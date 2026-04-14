@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { Inter, Noto_Serif } from "next/font/google";
+import { cn } from "@/lib/utils";
+
+const notoSerifHeading = Noto_Serif({subsets:['latin'],variable:'--font-heading'});
+
+const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -24,9 +30,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html
+      lang="ru"
+      className={cn("font-sans", inter.variable, notoSerifHeading.variable)}
+      style={{ colorScheme: "light" }}
+      suppressHydrationWarning
+    >
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning
       >
         {children}
       </body>

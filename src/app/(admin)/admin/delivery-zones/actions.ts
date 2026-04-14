@@ -1,0 +1,57 @@
+"use server"
+
+import { createClient } from "@/lib/supabase/server"
+import { revalidatePath } from "next/cache"
+
+export type DeliveryZoneInput = {
+  name: string
+  polygon: [number, number][]
+  delivery_price_bani: number
+  min_order_bani: number
+  free_delivery_from_bani: number | null
+  delivery_time_min: number
+  is_active: boolean
+  sort_order: number
+}
+
+export async function createDeliveryZone(data: DeliveryZoneInput) {
+  const supabase = await createClient()
+  const { error } = await supabase.from("delivery_zones").insert({
+    name: data.name,
+    polygon: data.polygon,
+    delivery_price_bani: data.delivery_price_bani,
+    min_order_bani: data.min_order_bani,
+    free_delivery_from_bani: data.free_delivery_from_bani,
+    delivery_time_min: data.delivery_time_min,
+    is_active: data.is_active,
+    sort_order: data.sort_order,
+  })
+  if (error) throw new Error(error.message)
+  revalidatePath("/admin/delivery-zones")
+}
+
+export async function updateDeliveryZone(id: string, data: DeliveryZoneInput) {
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from("delivery_zones")
+    .update({
+      name: data.name,
+      polygon: data.polygon,
+      delivery_price_bani: data.delivery_price_bani,
+      min_order_bani: data.min_order_bani,
+      free_delivery_from_bani: data.free_delivery_from_bani,
+      delivery_time_min: data.delivery_time_min,
+      is_active: data.is_active,
+      sort_order: data.sort_order,
+    })
+    .eq("id", id)
+  if (error) throw new Error(error.message)
+  revalidatePath("/admin/delivery-zones")
+}
+
+export async function deleteDeliveryZone(id: string) {
+  const supabase = await createClient()
+  const { error } = await supabase.from("delivery_zones").delete().eq("id", id)
+  if (error) throw new Error(error.message)
+  revalidatePath("/admin/delivery-zones")
+}

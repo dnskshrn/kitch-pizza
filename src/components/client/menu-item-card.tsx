@@ -1,0 +1,243 @@
+"use client"
+
+import { calcCompareAt } from "@/lib/discount"
+import { useProductModalStore } from "@/lib/store/product-modal-store"
+import type { MenuItem } from "@/types/database"
+import Image from "next/image"
+import { ItemBadge } from "./item-badge"
+
+export type MenuItemCardProps = {
+  item: MenuItem
+  lang: "RU" | "RO"
+}
+
+function formatLeiFromBani(bani: number, lang: "RU" | "RO"): string {
+  const lei = bani / 100
+  const formatted = lei.toLocaleString("ro-MD", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+  return lang === "RO" ? `${formatted} lei` : `${formatted} лей`
+}
+
+function getDisplayPriceBani(item: MenuItem): number | null {
+  if (item.has_sizes) {
+    const candidates = [item.price, item.size_s_price, item.size_l_price].filter(
+      (v): v is number => typeof v === "number",
+    )
+    if (candidates.length === 0) return null
+    return Math.min(...candidates)
+  }
+  if (item.price == null) return null
+  return item.price
+}
+
+function hasActiveDiscount(item: MenuItem): boolean {
+  const d = item.discount_percent
+  return d != null && d > 0 && d < 100
+}
+
+export type MenuItemPriceLabels = {
+  priceMain: string | null
+  priceCompare: string | null
+}
+
+/** Общая логика цен для карточки и мобильной строки (как на десктопе). */
+export function getMenuItemPriceLabels(
+  item: MenuItem,
+  lang: "RU" | "RO",
+): MenuItemPriceLabels {
+  const priceBani = getDisplayPriceBani(item)
+  const discount = hasActiveDiscount(item) ? item.discount_percent! : null
+
+  const priceLabelNoDiscount =
+    priceBani != null
+      ? item.has_sizes
+        ? lang === "RO"
+          ? `de la ${formatLeiFromBani(priceBani, lang)}`
+          : `от ${formatLeiFromBani(priceBani, lang)}`
+        : formatLeiFromBani(priceBani, lang)
+      : null
+
+  let priceMain: string | null = null
+  let priceCompare: string | null = null
+
+  if (priceBani != null && discount != null) {
+    const compareBani = calcCompareAt(priceBani, discount)
+    priceCompare = formatLeiFromBani(compareBani, lang)
+    if (item.has_sizes) {
+      priceMain =
+        lang === "RO"
+          ? `de la ${formatLeiFromBani(priceBani, lang)}`
+          : `от ${formatLeiFromBani(priceBani, lang)}`
+    } else {
+      priceMain = formatLeiFromBani(priceBani, lang)
+    }
+  } else {
+    priceMain = priceLabelNoDiscount
+  }
+
+  return { priceMain, priceCompare }
+}
+
+function MenuItemPriceBlock({
+  priceMain,
+  priceCompare,
+  className,
+}: MenuItemPriceLabels & { className?: string }) {
+  return (
+    <p
+      className={
+        className ??
+        "flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 text-sm font-medium tabular-nums leading-tight"
+      }
+    >
+      {priceMain ? <span>{priceMain}</span> : null}
+      {priceCompare ? (
+        <span className="mr-1 text-xs text-gray-400 line-through">
+          {priceCompare}
+        </span>
+      ) : null}
+    </p>
+  )
+}
+
+const CHOOSE_BTN_CLASS =
+  "inline-flex shrink-0 cursor-pointer items-center rounded-full bg-[#ECFFA1] font-semibold text-[#5F7600] transition-all duration-200 hover:bg-[#d4f000] active:scale-[0.97]"
+
+function cardAriaLabel(
+  name: string,
+  priceMain: string | null,
+  lang: "RU" | "RO",
+): string {
+  const action = lang === "RO" ? "Alege produsul" : "Выбрать товар"
+  if (priceMain) return `${name}. ${priceMain}. ${action}`
+  return `${name}. ${action}`
+}
+
+export function MenuItemCard({ item, lang }: MenuItemCardProps) {
+  const openProductModal = useProductModalStore((s) => s.open)
+
+  const name = lang === "RO" ? item.name_ro : item.name_ru
+  const description =
+    lang === "RO" ? item.description_ro : item.description_ru
+
+  const { priceMain, priceCompare } = getMenuItemPriceLabels(item, lang)
+  const aria = cardAriaLabel(name, priceMain, lang)
+
+  const openModal = () => openProductModal(item)
+
+  return (
+    <div className="h-full md:flex md:flex-col">
+      {/* Mobile: вся строка — одна кнопка */}
+      <button
+        type="button"
+        onClick={openModal}
+        aria-label={aria}
+        className="group flex w-full gap-3 text-left md:hidden"
+      >
+        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-[12px]">
+          {item.image_url ? (
+            <div className="absolute inset-0 transition-transform duration-300 ease-out will-change-transform group-hover:-translate-y-1.5">
+              <Image
+                src={item.image_url}
+                alt=""
+                fill
+                className="object-cover"
+                sizes="80px"
+              />
+            </div>
+          ) : (
+            <div
+              className="flex h-full w-full items-center justify-center text-[10px] text-zinc-400"
+              aria-hidden
+            >
+              {lang === "RO" ? "Fără foto" : "Нет фото"}
+            </div>
+          )}
+        </div>
+        <div className="flex min-h-20 min-w-0 flex-1 flex-col justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <h3 className="min-w-0 flex-1 truncate font-bold leading-tight">
+                {name}
+              </h3>
+              {item.tag ? (
+                <span className="shrink-0">
+                  <ItemBadge tag={item.tag} size="compact" />
+                </span>
+              ) : null}
+            </div>
+            {description ? (
+              <p className="mt-0.5 line-clamp-2 text-sm font-normal leading-snug text-zinc-500">
+                {description}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <MenuItemPriceBlock
+              priceMain={priceMain}
+              priceCompare={priceCompare}
+              className="flex min-w-0 flex-wrap items-baseline gap-x-1 text-sm font-medium tabular-nums leading-tight"
+            />
+            <span
+              className={`pointer-events-none px-3 py-1.5 text-xs ${CHOOSE_BTN_CLASS}`}
+              aria-hidden
+            >
+              {lang === "RO" ? "Alege" : "Выбрать"}
+            </span>
+          </div>
+        </div>
+      </button>
+
+      {/* Desktop: вся карточка — одна кнопка */}
+      <button
+        type="button"
+        onClick={openModal}
+        aria-label={aria}
+        className="group hidden h-full w-full flex-col gap-3 text-left md:flex"
+      >
+        <div className="relative aspect-square w-full overflow-hidden">
+          {item.image_url ? (
+            <>
+              <div className="absolute inset-0 transition-transform duration-300 ease-out will-change-transform group-hover:-translate-y-2">
+                <Image
+                  src={item.image_url}
+                  alt=""
+                  fill
+                  className="object-contain"
+                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+                />
+              </div>
+              <div className="pointer-events-none absolute right-2 top-2 z-10">
+                <ItemBadge tag={item.tag} />
+              </div>
+            </>
+          ) : (
+            <div
+              className="flex h-full w-full items-center justify-center text-xs text-muted-foreground"
+              aria-hidden
+            >
+              {lang === "RO" ? "Fără foto" : "Нет фото"}
+            </div>
+          )}
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-1">
+          <h3 className="font-bold leading-tight">{name}</h3>
+          {description ? (
+            <p className="line-clamp-3 text-sm text-zinc-500">{description}</p>
+          ) : null}
+          <div className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 pt-2">
+            <MenuItemPriceBlock priceMain={priceMain} priceCompare={priceCompare} />
+            <span
+              className={`pointer-events-none px-4 py-2 text-sm ${CHOOSE_BTN_CLASS}`}
+              aria-hidden
+            >
+              {lang === "RO" ? "Alege" : "Выбрать"}
+            </span>
+          </div>
+        </div>
+      </button>
+    </div>
+  )
+}

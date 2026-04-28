@@ -317,7 +317,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
     <header
       className={
         isTheSpot
-          ? "sticky top-0 z-50 bg-transparent"
+          ? "sticky top-0 z-30 bg-transparent"
           : "bg-white"
       }
     >

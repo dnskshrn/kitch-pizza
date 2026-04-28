@@ -15,7 +15,7 @@ export default async function HomePage() {
 
   return (
     <ClientContainer
-      className="py-10 data-[brand=the-spot]:px-4 data-[brand=the-spot]:pb-28 data-[brand=the-spot]:pt-0 md:data-[brand=the-spot]:pb-16 md:data-[brand=the-spot]:pt-2"
+      className="py-10 data-[brand=the-spot]:px-4 data-[brand=the-spot]:pb-28 data-[brand=the-spot]:pt-3 md:data-[brand=the-spot]:pb-16 md:data-[brand=the-spot]:pt-2"
       data-brand={brandSlug}
     >
       <PromotionsSlider brandSlug={brandSlug} promotions={promotions} />

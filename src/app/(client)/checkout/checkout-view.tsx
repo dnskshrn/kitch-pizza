@@ -403,7 +403,7 @@ export function CheckoutView({
       <div
         className={cn(
           "border-b border-transparent pt-4 md:pt-6",
-          brandSlug === "the-spot" && "h-[128px] md:h-auto",
+          brandSlug === "the-spot" && "h-[104px] md:h-auto",
         )}
       >
         <ClientContainer>
@@ -474,19 +474,39 @@ export function CheckoutView({
         </ClientContainer>
       </div>
 
-      <ClientContainer className="flex-1 py-6 md:py-10">
-        <div className="flex flex-col gap-8 md:flex-row md:items-start md:gap-8 lg:gap-12">
+      <ClientContainer
+        className={cn(
+          "flex-1 py-6 md:py-10",
+          brandSlug === "the-spot" && "max-md:py-4",
+        )}
+      >
+        <div
+          className={cn(
+            "flex flex-col gap-8 md:flex-row md:items-start md:gap-8 lg:gap-12",
+            brandSlug === "the-spot" && "max-md:gap-5",
+          )}
+        >
           {/* Left column */}
           <div className="storefront-checkout-form-panel flex w-full max-w-full flex-col md:w-[680px] md:max-w-[680px]">
             <h1 className="hidden text-[32px] font-bold leading-tight text-[#242424] md:block">
               Заказ на доставку
             </h1>
 
-            <h2 className="mt-8 text-[24px] font-bold leading-tight text-[#242424] md:mt-0 md:hidden">
+            <h2
+              className={cn(
+                "mt-8 text-[24px] font-bold leading-tight text-[#242424] md:mt-0 md:hidden",
+                brandSlug === "the-spot" && "max-md:mt-3",
+              )}
+            >
               Контактные данные
             </h2>
 
-            <div className="mt-5 flex flex-col gap-5 md:mt-6">
+            <div
+              className={cn(
+                "mt-5 flex flex-col gap-5 md:mt-6",
+                brandSlug === "the-spot" && "max-md:mt-4",
+              )}
+            >
             {/* Contact */}
             <section className="flex flex-col gap-5">
               <h2 className="hidden text-[24px] font-bold text-[#242424] md:block lg:hidden">
@@ -883,7 +903,13 @@ export function CheckoutView({
             </div>
 
             {/* Payment — визуально отдельный блок */}
-            <section className="mt-10 border-t border-[#f0f0f0] pt-10 md:mt-12 md:pt-12">
+            <section
+              className={cn(
+                "mt-10 border-t border-[#f0f0f0] pt-10 md:mt-12 md:pt-12",
+                brandSlug === "the-spot" &&
+                  "max-md:mt-8 max-md:border-[rgb(36_36_36/0.08)] max-md:pt-8",
+              )}
+            >
               <h3 className="mb-6 text-[24px] font-bold leading-tight text-[#242424] lg:hidden">
                 Метод оплаты
               </h3>

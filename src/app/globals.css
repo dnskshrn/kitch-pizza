@@ -244,14 +244,31 @@
 }
 
 [data-brand="the-spot"] .storefront-checkout-form-panel {
-  background: var(--color-surface);
+  background: transparent;
   border-radius: var(--radius-card);
-  padding: 24px;
+  padding: 0;
+}
+
+[data-brand="the-spot"] .storefront-checkout-form-panel .storefront-modal-field {
+  background: var(--color-surface);
+}
+
+@media (max-width: 767px) {
+  [data-brand="the-spot"] .storefront-checkout-form-panel {
+    margin-left: 0;
+    margin-right: 0;
+    width: 100%;
+    max-width: none;
+  }
 }
 
 @media (min-width: 768px) {
   [data-brand="the-spot"] .storefront-checkout-form-panel {
     padding: 28px;
+    margin-left: 0;
+    margin-right: 0;
+    width: auto;
+    max-width: none;
   }
 }
 

@@ -136,7 +136,7 @@ function StickyCategoryChrome({
       />
       <div
         className={cn(
-          "sticky top-0 z-40 transition-shadow duration-300 ease-out",
+          "sticky top-0 z-30 transition-shadow duration-300 ease-out",
           className,
           hasStickyShadow && isStuck
             ? "shadow-[0_4px_24px_rgba(0,0,0,0.07)]"
@@ -349,7 +349,7 @@ function TheSpotCategoryBar({
 }) {
   return (
     <>
-      <div className="sticky top-[77px] z-40 md:hidden">
+      <div className="sticky top-[77px] z-30 md:hidden">
         <div className="flex gap-2 overflow-x-auto py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {categories.map((cat) => {
             const isActive = activeSlug === cat.slug

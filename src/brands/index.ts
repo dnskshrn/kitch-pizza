@@ -55,7 +55,7 @@ export const brands: BrandConfig[] = [
     slug: 'the-spot',
     name: 'The Spot',
     domain: 'thespot.md',
-    devDomain: 'www.thespot.md',
+    devDomain: '192.168.50.137',
     logo: '/the-spot-logo.svg',
     phone: '079 700 290', // TODO
     hours: '11:00 – 23:00', // TODO

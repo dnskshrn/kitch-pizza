@@ -5,6 +5,7 @@ import { DeliveryRoot } from "@/components/client/delivery-modal"
 import { MainHeader } from "@/components/client/main-header"
 import { MenuCategoryBar } from "@/components/client/menu-category-bar"
 import { ProductModalRoot } from "@/components/client/product-modal/ProductModalRoot"
+import { StorefrontHaptics } from "@/components/client/storefront-haptics"
 import { TopNav } from "@/components/client/top-nav"
 import type { Category } from "@/types/database"
 import { usePathname } from "next/navigation"
@@ -40,6 +41,7 @@ export function ClientChrome({
   if (isCheckoutFlow) {
     return (
       <>
+        <StorefrontHaptics />
         <ProductModalRoot />
         <DeliveryRoot />
         <CartRoot />
@@ -50,6 +52,7 @@ export function ClientChrome({
 
   return (
     <>
+      <StorefrontHaptics />
       {brandSlug === "the-spot" ? null : <TopNav />}
       <MainHeader brandSlug={brandSlug} />
       {brandSlug === "the-spot" ? null : (

@@ -88,6 +88,7 @@ export function CartContent({
   const goodsBani = Math.max(0, subtotal - discount)
   const grandTotalBani = goodsBani + deliveryFeeBani
   const totalLei = formatLei(grandTotalBani)
+  const isCartEmpty = items.length === 0
 
   async function handleApplyPromo() {
     await applyPromo(codeInput)
@@ -101,7 +102,7 @@ export function CartContent({
   }
 
   return (
-    <div className="storefront-modal-bg flex h-full min-h-0 flex-col">
+    <div className="storefront-modal-bg relative flex h-full min-h-0 flex-col overflow-hidden">
       <header className="relative shrink-0 px-4 pb-6 pt-4 md:pb-7 md:pt-5">
         <div className="flex items-start gap-2 pr-10 md:pr-12">
           <ShoppingBasket className="mt-0.5 size-6 shrink-0 text-[#242424]" strokeWidth={2} />
@@ -121,14 +122,14 @@ export function CartContent({
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-4 top-4 flex size-10 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
+          className="storefront-modal-surface absolute right-4 top-4 flex size-10 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
           aria-label="Закрыть корзину"
         >
           <X className="size-5" strokeWidth={2.5} />
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 [-webkit-overflow-scrolling:touch]">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[112px] [-webkit-overflow-scrolling:touch]">
         <div className="space-y-3">
           {items.length === 0 ? (
             <div className="flex min-h-[120px] items-center justify-center rounded-[16px] py-8 text-center text-[rgba(36,36,36,0.5)]">
@@ -171,107 +172,124 @@ export function CartContent({
             </div>
           </div>
         </section>
-      </div>
 
-      {/* Статичная декоративная белая секция: промокод + итоги + кнопка (не часть жеста sheet) */}
-      <section
-        className="shrink-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2"
-        aria-label="Промокод и оформление"
-      >
-        <div className="storefront-modal-surface storefront-modal-card-radius rounded-[20px] p-4">
-          {appliedPromo ? (
-            <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
-              <Check
-                className="storefront-modal-accent size-5 shrink-0"
-                strokeWidth={2.5}
-                aria-hidden
-              />
-              <p className="min-w-0 flex-1 text-sm font-medium text-[#242424]">
-                Промокод{" "}
-                <span className="font-mono uppercase">{appliedPromo.code}</span>{" "}
-                применён
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  removePromo()
-                  setCodeInput("")
-                }}
-                className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/10"
-                aria-label="Убрать промокод"
-              >
-                <X className="size-4" strokeWidth={2.5} />
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  name="promo"
-                  placeholder="Промокод"
-                  value={codeInput}
-                  disabled={promoLoading}
-                  onChange={(e) => setCodeInput(e.target.value)}
-                  onKeyDown={handlePromoKeyDown}
-                  className="storefront-modal-field min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
-                  aria-label="Промокод"
-                  autoComplete="off"
+        <section className="shrink-0 pb-4 pt-1" aria-label="Промокод и детали заказа">
+          <div className="storefront-modal-surface storefront-modal-card-radius rounded-[20px] p-4">
+            {appliedPromo ? (
+              <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
+                <Check
+                  className="storefront-modal-accent size-5 shrink-0"
+                  strokeWidth={2.5}
+                  aria-hidden
                 />
+                <p className="min-w-0 flex-1 text-sm font-medium text-[#242424]">
+                  Промокод{" "}
+                  <span className="font-mono uppercase">{appliedPromo.code}</span>{" "}
+                  применён
+                </p>
                 <button
                   type="button"
-                  onClick={() => void handleApplyPromo()}
-                  disabled={promoLoading || !codeInput.trim()}
-                  className="shrink-0 rounded-[12px] bg-[#242424] px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => {
+                    removePromo()
+                    setCodeInput("")
+                  }}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/10"
+                  aria-label="Убрать промокод"
                 >
-                  {promoLoading ? (
-                    <Loader2 className="size-5 animate-spin" aria-hidden />
-                  ) : (
-                    "Применить"
-                  )}
+                  <X className="size-4" strokeWidth={2.5} />
                 </button>
               </div>
-              {promoError ? (
-                <p className="text-sm text-red-600" role="alert">
-                  {promoError}
-                </p>
-              ) : null}
-            </div>
-          )}
-
-          <div className="mt-4 space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-[rgba(36,36,36,0.55)]">{ruGoodsPhrase(itemCount)}</span>
-              <span className="font-medium tabular-nums text-[#242424]">{subtotalLei} лей</span>
-            </div>
-            {discount > 0 ? (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-[rgba(36,36,36,0.55)]">Скидка</span>
-                <span className="storefront-modal-accent font-medium tabular-nums">
-                  −{discountLei} лей
-                </span>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    name="promo"
+                    placeholder="Промокод"
+                    value={codeInput}
+                    disabled={promoLoading}
+                    onChange={(e) => setCodeInput(e.target.value)}
+                    onKeyDown={handlePromoKeyDown}
+                    className="storefront-modal-field min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
+                    aria-label="Промокод"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleApplyPromo()}
+                    disabled={promoLoading || !codeInput.trim()}
+                    className="shrink-0 rounded-[12px] bg-[#242424] px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {promoLoading ? (
+                      <Loader2 className="size-5 animate-spin" aria-hidden />
+                    ) : (
+                      "Применить"
+                    )}
+                  </button>
+                </div>
+                {promoError ? (
+                  <p className="text-sm text-red-600" role="alert">
+                    {promoError}
+                  </p>
+                ) : null}
               </div>
-            ) : null}
-            <div className="flex items-center justify-between text-sm">
-              <span className="inline-flex items-center gap-1 text-[rgba(36,36,36,0.55)]">
-                Доставка
-                <Info className="size-[14px] shrink-0" strokeWidth={2} aria-hidden />
-                {/* TODO: расчёт доставки */}
-              </span>
-              <span className="tabular-nums text-[rgba(36,36,36,0.45)]">-- лей</span>
+            )}
+
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-[rgba(36,36,36,0.55)]">{ruGoodsPhrase(itemCount)}</span>
+                <span className="font-medium tabular-nums text-[#242424]">{subtotalLei} лей</span>
+              </div>
+              {discount > 0 ? (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-[rgba(36,36,36,0.55)]">Скидка</span>
+                  <span className="storefront-modal-accent font-medium tabular-nums">
+                    −{discountLei} лей
+                  </span>
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between text-sm">
+                <span className="inline-flex items-center gap-1 text-[rgba(36,36,36,0.55)]">
+                  Доставка
+                  <Info className="size-[14px] shrink-0" strokeWidth={2} aria-hidden />
+                  {/* TODO: расчёт доставки */}
+                </span>
+                <span className="tabular-nums text-[rgba(36,36,36,0.45)]">-- лей</span>
+              </div>
             </div>
           </div>
+        </section>
+      </div>
 
-          <div className="mt-5 flex items-center gap-3 border-t border-[#f0f0f0] pt-4">
-            <p className="text-[20px] font-bold tabular-nums text-[#242424]">{totalLei} лей</p>
-            <Link
-              href="/checkout"
-              onClick={onClose}
-              className="storefront-modal-cta flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full py-3 text-[16px] font-bold transition-all hover:brightness-95 active:scale-[0.98]"
-            >
-              К оформлению
-              <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
-            </Link>
+      {/* Статичный нижний островок: только сумма + кнопка, чтобы товары получали больше места для скролла. */}
+      <section
+        className="pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        aria-label="Итог и оформление"
+      >
+        <div className="storefront-modal-surface pointer-events-auto rounded-full p-2">
+          <div className="flex items-center gap-3">
+            <p className="pl-3 text-[20px] font-bold tabular-nums text-[#242424]">
+              {totalLei} лей
+            </p>
+            {isCartEmpty ? (
+              <button
+                type="button"
+                disabled
+                className="storefront-modal-cta flex flex-1 cursor-not-allowed items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold opacity-45"
+              >
+                К оформлению
+                <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
+              </button>
+            ) : (
+              <Link
+                href="/checkout"
+                onClick={onClose}
+                className="storefront-modal-cta flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold transition-all hover:brightness-95 active:scale-[0.98]"
+              >
+                К оформлению
+                <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
+              </Link>
+            )}
           </div>
         </div>
       </section>

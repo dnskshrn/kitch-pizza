@@ -173,6 +173,7 @@ export function MenuItemDialog({
   const [addDiscount, setAddDiscount] = useState(false)
   const [discountPercentStr, setDiscountPercentStr] = useState("")
   const [tagValue, setTagValue] = useState<string>(TAG_NONE)
+  const itemId = item?.id
 
   useEffect(() => {
     if (!open) return
@@ -236,9 +237,9 @@ export function MenuItemDialog({
   }, [open, mode, item, categories])
 
   useEffect(() => {
-    if (!open || mode !== "edit" || !item) return
+    if (!open || mode !== "edit" || !itemId) return
     let cancelled = false
-    getMenuItemToppingGroups(item.id)
+    getMenuItemToppingGroups(itemId)
       .then((ids) => {
         if (!cancelled) setSelectedGroupIds(ids)
       })
@@ -251,7 +252,7 @@ export function MenuItemDialog({
     return () => {
       cancelled = true
     }
-  }, [open, mode, item?.id])
+  }, [open, mode, itemId])
 
   function toggleGroupId(groupId: string) {
     setSelectedGroupIds((prev) =>

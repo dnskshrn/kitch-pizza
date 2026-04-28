@@ -55,7 +55,7 @@ export function PromotionsSlider({
   const touchStartX = useRef<number | null>(null)
   const touchStartIndex = useRef(0)
   const activeIndexRef = useRef(0)
-  const autoslideTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const autoslideTimeoutRef = useRef<number | null>(null)
 
   const [lang, setLang] = useState<Lang>("RU")
   const [activeIndex, setActiveIndex] = useState(0)

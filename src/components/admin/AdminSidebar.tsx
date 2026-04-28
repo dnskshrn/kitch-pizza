@@ -3,6 +3,8 @@
 import Link from "next/link"
 import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
+import { brands } from "@/brands"
+import { BrandSwitcher } from "@/components/admin/brand-switcher"
 import {
   LayoutGrid,
   UtensilsCrossed,
@@ -29,9 +31,23 @@ const navItems = [
   { href: "/admin/gallery", label: "Галерея", icon: Images, disabled: true },
 ]
 
-export default function AdminSidebar() {
+type AdminBrand = {
+  id: string
+  slug: string
+  name: string
+}
+
+export default function AdminSidebar({
+  adminBrands,
+  currentSlug,
+}: {
+  adminBrands: AdminBrand[]
+  currentSlug: string
+}) {
   const pathname = usePathname()
   const router = useRouter()
+  const brand =
+    brands.find((b) => b.slug === currentSlug) ?? brands[0]
 
   async function handleLogout() {
     const supabase = createClient()
@@ -48,8 +64,8 @@ export default function AdminSidebar() {
           className="inline-flex focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
         >
           <Image
-            src="/kitch-pizza-logo.svg"
-            alt="Kitch!"
+            src={brand.logo}
+            alt={brand.name}
             width={151}
             height={70}
             className="h-[45px] w-auto object-contain object-left"
@@ -57,6 +73,7 @@ export default function AdminSidebar() {
           />
         </Link>
       </div>
+      <BrandSwitcher brands={adminBrands} currentSlug={currentSlug} />
       <nav className="flex flex-1 flex-col gap-1 p-3">
         {navItems.map(({ href, label, icon: Icon, disabled }) =>
           disabled ? (

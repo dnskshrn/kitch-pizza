@@ -1,3 +1,4 @@
+import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { MenuItem } from "@/types/database"
 import { getToppingGroups } from "./actions"
@@ -8,6 +9,7 @@ type MenuItemRow = MenuItem & {
 }
 
 export default async function AdminMenuPage() {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const [{ data: items, error: itemsError }, { data: categories, error: catError }, toppingGroups] =
@@ -15,10 +17,12 @@ export default async function AdminMenuPage() {
       supabase
         .from("menu_items")
         .select("*, category:menu_categories(id, name_ru, name_ro)")
+        .eq("brand_id", brandId)
         .order("sort_order", { ascending: true }),
       supabase
         .from("menu_categories")
         .select("id, name_ru, name_ro")
+        .eq("brand_id", brandId)
         .order("sort_order", { ascending: true }),
       getToppingGroups(),
     ])

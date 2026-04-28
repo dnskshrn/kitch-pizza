@@ -1,14 +1,17 @@
 "use server"
 
+import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { ToppingGroup } from "@/types/database"
 import { revalidatePath } from "next/cache"
 
 export async function getToppingGroups(): Promise<ToppingGroup[]> {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("topping_groups")
     .select("*")
+    .eq("brand_id", brandId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
   if (error) throw new Error(error.message)
@@ -71,10 +74,12 @@ export async function createMenuItem(data: {
   discount_percent: number | null
   tag: string | null
 }): Promise<string> {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { data: row, error } = await supabase
     .from("menu_items")
     .insert({
+      brand_id: brandId,
       category_id: data.category_id,
       name_ru: data.name_ru,
       name_ro: data.name_ro,
@@ -127,6 +132,7 @@ export async function updateMenuItem(
     tag: string | null
   }
 ) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase
     .from("menu_items")
@@ -152,14 +158,20 @@ export async function updateMenuItem(
       tag: data.tag,
     })
     .eq("id", id)
+    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/menu")
   revalidatePath("/")
 }
 
 export async function deleteMenuItem(id: string) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await supabase.from("menu_items").delete().eq("id", id)
+  const { error } = await supabase
+    .from("menu_items")
+    .delete()
+    .eq("id", id)
+    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/menu")
   revalidatePath("/")

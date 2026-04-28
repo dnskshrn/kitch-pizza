@@ -1,6 +1,5 @@
 "use client"
 
-import { BRAND_CART_BG } from "@/lib/client-brand"
 import type { CartLang } from "@/lib/cart-helpers"
 import {
   selectCartDiscount,
@@ -19,8 +18,6 @@ import {
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { CartItemCard } from "./CartItemCard"
-
-const BRAND_DISCOUNT = "#5F7600"
 
 const LANG_KEY = "lang"
 
@@ -104,7 +101,7 @@ export function CartContent({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f2f2f2]">
+    <div className="storefront-modal-bg flex h-full min-h-0 flex-col">
       <header className="relative shrink-0 px-4 pb-6 pt-4 md:pb-7 md:pt-5">
         <div className="flex items-start gap-2 pr-10 md:pr-12">
           <ShoppingBasket className="mt-0.5 size-6 shrink-0 text-[#242424]" strokeWidth={2} />
@@ -134,7 +131,7 @@ export function CartContent({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 [-webkit-overflow-scrolling:touch]">
         <div className="space-y-3">
           {items.length === 0 ? (
-            <div className="flex min-h-[120px] items-center justify-center py-8 text-center text-[rgba(36,36,36,0.5)]">
+            <div className="flex min-h-[120px] items-center justify-center rounded-[16px] py-8 text-center text-[rgba(36,36,36,0.5)]">
               Корзина пуста
             </div>
           ) : (
@@ -158,14 +155,14 @@ export function CartContent({
           <p className="mb-2 text-xs text-[rgba(36,36,36,0.45)]">Добавить к заказу?</p>
           <div className="-mx-1 flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
             {/* TODO: апселл — реальные категории «Соусы» / «Напитки» */}
-            <div className="w-[120px] shrink-0 rounded-[16px] bg-white p-3">
+            <div className="storefront-modal-surface storefront-modal-card-radius w-[120px] shrink-0 rounded-[16px] p-3">
               <div
                 className="mb-2 aspect-square w-full rounded-lg border border-dashed border-[#ddd]"
                 aria-hidden
               />
               <p className="text-center text-sm font-medium text-[#242424]">Соусы</p>
             </div>
-            <div className="w-[120px] shrink-0 rounded-[16px] bg-white p-3">
+            <div className="storefront-modal-surface storefront-modal-card-radius w-[120px] shrink-0 rounded-[16px] p-3">
               <div
                 className="mb-2 aspect-square w-full rounded-lg border border-dashed border-[#ddd]"
                 aria-hidden
@@ -181,12 +178,11 @@ export function CartContent({
         className="shrink-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2"
         aria-label="Промокод и оформление"
       >
-        <div className="rounded-[20px] bg-white p-4">
+        <div className="storefront-modal-surface storefront-modal-card-radius rounded-[20px] p-4">
           {appliedPromo ? (
-            <div className="flex items-center gap-2 rounded-[12px] bg-[#f2f2f2] px-3 py-3">
+            <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
               <Check
-                className="size-5 shrink-0"
-                style={{ color: BRAND_DISCOUNT }}
+                className="storefront-modal-accent size-5 shrink-0"
                 strokeWidth={2.5}
                 aria-hidden
               />
@@ -218,7 +214,7 @@ export function CartContent({
                   disabled={promoLoading}
                   onChange={(e) => setCodeInput(e.target.value)}
                   onKeyDown={handlePromoKeyDown}
-                  className="min-w-0 flex-1 rounded-[12px] bg-[#f2f2f2] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
+                  className="storefront-modal-field min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
                   aria-label="Промокод"
                   autoComplete="off"
                 />
@@ -251,10 +247,7 @@ export function CartContent({
             {discount > 0 ? (
               <div className="flex items-center justify-between text-sm">
                 <span className="text-[rgba(36,36,36,0.55)]">Скидка</span>
-                <span
-                  className="font-medium tabular-nums"
-                  style={{ color: BRAND_DISCOUNT }}
-                >
+                <span className="storefront-modal-accent font-medium tabular-nums">
                   −{discountLei} лей
                 </span>
               </div>
@@ -270,12 +263,11 @@ export function CartContent({
           </div>
 
           <div className="mt-5 flex items-center gap-3 border-t border-[#f0f0f0] pt-4">
-            <p className="text-[24px] font-bold tabular-nums text-[#242424]">{totalLei} лей</p>
+            <p className="text-[20px] font-bold tabular-nums text-[#242424]">{totalLei} лей</p>
             <Link
               href="/checkout"
               onClick={onClose}
-              className="flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full py-3.5 text-[18px] font-bold text-[#343434] transition-all hover:brightness-95 active:scale-[0.98]"
-              style={{ backgroundColor: BRAND_CART_BG }}
+              className="storefront-modal-cta flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full py-3 text-[16px] font-bold transition-all hover:brightness-95 active:scale-[0.98]"
             >
               К оформлению
               <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />

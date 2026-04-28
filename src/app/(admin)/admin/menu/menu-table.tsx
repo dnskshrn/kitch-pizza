@@ -103,13 +103,13 @@ export function MenuTable({
                     src={row.image_url}
                     alt=""
                     width={64}
-                    height={48}
-                    className="rounded-lg object-cover"
+                    height={64}
+                    className="aspect-square rounded-lg object-cover"
                   />
                 ) : (
                   <div
                     className="text-muted-foreground flex items-center justify-center rounded-lg border border-dashed border-border text-xs"
-                    style={{ width: 64, height: 48 }}
+                    style={{ width: 64, height: 64 }}
                   >
                     —
                   </div>

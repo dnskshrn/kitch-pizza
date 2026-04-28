@@ -1,7 +1,10 @@
 import { CheckoutSuccessView } from "@/components/client/checkout/checkout-success-view"
+import { getBrand } from "@/lib/get-brand"
 import { Suspense } from "react"
 
-export default function CheckoutSuccessPage() {
+export default async function CheckoutSuccessPage() {
+  const brand = await getBrand()
+
   return (
     <Suspense
       fallback={
@@ -10,7 +13,11 @@ export default function CheckoutSuccessPage() {
         </div>
       }
     >
-      <CheckoutSuccessView />
+      <CheckoutSuccessView
+        brandName={brand.name}
+        brandLogo={brand.logo}
+        brandSlug={brand.slug}
+      />
     </Suspense>
   )
 }

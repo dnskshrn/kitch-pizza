@@ -7,6 +7,7 @@ import Image from "next/image"
 import { ItemBadge } from "./item-badge"
 
 export type MenuItemCardProps = {
+  brandSlug?: string
   item: MenuItem
   lang: "RU" | "RO"
 }
@@ -115,7 +116,11 @@ function cardAriaLabel(
   return `${name}. ${action}`
 }
 
-export function MenuItemCard({ item, lang }: MenuItemCardProps) {
+export function MenuItemCard({
+  brandSlug = "kitch-pizza",
+  item,
+  lang,
+}: MenuItemCardProps) {
   const openProductModal = useProductModalStore((s) => s.open)
 
   const name = lang === "RO" ? item.name_ro : item.name_ru
@@ -126,118 +131,211 @@ export function MenuItemCard({ item, lang }: MenuItemCardProps) {
   const aria = cardAriaLabel(name, priceMain, lang)
 
   const openModal = () => openProductModal(item)
+  const isTheSpot = brandSlug === "the-spot"
 
   return (
     <div className="h-full md:flex md:flex-col">
       {/* Mobile: вся строка — одна кнопка */}
-      <button
-        type="button"
-        onClick={openModal}
-        aria-label={aria}
-        className="group flex w-full gap-3 text-left md:hidden"
-      >
-        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-[12px]">
-          {item.image_url ? (
-            <div className="absolute inset-0 transition-transform duration-300 ease-out will-change-transform group-hover:-translate-y-1.5">
+      {isTheSpot ? (
+        <button
+          type="button"
+          onClick={openModal}
+          aria-label={aria}
+          className="group flex w-full flex-col gap-3 text-left md:hidden"
+        >
+          <div className="relative aspect-square w-full overflow-hidden rounded-[12px] bg-white">
+            {item.image_url ? (
               <Image
                 src={item.image_url}
                 alt=""
                 fill
-                className="object-cover"
-                sizes="80px"
+                className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                sizes="50vw"
               />
-            </div>
-          ) : (
-            <div
-              className="flex h-full w-full items-center justify-center text-[10px] text-zinc-400"
-              aria-hidden
-            >
-              {lang === "RO" ? "Fără foto" : "Нет фото"}
-            </div>
-          )}
-        </div>
-        <div className="flex min-h-20 min-w-0 flex-1 flex-col justify-between gap-2">
+            ) : null}
+          </div>
           <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <h3 className="min-w-0 flex-1 truncate font-bold leading-tight">
-                {name}
-              </h3>
-              {item.tag ? (
-                <span className="shrink-0">
-                  <ItemBadge tag={item.tag} size="compact" />
-                </span>
-              ) : null}
-            </div>
+            <h3 className="line-clamp-2 text-[17px] font-bold leading-[1.12] text-[var(--color-text)]">
+              {name}
+            </h3>
             {description ? (
-              <p className="mt-0.5 line-clamp-2 text-sm font-normal leading-snug text-zinc-500">
+              <p className="mt-2 line-clamp-4 text-[13px] font-normal leading-[1.2] text-[var(--color-muted)]">
                 {description}
               </p>
             ) : null}
+            {priceMain ? (
+              <div className="mt-3 inline-flex rounded-full bg-[var(--color-accent-soft)] px-3 py-2 text-[14px] font-bold leading-none text-[var(--color-accent-text)]">
+                <MenuItemPriceBlock
+                  priceMain={priceMain.replace("лей", "MDL")}
+                  priceCompare={priceCompare}
+                  className="flex min-w-0 items-baseline gap-x-1 tabular-nums"
+                />
+              </div>
+            ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <MenuItemPriceBlock
-              priceMain={priceMain}
-              priceCompare={priceCompare}
-              className="flex min-w-0 flex-wrap items-baseline gap-x-1 text-sm font-medium tabular-nums leading-tight"
-            />
-            <span
-              className={`pointer-events-none px-3 py-1.5 text-xs ${CHOOSE_BTN_CLASS}`}
-              aria-hidden
-            >
-              {lang === "RO" ? "Alege" : "Выбрать"}
-            </span>
-          </div>
-        </div>
-      </button>
-
-      {/* Desktop: вся карточка — одна кнопка */}
-      <button
-        type="button"
-        onClick={openModal}
-        aria-label={aria}
-        className="group hidden h-full w-full flex-col gap-3 text-left md:flex"
-      >
-        <div className="relative aspect-square w-full overflow-hidden">
-          {item.image_url ? (
-            <>
-              <div className="absolute inset-0 transition-transform duration-300 ease-out will-change-transform group-hover:-translate-y-2">
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={openModal}
+          aria-label={aria}
+          className="group flex w-full gap-3 text-left md:hidden"
+        >
+          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-[12px]">
+            {item.image_url ? (
+              <div className="absolute inset-0 transition-transform duration-300 ease-out will-change-transform group-hover:-translate-y-1.5">
                 <Image
                   src={item.image_url}
                   alt=""
                   fill
-                  className="object-contain"
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+                  className="object-cover"
+                  sizes="80px"
                 />
               </div>
-              <div className="pointer-events-none absolute right-2 top-2 z-10">
+            ) : (
+              <div
+                className="flex h-full w-full items-center justify-center text-[10px] text-zinc-400"
+                aria-hidden
+              >
+                {lang === "RO" ? "Fără foto" : "Нет фото"}
+              </div>
+            )}
+          </div>
+          <div className="flex min-h-20 min-w-0 flex-1 flex-col justify-between gap-2">
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="min-w-0 flex-1 truncate font-bold leading-tight">
+                  {name}
+                </h3>
+                {item.tag ? (
+                  <span className="shrink-0">
+                    <ItemBadge tag={item.tag} size="compact" />
+                  </span>
+                ) : null}
+              </div>
+              {description ? (
+                <p className="mt-0.5 line-clamp-2 text-sm font-normal leading-snug text-zinc-500">
+                  {description}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <MenuItemPriceBlock
+                priceMain={priceMain}
+                priceCompare={priceCompare}
+                className="flex min-w-0 flex-wrap items-baseline gap-x-1 text-sm font-medium tabular-nums leading-tight"
+              />
+              <span
+                className={`pointer-events-none px-3 py-1.5 text-xs ${CHOOSE_BTN_CLASS}`}
+                aria-hidden
+              >
+                {lang === "RO" ? "Alege" : "Выбрать"}
+              </span>
+            </div>
+          </div>
+        </button>
+      )}
+
+      {/* Desktop: вся карточка — одна кнопка */}
+      {isTheSpot ? (
+        <button
+          type="button"
+          onClick={openModal}
+          aria-label={aria}
+          className="group hidden h-full w-full flex-col gap-3 text-left md:flex"
+        >
+          <div className="relative aspect-square w-full overflow-hidden rounded-[var(--radius-card)] bg-white">
+            {item.image_url ? (
+              <Image
+                src={item.image_url}
+                alt=""
+                fill
+                className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                sizes="(max-width: 1023px) 31vw, (max-width: 1279px) 30vw, 286px"
+              />
+            ) : (
+              <div
+                className="flex h-full w-full items-center justify-center text-xs text-[var(--color-muted)]"
+                aria-hidden
+              >
+                {lang === "RO" ? "Fără foto" : "Нет фото"}
+              </div>
+            )}
+            {item.tag ? (
+              <div className="pointer-events-none absolute right-3 top-3 z-10">
                 <ItemBadge tag={item.tag} />
               </div>
-            </>
-          ) : (
-            <div
-              className="flex h-full w-full items-center justify-center text-xs text-muted-foreground"
-              aria-hidden
-            >
-              {lang === "RO" ? "Fără foto" : "Нет фото"}
-            </div>
-          )}
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col gap-1">
-          <h3 className="font-bold leading-tight">{name}</h3>
-          {description ? (
-            <p className="line-clamp-3 text-sm text-zinc-500">{description}</p>
-          ) : null}
-          <div className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 pt-2">
-            <MenuItemPriceBlock priceMain={priceMain} priceCompare={priceCompare} />
-            <span
-              className={`pointer-events-none px-4 py-2 text-sm ${CHOOSE_BTN_CLASS}`}
-              aria-hidden
-            >
-              {lang === "RO" ? "Alege" : "Выбрать"}
-            </span>
+            ) : null}
           </div>
-        </div>
-      </button>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <h3 className="line-clamp-2 text-[18px] font-bold leading-[1.12] tracking-[-0.01em] text-[var(--color-text)] lg:text-[20px]">
+              {name}
+            </h3>
+            {description ? (
+              <p className="mt-2 line-clamp-3 text-[14px] leading-snug text-[var(--color-muted)]">
+                {description}
+              </p>
+            ) : null}
+            {priceMain ? (
+              <div className="mt-3 inline-flex w-fit rounded-full bg-[var(--color-accent-soft)] px-3.5 py-2 text-[15px] font-bold leading-none text-[var(--color-accent-text)] transition-all duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white">
+                <MenuItemPriceBlock
+                  priceMain={priceMain.replace("лей", "MDL")}
+                  priceCompare={priceCompare}
+                  className="flex min-w-0 items-baseline gap-x-1 tabular-nums"
+                />
+              </div>
+            ) : null}
+          </div>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={openModal}
+          aria-label={aria}
+          className="group hidden h-full w-full flex-col gap-3 text-left md:flex"
+        >
+          <div className="relative aspect-square w-full overflow-hidden">
+            {item.image_url ? (
+              <>
+                <div className="absolute inset-0 transition-transform duration-300 ease-out will-change-transform group-hover:-translate-y-2">
+                  <Image
+                    src={item.image_url}
+                    alt=""
+                    fill
+                    className="object-contain"
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+                  />
+                </div>
+                <div className="pointer-events-none absolute right-2 top-2 z-10">
+                  <ItemBadge tag={item.tag} />
+                </div>
+              </>
+            ) : (
+              <div
+                className="flex h-full w-full items-center justify-center text-xs text-muted-foreground"
+                aria-hidden
+              >
+                {lang === "RO" ? "Fără foto" : "Нет фото"}
+              </div>
+            )}
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-1">
+            <h3 className="font-bold leading-tight">{name}</h3>
+            {description ? (
+              <p className="line-clamp-3 text-sm text-zinc-500">{description}</p>
+            ) : null}
+            <div className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 pt-2">
+              <MenuItemPriceBlock priceMain={priceMain} priceCompare={priceCompare} />
+              <span
+                className={`pointer-events-none px-4 py-2 text-sm ${CHOOSE_BTN_CLASS}`}
+                aria-hidden
+              >
+                {lang === "RO" ? "Alege" : "Выбрать"}
+              </span>
+            </div>
+          </div>
+        </button>
+      )}
     </div>
   )
 }

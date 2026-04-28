@@ -42,7 +42,7 @@ export function CartPanel({ isOpen, onClose, children }: CartPanelProps) {
       />
       <div
         className={cn(
-          "fixed right-0 top-0 z-50 flex h-[100dvh] w-[420px] max-w-[100vw] flex-col bg-[#f2f2f2] shadow-none transition-transform duration-300 ease-out",
+          "storefront-modal-bg fixed right-0 top-0 z-50 flex h-[100dvh] w-[420px] max-w-[100vw] flex-col shadow-none transition-transform duration-300 ease-out",
           visible ? "translate-x-0" : "translate-x-full",
         )}
       >

@@ -111,7 +111,7 @@ export function DeliveryContent({
       )}
     >
       {layout === "desktop" ? (
-        <h2 className="text-[24px] font-bold leading-tight text-[#242424]">
+        <h2 className="text-[20px] font-bold leading-tight text-[#242424]">
           Адрес доставки
         </h2>
       ) : null}
@@ -119,8 +119,8 @@ export function DeliveryContent({
       {hideModeToggle ? null : <DeliveryModeIsland variant="panel" />}
 
       {mode === "pickup" ? (
-        <div className="flex items-start gap-3 rounded-[16px] bg-[#f2f2f2] p-4">
-          <MapPin className="mt-0.5 size-5 shrink-0 text-[#5F7600]" strokeWidth={2} />
+        <div className="storefront-modal-field flex items-start gap-3 rounded-[16px] p-4">
+          <MapPin className="storefront-modal-accent mt-0.5 size-5 shrink-0" strokeWidth={2} />
           <div>
             <p className="text-sm font-semibold text-[#242424]">Самовывоз</p>
             <p className="text-muted-foreground mt-1 text-sm">
@@ -133,7 +133,7 @@ export function DeliveryContent({
           <div className="flex items-stretch gap-2">
             <div
               className={cn(
-                "relative min-w-0 flex-1 rounded-[12px] bg-[#f2f2f2] px-[16px] py-[8px]",
+                "storefront-modal-field relative min-w-0 flex-1 rounded-[12px] px-[16px] py-[8px]",
                 outOfZone && "ring-2 ring-inset ring-orange-400",
               )}
             >
@@ -164,7 +164,7 @@ export function DeliveryContent({
               {geocoding ? (
                 <Loader2
                   className={cn(
-                    "absolute right-3 size-5 animate-spin text-[#5F7600]",
+                    "storefront-modal-accent absolute right-3 size-5 animate-spin",
                     addressLifted ? "top-[26px]" : "top-1/2 -translate-y-1/2",
                   )}
                 />
@@ -174,14 +174,14 @@ export function DeliveryContent({
               type="button"
               onClick={onLocateMe}
               disabled={locating}
-              className="flex w-[54px] shrink-0 items-center justify-center self-stretch rounded-[12px] bg-[#ccff00] transition-opacity disabled:pointer-events-none disabled:opacity-50"
+              className="storefront-modal-cta flex w-[54px] shrink-0 items-center justify-center self-stretch rounded-[12px] transition-opacity disabled:pointer-events-none disabled:opacity-50"
               aria-label="Моё местоположение"
             >
               {locating ? (
-                <Loader2 className="size-6 animate-spin text-[#343434]" />
+                <Loader2 className="size-6 animate-spin" />
               ) : (
                 <Navigation
-                  className="size-6 rotate-180 scale-y-[-1] text-[#343434]"
+                  className="size-6 rotate-180 scale-y-[-1]"
                   strokeWidth={2}
                 />
               )}
@@ -191,11 +191,11 @@ export function DeliveryContent({
           {outOfZone ? (
             <div className="flex gap-3 pt-1">
               <div
-                className="size-16 shrink-0 rounded-[12px] border border-dashed border-[#ccc] bg-[#e8e8e8]"
+                className="storefront-modal-soft size-16 shrink-0 rounded-[12px] border border-dashed border-[#ccc]"
                 aria-hidden
               />
               <div className="min-w-0">
-                <p className="text-[18px] font-bold leading-snug text-[#242424]">
+                <p className="text-[16px] font-bold leading-snug text-[#242424]">
                   Мы еще не открылись в вашем районе!
                 </p>
                 <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
@@ -214,7 +214,7 @@ export function DeliveryContent({
                   placeholder="Подъезд"
                   value={entrance}
                   onChange={(e) => setSecondary({ entrance: e.target.value })}
-                  className="min-w-0 flex-1 rounded-[8px] bg-[#f2f2f2] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                  className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
                 <input
                   type="text"
@@ -222,7 +222,7 @@ export function DeliveryContent({
                   placeholder="Этаж"
                   value={floor}
                   onChange={(e) => setSecondary({ floor: e.target.value })}
-                  className="min-w-0 flex-1 rounded-[8px] bg-[#f2f2f2] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                  className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
                 <input
                   type="text"
@@ -230,14 +230,14 @@ export function DeliveryContent({
                   placeholder="Квартира"
                   value={apartment}
                   onChange={(e) => setSecondary({ apartment: e.target.value })}
-                  className="min-w-0 flex-1 rounded-[8px] bg-[#f2f2f2] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                  className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
                 <input
                   type="text"
                   placeholder="Домофон"
                   value={intercom}
                   onChange={(e) => setSecondary({ intercom: e.target.value })}
-                  className="min-w-0 flex-1 rounded-[8px] bg-[#f2f2f2] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                  className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
               </div>
 
@@ -246,7 +246,7 @@ export function DeliveryContent({
                 placeholder="Комментарий"
                 value={comment}
                 onChange={(e) => setSecondary({ comment: e.target.value })}
-                className="w-full rounded-[12px] bg-[#f2f2f2] px-[16px] py-[14px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                className="storefront-modal-field w-full rounded-[12px] px-[16px] py-[14px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
               />
             </>
           ) : null}
@@ -262,7 +262,7 @@ export function DeliveryContent({
             >
               <div className="flex min-w-0 flex-col items-center gap-1 text-center">
                 <Clock
-                  className="size-[22px] shrink-0 text-[#5F7600]"
+                  className="storefront-modal-accent size-[22px] shrink-0"
                   strokeWidth={2}
                   aria-hidden
                 />
@@ -275,7 +275,7 @@ export function DeliveryContent({
               </div>
               <div className="flex min-w-0 flex-col items-center gap-1 text-center">
                 <Truck
-                  className="size-[22px] shrink-0 text-[#5F7600]"
+                  className="storefront-modal-accent size-[22px] shrink-0"
                   strokeWidth={2}
                   aria-hidden
                 />
@@ -290,7 +290,7 @@ export function DeliveryContent({
               </div>
               <div className="flex min-w-0 flex-col items-center gap-1 text-center">
                 <ShoppingBag
-                  className="size-[22px] shrink-0 text-[#5F7600]"
+                  className="storefront-modal-accent size-[22px] shrink-0"
                   strokeWidth={2}
                   aria-hidden
                 />
@@ -304,7 +304,7 @@ export function DeliveryContent({
               {selectedZone.free_delivery_from_bani != null ? (
                 <div className="flex min-w-0 flex-col items-center gap-1 text-center">
                   <Gift
-                    className="size-[22px] shrink-0 text-[#5F7600]"
+                    className="storefront-modal-accent size-[22px] shrink-0"
                     strokeWidth={2}
                     aria-hidden
                   />
@@ -333,7 +333,7 @@ export function DeliveryContent({
         }}
         aria-disabled={!canSubmit}
         className={cn(
-          "relative w-full overflow-hidden rounded-full bg-[#ccff00] py-4 text-[20px] font-bold text-[#343434]",
+          "storefront-modal-cta relative w-full overflow-hidden rounded-full py-3.5 text-[16px] font-bold",
           !canSubmit && "pointer-events-none",
         )}
       >

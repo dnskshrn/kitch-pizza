@@ -28,7 +28,7 @@ export function DeliveryModeIsland({
         isFloating && "max-w-[min(100%,320px)]",
         isFloating
           ? "border border-white/60 bg-white/55 shadow-lg backdrop-blur-xl"
-          : "bg-[#f2f2f2]",
+          : "storefront-modal-field",
         className,
       )}
     >
@@ -39,14 +39,14 @@ export function DeliveryModeIsland({
           "flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full py-[6px] text-center text-[16px] font-medium transition-colors",
           mode === "delivery"
             ? cn(
-                "text-[#343434]",
+                "storefront-modal-mode-active",
                 isFloating
-                  ? "bg-white font-semibold shadow-md"
-                  : "bg-white",
+                  ? "font-semibold shadow-md"
+                  : "",
               )
             : cn(
                 "text-black",
-                isFloating ? "bg-transparent" : "bg-[#f2f2f2]",
+                isFloating ? "bg-transparent" : "storefront-modal-field",
               ),
         )}
       >
@@ -60,14 +60,14 @@ export function DeliveryModeIsland({
           "flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full py-[6px] text-center text-[16px] font-medium transition-colors",
           mode === "pickup"
             ? cn(
-                "text-[#343434]",
+                "storefront-modal-mode-active",
                 isFloating
-                  ? "bg-white font-semibold shadow-md"
-                  : "bg-white",
+                  ? "font-semibold shadow-md"
+                  : "",
               )
             : cn(
                 "text-black",
-                isFloating ? "bg-transparent" : "bg-[#f2f2f2]",
+                isFloating ? "bg-transparent" : "storefront-modal-field",
               ),
         )}
       >

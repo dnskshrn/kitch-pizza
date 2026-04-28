@@ -41,8 +41,8 @@ function StepPill({
       className={cn(
         "flex shrink-0 items-center gap-3 rounded-[12px] px-[16px] py-[8px]",
         active
-          ? "bg-[#ECFFA1] text-[#5F7600]"
-          : "bg-[#f2f2f2] text-[#808080]",
+          ? "storefront-checkout-progress-active"
+          : "storefront-checkout-progress-muted",
       )}
     >
       <span className="text-[16px] font-bold leading-none">{n}</span>

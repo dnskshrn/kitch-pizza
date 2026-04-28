@@ -35,11 +35,21 @@ function cardWidthExpr(windowWidth: number): string {
   return "calc((100% - 12px * 3) / 3.5)"
 }
 
+function theSpotCardWidthExpr(windowWidth: number): string {
+  if (windowWidth < 760) return "286px"
+  if (windowWidth < 1024) return "calc((100% - 20px) / 2)"
+  return "calc((100% - 40px) / 3)"
+}
+
 export type PromotionsSliderProps = {
+  brandSlug?: string
   promotions: StorefrontPromotion[]
 }
 
-export function PromotionsSlider({ promotions }: PromotionsSliderProps) {
+export function PromotionsSlider({
+  brandSlug = "kitch-pizza",
+  promotions,
+}: PromotionsSliderProps) {
   const windowWidth = useWindowWidth()
   const scrollRef = useRef<HTMLDivElement>(null)
   const touchStartX = useRef<number | null>(null)
@@ -50,9 +60,11 @@ export function PromotionsSlider({ promotions }: PromotionsSliderProps) {
   const isMobile = windowWidth < 760
   const showArrows = windowWidth >= 760
 
+  const isTheSpot = brandSlug === "the-spot"
+
   const cardWidth = useMemo(
-    () => cardWidthExpr(windowWidth),
-    [windowWidth],
+    () => (isTheSpot ? theSpotCardWidthExpr(windowWidth) : cardWidthExpr(windowWidth)),
+    [isTheSpot, windowWidth],
   )
 
   useEffect(() => {
@@ -63,8 +75,9 @@ export function PromotionsSlider({ promotions }: PromotionsSliderProps) {
     const el = scrollRef.current
     const first = el?.firstElementChild as HTMLElement | undefined
     if (!first) return 0
-    return first.offsetWidth + GAP_PX
-  }, [])
+    const gap = isTheSpot && windowWidth >= 760 ? 20 : GAP_PX
+    return first.offsetWidth + gap
+  }, [isTheSpot, windowWidth])
 
   const updateActiveFromScroll = useCallback(() => {
     const el = scrollRef.current
@@ -125,12 +138,24 @@ export function PromotionsSlider({ promotions }: PromotionsSliderProps) {
     else scrollPrev()
   }
 
+  if (isTheSpot && promotions.length === 0) {
+    return (
+      <section id="promotions" className="w-full" aria-label="Акции">
+        <div className="flex gap-4 overflow-x-auto py-2 md:gap-5 md:overflow-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="aspect-[16/9] w-[286px] shrink-0 rounded-[var(--radius-card)] bg-white md:flex-1" />
+          <div className="aspect-[16/9] w-[286px] shrink-0 rounded-[var(--radius-card)] bg-white md:flex-1" />
+          <div className="hidden rounded-[var(--radius-card)] bg-white md:block md:flex-1 md:aspect-[16/9]" />
+        </div>
+      </section>
+    )
+  }
+
   if (promotions.length === 0) {
     return null
   }
 
   return (
-    <section className="w-full" aria-label="Акции">
+    <section id="promotions" className="w-full" aria-label="Акции">
       <div className="relative w-full overflow-hidden">
         {showArrows && (
           <>
@@ -155,7 +180,7 @@ export function PromotionsSlider({ promotions }: PromotionsSliderProps) {
 
         <div
           ref={scrollRef}
-          className="flex gap-3 overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex gap-3 overflow-x-auto scroll-smooth md:gap-5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{ scrollBehavior: "smooth" }}
           onScroll={isMobile ? updateActiveFromScroll : undefined}
           onTouchStart={onTouchStart}
@@ -167,10 +192,14 @@ export function PromotionsSlider({ promotions }: PromotionsSliderProps) {
             return (
               <article
                 key={p.id}
-                className="relative shrink-0 overflow-hidden rounded-2xl bg-transparent"
+                className={
+                  isTheSpot
+                    ? "relative shrink-0 overflow-hidden rounded-[var(--radius-card)] bg-white"
+                    : "relative shrink-0 overflow-hidden rounded-2xl bg-transparent"
+                }
                 style={{
                   width: cardWidth,
-                  aspectRatio: "4 / 3",
+                  aspectRatio: "16 / 9",
                 }}
               >
                 {src ? (

@@ -1,5 +1,6 @@
 "use server"
 
+import { getBrandId } from "@/lib/get-brand-id"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { PromoCode, PromoCodeValidationResult } from "@/types/database"
 
@@ -7,6 +8,7 @@ export async function validatePromoCode(
   code: string,
   cartSubtotalBani: number,
 ): Promise<PromoCodeValidationResult> {
+  const brandId = await getBrandId()
   const normalized = code.trim().toUpperCase()
   if (!normalized) {
     return { valid: false, error: "not_found" }
@@ -16,6 +18,7 @@ export async function validatePromoCode(
   const { data, error } = await supabase
     .from("promo_codes")
     .select("*")
+    .eq("brand_id", brandId)
     .eq("code", normalized)
     .maybeSingle()
 

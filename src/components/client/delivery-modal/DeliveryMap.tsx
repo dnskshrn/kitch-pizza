@@ -22,6 +22,13 @@ function closeCoord(a: number, b: number, eps = 1e-5) {
   return Math.abs(a - b) < eps
 }
 
+function readBrandAccentColor(container: HTMLDivElement | null) {
+  if (!container) return "#5F7600"
+  const brandedRoot = container.closest("[data-brand]") ?? document.documentElement
+  const accent = getComputedStyle(brandedRoot).getPropertyValue("--color-accent").trim()
+  return accent || "#5F7600"
+}
+
 export type DeliveryMapProps = {
   /** Если ещё не загружено — передавайте []; компонент терпимо относится к undefined. */
   zones?: DeliveryZone[] | null
@@ -34,6 +41,8 @@ export type DeliveryMapProps = {
   locating?: boolean
   /** Позиция/ z-index кнопки (напр. моб. sheet: выше нижней панели) */
   locateMeButtonClassName?: string
+  /** Позиция кнопок зума Leaflet. */
+  zoomControlPosition?: L.ControlPosition
 }
 
 export default function DeliveryMap({
@@ -45,9 +54,11 @@ export default function DeliveryMap({
   onLocateMe,
   locating = false,
   locateMeButtonClassName,
+  zoomControlPosition = "topleft",
 }: DeliveryMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
+  const zoomControlPositionRef = useRef(zoomControlPosition)
   const zonesRef = useRef<DeliveryZone[]>(zones ?? [])
   const modeRef = useRef(mode)
   const ignoreNextMoveEndRef = useRef(false)
@@ -63,11 +74,16 @@ export default function DeliveryMap({
     const el = containerRef.current
     if (!el) return
 
-    const map = L.map(el).setView(CHISINAU, 13)
+    const map = L.map(el, {
+      dragging: true,
+      touchZoom: true,
+      zoomControl: false,
+    }).setView(CHISINAU, 13)
     mapRef.current = map
     L.tileLayer(STOREFRONT_MAP_TILE_URL, {
       attribution: STOREFRONT_MAP_ATTRIBUTION,
     }).addTo(map)
+    L.control.zoom({ position: zoomControlPositionRef.current }).addTo(map)
 
     const runReverseForCenter = () => {
       const c = map.getCenter()
@@ -134,15 +150,16 @@ export default function DeliveryMap({
 
     polygonLayersRef.current.forEach((p) => p.remove())
     polygonLayersRef.current = []
+    const brandAccent = readBrandAccentColor(containerRef.current)
     ;(zones ?? []).forEach((z, idx) => {
       const isPrimary = idx === 0
       const poly = L.polygon(
         z.polygon.map((pair) => [pair[0], pair[1]] as [number, number]),
         {
-          color: isPrimary ? "#5F7600" : "#2563eb",
+          color: isPrimary ? brandAccent : "#2563eb",
           weight: 2,
           opacity: isPrimary ? 0.6 : 0.5,
-          fillColor: isPrimary ? "#5F7600" : "#2563eb",
+          fillColor: isPrimary ? brandAccent : "#2563eb",
           fillOpacity: isPrimary ? 0.2 : 0.15,
         },
       ).addTo(map)
@@ -174,12 +191,17 @@ export default function DeliveryMap({
 
   return (
     <div
-      className={cn("relative min-h-[240px] w-full", className)}
+      data-vaul-no-drag
+      className={cn("relative min-h-[240px] w-full touch-none", className)}
       onPointerDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
       onTouchMove={(e) => e.stopPropagation()}
     >
-      <div ref={containerRef} className="absolute inset-0 z-0 min-h-[240px]" />
+      <div
+        ref={containerRef}
+        data-vaul-no-drag
+        className="absolute inset-0 z-0 min-h-[240px]"
+      />
       {mode === "delivery" ? (
         <div
           className="pointer-events-none absolute left-1/2 top-1/2 z-[5] -translate-x-1/2 -translate-y-full"
@@ -201,12 +223,12 @@ export default function DeliveryMap({
           onClick={onLocateMe}
           disabled={locating}
           className={cn(
-            "absolute flex cursor-pointer items-center gap-[12px] rounded-full bg-white px-[16px] py-[8px] transition-opacity disabled:pointer-events-none disabled:opacity-60",
+            "storefront-modal-surface absolute flex cursor-pointer items-center gap-[12px] rounded-full px-[16px] py-[8px] transition-opacity disabled:pointer-events-none disabled:opacity-60",
             locateMeButtonClassName ?? "bottom-[20px] right-[20px] z-[1000]",
           )}
         >
           <Navigation
-            className="size-[22px] shrink-0 rotate-180 scale-y-[-1] text-[#242424]"
+            className="storefront-modal-accent size-[22px] shrink-0 rotate-180 scale-y-[-1]"
             strokeWidth={2}
             aria-hidden
           />

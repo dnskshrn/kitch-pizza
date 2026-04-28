@@ -1,6 +1,5 @@
 "use client"
 
-import { BRAND_CART_BG } from "@/lib/client-brand"
 import { fetchToppingsForMenuItem } from "@/lib/data/storefront-item-toppings"
 import { useCartStore } from "@/lib/store/cart-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
@@ -113,7 +112,7 @@ function DesktopModalShell({
     >
       <div
         className={cn(
-          "relative z-[70] h-[620px] w-full max-w-[960px] origin-center overflow-hidden rounded-[24px] bg-white transition-all duration-300 ease-out",
+          "storefront-modal-surface relative z-[70] h-[620px] w-full max-w-[1120px] origin-center overflow-hidden rounded-[24px] transition-all duration-300 ease-out",
           visible
             ? "translate-y-0 scale-100 opacity-100"
             : "translate-y-3 scale-[0.96] opacity-0",
@@ -125,7 +124,7 @@ function DesktopModalShell({
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-7 top-7 z-20 flex h-[50px] w-[50px] cursor-pointer items-center justify-center rounded-full bg-white text-[#242424] transition-all duration-200 hover:bg-gray-200 active:scale-[0.93]"
+          className="storefront-modal-surface absolute right-7 top-7 z-20 flex size-11 cursor-pointer items-center justify-center rounded-full text-[#242424] transition-all duration-200 hover:bg-gray-200 active:scale-[0.93]"
           aria-label={closeLabel}
         >
           <X size={22} strokeWidth={2.5} />
@@ -266,14 +265,14 @@ export function ProductModalRoot() {
 
   const imageBlock =
     panelItem && (
-      <div className="relative mx-auto h-[280px] w-full max-w-[450px] shrink-0 md:absolute md:left-[20px] md:top-1/2 md:mx-0 md:h-[450px] md:w-[450px] md:-translate-y-1/2">
+      <div className="relative mx-auto aspect-square w-full max-w-[450px] shrink-0 md:absolute md:bottom-[20px] md:left-[20px] md:top-[20px] md:mx-0 md:w-auto md:max-w-none">
         {panelItem.image_url ? (
           <Image
             src={panelItem.image_url}
             alt=""
             fill
             className="object-contain"
-            sizes="(max-width: 768px) 100vw, 450px"
+            sizes="(max-width: 768px) 100vw, 580px"
             priority
           />
         ) : (
@@ -292,8 +291,7 @@ export function ProductModalRoot() {
       <button
         type="button"
         onClick={handleAddToCart}
-        className="w-full cursor-pointer rounded-full py-[15px] text-[20px] font-bold text-[#242424] transition-all duration-200 hover:brightness-110 active:scale-[0.98] active:brightness-95"
-        style={{ backgroundColor: BRAND_CART_BG }}
+        className="storefront-modal-cta w-full cursor-pointer rounded-full py-3.5 text-[16px] font-bold transition-all duration-200 hover:brightness-110 active:scale-[0.98] active:brightness-95"
       >
         {addToCartLabel} · {totalLabel}
       </button>
@@ -308,7 +306,7 @@ export function ProductModalRoot() {
               {lang === "RO" ? panelItem.name_ro : panelItem.name_ru}
             </h2>
             {weightPillLabel ? (
-              <span className="inline-flex shrink-0 items-center rounded-full border border-[#ccc] px-3 py-1 text-sm font-medium text-[rgba(36,36,36,0.5)]">
+              <span className="storefront-modal-field inline-flex shrink-0 items-center rounded-full border border-[#ccc] px-3 py-1 text-sm font-medium text-[rgba(36,36,36,0.5)]">
                 {weightPillLabel}
               </span>
             ) : null}
@@ -327,7 +325,7 @@ export function ProductModalRoot() {
           />
         ) : null}
         {toppings.length > 0 ? (
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             {toppings.map((t) => (
               <ToppingCard
                 key={t.id}
@@ -355,7 +353,7 @@ export function ProductModalRoot() {
       >
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 z-[60] bg-black/50" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-[70] flex max-h-[92dvh] flex-col rounded-t-[24px] bg-white outline-none">
+          <Drawer.Content className="storefront-modal-surface fixed bottom-0 left-0 right-0 z-[70] flex max-h-[92dvh] flex-col rounded-t-[24px] outline-none">
             <Drawer.Title className="sr-only">{titleName}</Drawer.Title>
             <div
               className="mx-auto mb-0 mt-3 h-1 w-10 shrink-0 rounded-full bg-[#ccc]"
@@ -364,7 +362,7 @@ export function ProductModalRoot() {
             <button
               type="button"
               onClick={close}
-              className="absolute right-5 top-5 z-10 flex h-[50px] w-[50px] cursor-pointer items-center justify-center rounded-full bg-white text-[#242424] transition-all duration-200 hover:bg-black/10 active:scale-[0.95]"
+              className="storefront-modal-surface absolute right-5 top-5 z-10 flex size-11 cursor-pointer items-center justify-center rounded-full text-[#242424] transition-all duration-200 hover:bg-black/10 active:scale-[0.95]"
               aria-label={closeLabel}
             >
               <X size={22} strokeWidth={2.5} />
@@ -372,11 +370,11 @@ export function ProductModalRoot() {
             <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
                 {imageBlock}
-                <div className="mt-4 rounded-[20px] bg-[#f2f2f2] p-4">
+                <div className="storefront-modal-bg storefront-modal-card-radius mt-4 rounded-[20px] p-4">
                   {modalScrollBody}
                 </div>
               </div>
-              <div className="shrink-0 border-t border-[#ebebeb] bg-white pt-3">
+              <div className="storefront-modal-surface shrink-0 border-t border-[#ebebeb] pt-3">
                 {addToCartButton}
               </div>
             </div>
@@ -392,7 +390,7 @@ export function ProductModalRoot() {
     <DesktopModalShell visible={visible} onClose={close} closeLabel={closeLabel}>
       {imageBlock}
       <div
-        className="absolute bottom-[20px] right-[20px] top-[20px] flex w-[min(450px,calc(100%-40px))] flex-col overflow-hidden rounded-[20px] bg-[#f2f2f2] p-5 md:w-[450px]"
+        className="storefront-modal-bg storefront-modal-card-radius absolute bottom-[20px] right-[20px] top-[20px] flex w-[min(450px,calc(100%-40px))] flex-col overflow-hidden rounded-[20px] p-5 md:w-[450px]"
         style={{ maxHeight: "calc(100% - 40px)" }}
       >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

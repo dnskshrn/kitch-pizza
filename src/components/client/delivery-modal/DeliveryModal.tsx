@@ -93,7 +93,7 @@ export function DeliveryModal({ open, onClose, zones }: DeliveryModalProps) {
       >
         <div
           className={cn(
-            "relative flex h-[540px] w-full flex-row overflow-hidden rounded-[24px] bg-white transition-all duration-300 ease-out",
+            "storefront-modal-surface relative flex h-[540px] w-full flex-row overflow-hidden rounded-[24px] transition-all duration-300 ease-out",
             visible
               ? "translate-y-0 scale-100 opacity-100"
               : "translate-y-3 scale-[0.96] opacity-0",
@@ -105,12 +105,12 @@ export function DeliveryModal({ open, onClose, zones }: DeliveryModalProps) {
           <button
             type="button"
             onClick={onClose}
-            className="absolute right-4 top-4 z-[2000] flex h-[51px] w-[51px] cursor-pointer items-center justify-center rounded-full bg-white text-[#242424] shadow-md transition-all duration-200 hover:bg-gray-200 active:scale-[0.93]"
+            className="storefront-modal-surface absolute right-4 top-4 z-[2000] flex size-11 cursor-pointer items-center justify-center rounded-full text-[#242424] shadow-md transition-all duration-200 hover:bg-gray-200 active:scale-[0.93]"
             aria-label="Закрыть"
           >
             <X size={22} strokeWidth={2.5} />
           </button>
-          <div className="flex h-full w-full min-w-0 max-w-[450px] shrink-0 flex-col border-r border-[#ebebeb] p-[20px]">
+          <div className="storefront-modal-surface flex h-full w-full min-w-0 max-w-[450px] shrink-0 flex-col border-r border-[#ebebeb] p-[20px]">
             <DeliveryContent
               zones={zones}
               onChoose={onClose}

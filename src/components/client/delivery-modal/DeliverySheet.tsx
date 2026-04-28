@@ -5,9 +5,8 @@ import { findZoneForPoint } from "@/lib/geo"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import type { DeliveryZone } from "@/types/database"
 import dynamic from "next/dynamic"
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { X } from "lucide-react"
-import { Drawer } from "vaul"
 import { DeliveryContent } from "./DeliveryContent"
 import { DeliveryModeIsland } from "./delivery-mode-island"
 
@@ -32,6 +31,15 @@ export function DeliverySheet({ open, onClose, zones }: DeliverySheetProps) {
   const mode = useDeliveryStore((s) => s.mode)
   const mapLat = useDeliveryStore((s) => s.lat)
   const mapLng = useDeliveryStore((s) => s.lng)
+
+  useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [open])
 
   const resolvePick = useCallback(
     async (la: number, ln: number) => {
@@ -58,59 +66,67 @@ export function DeliverySheet({ open, onClose, zones }: DeliverySheetProps) {
     )
   }, [resolvePick])
 
-  return (
-    <Drawer.Root open={open} onOpenChange={(o) => !o && onClose()}>
-      <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 z-[60] bg-black/50" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 z-[70] flex h-[92dvh] max-h-[92dvh] flex-col overflow-hidden rounded-t-[24px] bg-white p-0 outline-none">
-          <Drawer.Title className="sr-only">Адрес доставки</Drawer.Title>
+  if (!open) return null
 
-          {/* Верх: карта (~половина высоты), как на десктопе — отдельно от панели формы */}
-          <div className="relative min-h-0 flex-1 basis-0">
-            <DeliveryMap
+  return (
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/50" aria-hidden />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delivery-sheet-title"
+        className="storefront-modal-surface fixed inset-0 z-[70] flex h-dvh max-h-dvh flex-col overflow-hidden p-0 outline-none"
+      >
+        <h2 id="delivery-sheet-title" className="sr-only">
+          Адрес доставки
+        </h2>
+
+        {/* Верх: карта (~половина высоты), как на десктопе — отдельно от панели формы */}
+        <div className="relative min-h-0 flex-1 basis-0">
+          <DeliveryMap
+            zones={zones}
+            mode={mode}
+            lat={mapLat}
+            lng={mapLng}
+            onLocateMe={handleLocateMe}
+            locating={locating}
+            locateMeButtonClassName="bottom-4 right-4 z-10"
+            zoomControlPosition="bottomleft"
+            className="h-full w-full min-h-0"
+          />
+          {/* Островок Доставка / Самовывоз + закрытие — поверх карты */}
+          <div className="pointer-events-none absolute inset-0 z-[25]">
+            <div className="pointer-events-auto absolute left-4 top-[max(0.75rem,env(safe-area-inset-top))] w-[min(320px,calc(100%-5.5rem))]">
+              <DeliveryModeIsland variant="floating" />
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="storefront-modal-surface pointer-events-auto absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[26] flex size-11 shrink-0 items-center justify-center rounded-full text-[#242424] shadow-md transition hover:opacity-90 active:scale-[0.96]"
+              aria-label="Закрыть"
+            >
+              <X className="size-[22px]" strokeWidth={2.5} aria-hidden />
+            </button>
+          </div>
+        </div>
+
+        {/* Низ: форма на непрозрачном белом фоне, без blur */}
+        <div className="storefront-modal-surface flex min-h-0 flex-1 basis-0 flex-col overflow-hidden border-t border-[#ebebeb]">
+          <div
+            className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-[#ccc]"
+            aria-hidden
+          />
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-5 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <DeliveryContent
               zones={zones}
-              mode={mode}
-              lat={mapLat}
-              lng={mapLng}
+              onChoose={onClose}
               onLocateMe={handleLocateMe}
               locating={locating}
-              locateMeButtonClassName="bottom-4 right-4 z-10"
-              className="h-full w-full min-h-0"
+              hideModeToggle
             />
-            {/* Островок Доставка / Самовывоз + закрытие — поверх карты */}
-            <div className="pointer-events-none absolute inset-0 z-[25]">
-              <div className="pointer-events-auto absolute left-1/2 top-[max(0.75rem,env(safe-area-inset-top))] w-[min(320px,calc(100%-4.5rem))] -translate-x-1/2">
-                <DeliveryModeIsland variant="floating" />
-              </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="pointer-events-auto absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[26] flex size-11 shrink-0 items-center justify-center rounded-full bg-white text-[#242424] shadow-md transition hover:opacity-90 active:scale-[0.96]"
-                aria-label="Закрыть"
-              >
-                <X className="size-[22px]" strokeWidth={2.5} aria-hidden />
-              </button>
-            </div>
           </div>
-
-          {/* Низ: форма на непрозрачном белом фоне, без blur */}
-          <div className="flex min-h-0 flex-1 basis-0 flex-col overflow-hidden border-t border-[#ebebeb] bg-white">
-            <div
-              className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-[#ccc]"
-              aria-hidden
-            />
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-5 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <DeliveryContent
-                zones={zones}
-                onChoose={onClose}
-                onLocateMe={handleLocateMe}
-                locating={locating}
-                hideModeToggle
-              />
-            </div>
-          </div>
-        </Drawer.Content>
-      </Drawer.Portal>
-    </Drawer.Root>
+        </div>
+      </section>
+    </>
   )
 }

@@ -43,12 +43,22 @@ function readLang(): CartLang {
   return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
 }
 
-const checkoutLimeCta =
-  "cursor-pointer transition-all duration-200 ease-out hover:bg-[#b8f000] active:scale-[0.97]"
+const checkoutCtaMotion =
+  "cursor-pointer transition-all duration-200 ease-out hover:brightness-95 active:scale-[0.97]"
 const checkoutIconCircle =
   "cursor-pointer transition-all duration-200 ease-out hover:bg-[#e8e8e8] active:scale-[0.96]"
 
-export function CheckoutSuccessView() {
+type CheckoutSuccessViewProps = {
+  brandName: string
+  brandLogo: string
+  brandSlug: string
+}
+
+export function CheckoutSuccessView({
+  brandName,
+  brandLogo,
+  brandSlug,
+}: CheckoutSuccessViewProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const rawName = searchParams.get("name") ?? ""
@@ -111,15 +121,26 @@ export function CheckoutSuccessView() {
 
   return (
     <div className="flex min-h-screen flex-col pb-[calc(88px+env(safe-area-inset-bottom))] md:pb-0">
-      <div className="border-b border-transparent pt-4 md:pt-6">
+      <div
+        className={cn(
+          "border-b border-transparent pt-4 md:pt-6",
+          brandSlug === "the-spot" && "h-[128px] md:h-auto",
+        )}
+      >
         <ClientContainer>
           <div className="flex w-full items-center gap-3 md:justify-between md:gap-6">
-            <div className="flex min-w-0 items-center gap-3 md:gap-6">
+            <div
+              className={cn(
+                "flex min-w-0 items-center gap-3 md:gap-6",
+                brandSlug === "the-spot" &&
+                  "fixed left-5 top-[max(1rem,env(safe-area-inset-top))] z-50 rounded-full bg-[var(--color-bg)] p-2 pr-5 shadow-sm ring-1 ring-black/5 md:static md:rounded-none md:bg-transparent md:p-0 md:pr-0 md:shadow-none md:ring-0",
+              )}
+            >
               <button
                 type="button"
                 onClick={handleBackNav}
                 className={cn(
-                  "flex size-11 shrink-0 items-center justify-center rounded-full bg-[#f2f2f2] text-[#242424]",
+                  "storefront-modal-surface flex size-11 shrink-0 items-center justify-center rounded-full text-[#242424]",
                   checkoutIconCircle,
                 )}
                 aria-label="На главную"
@@ -127,27 +148,41 @@ export function CheckoutSuccessView() {
                 <ChevronLeft className="size-6" strokeWidth={2} />
               </button>
 
-              <div className="flex shrink-0 items-center md:hidden">
+              <Link
+                href="/"
+                className="flex shrink-0 items-center md:hidden"
+                aria-label={`${brandName} — на главную`}
+              >
                 <Image
-                  src="/kitch-pizza-logo.svg"
-                  alt="Kitch Pizza"
-                  width={220}
-                  height={84}
-                  className="h-[55px] w-auto max-w-[min(200px,52vw)] object-contain object-left"
+                  src={brandLogo}
+                  alt={brandName}
+                  width={brandSlug === "the-spot" ? 80 : 220}
+                  height={brandSlug === "the-spot" ? 47 : 84}
+                  className={cn(
+                    "w-auto max-w-[min(200px,52vw)] object-contain object-left",
+                    brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+                  )}
                   unoptimized
                 />
-              </div>
+              </Link>
 
-              <div className="hidden shrink-0 md:block">
+              <Link
+                href="/"
+                className="hidden shrink-0 md:block"
+                aria-label={`${brandName} — на главную`}
+              >
                 <Image
-                  src="/kitch-pizza-logo.svg"
-                  alt="Kitch Pizza"
-                  width={220}
-                  height={84}
-                  className="h-[55px] w-auto object-contain object-left"
+                  src={brandLogo}
+                  alt={brandName}
+                  width={brandSlug === "the-spot" ? 80 : 220}
+                  height={brandSlug === "the-spot" ? 47 : 84}
+                  className={cn(
+                    "w-auto object-contain object-left",
+                    brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+                  )}
                   unoptimized
                 />
-              </div>
+              </Link>
             </div>
 
             <div className="hidden shrink-0 md:block">
@@ -160,20 +195,20 @@ export function CheckoutSuccessView() {
       <ClientContainer className="flex-1 py-6 md:py-10">
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:gap-8 lg:gap-12">
           <div className="flex w-full max-w-full flex-col gap-3 md:w-[680px] md:max-w-[680px]">
-            <div className="relative z-0 mb-3 overflow-visible rounded-[24px] bg-[#CCFF00] p-6 pb-8 md:mb-4 md:p-8 md:pb-10">
+            <div className="storefront-checkout-success-hero storefront-modal-card-radius relative z-0 mb-3 overflow-visible rounded-[24px] p-6 pb-8 md:mb-4 md:p-8 md:pb-10">
               <div className="max-w-[min(100%,420px)] pr-[100px] sm:pr-[120px] md:pr-44 lg:pr-52">
-                <h1 className="text-[24px] font-bold leading-tight text-[#242424] md:text-[28px]">
+                <h1 className="text-[22px] font-bold leading-tight text-[#242424] md:text-[24px]">
                   {customerName
                     ? `Заказ отправлен, ${customerName}!`
                     : "Заказ отправлен!"}
                 </h1>
                 {/* TODO: при появлении постоянного хранения имени заказа — подставлять из стора, search — fallback */}
-                <p className="mt-2 text-[16px] font-medium text-[#242424]">
+                <p className="mt-2 text-[14px] font-normal text-[#242424]">
                   Скоро наберем
                 </p>
                 <a
                   href="tel:+37379700290"
-                  className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-[16px] font-bold text-[#242424] shadow-sm transition-opacity hover:opacity-90"
+                  className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-[14px] font-bold text-[#242424] shadow-sm transition-opacity hover:opacity-90"
                 >
                   <Phone className="size-5 shrink-0" strokeWidth={2} aria-hidden />
                   079 700 290
@@ -228,8 +263,8 @@ export function CheckoutSuccessView() {
           <Link
             href="/"
             className={cn(
-              "flex h-[54px] w-full items-center justify-center rounded-full bg-[#ccff00] text-[20px] font-bold text-[#242424]",
-              checkoutLimeCta,
+              "storefront-modal-cta flex h-12 w-full items-center justify-center rounded-full text-[16px] font-bold",
+              checkoutCtaMotion,
             )}
           >
             Вернуться в меню
@@ -237,19 +272,22 @@ export function CheckoutSuccessView() {
         </div>
       </div>
 
-      <footer className="mt-auto hidden h-[120px] rounded-t-[48px] bg-[#f2f2f2] md:block">
+      <footer className="storefront-modal-field mt-auto hidden h-[120px] rounded-t-[48px] md:block">
         <ClientContainer className="flex h-full items-center justify-between">
           <Image
-            src="/kitch-pizza-logo.svg"
+            src={brandLogo}
             alt=""
-            width={220}
-            height={84}
-            className="h-[55px] w-auto object-contain object-left"
+            width={brandSlug === "the-spot" ? 80 : 220}
+            height={brandSlug === "the-spot" ? 47 : 84}
+            className={cn(
+              "w-auto object-contain object-left",
+              brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+            )}
             unoptimized
           />
           <a
             href="mailto:feedback@kitch.md"
-            className="text-[20px] font-medium text-[#808080] hover:underline"
+            className="text-[14px] font-normal text-[#808080] hover:underline"
           >
             feedback@kitch.md
           </a>

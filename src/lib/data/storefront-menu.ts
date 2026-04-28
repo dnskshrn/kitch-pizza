@@ -1,13 +1,16 @@
+import { getBrandId } from "@/lib/get-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { Category, CategoryWithItems, MenuItem } from "@/types/database"
 
 /** Меню витрины: активные категории по sort_order и активные позиции; пустые категории отбрасываются. */
 export async function getStorefrontMenu(): Promise<CategoryWithItems[]> {
+  const brandId = await getBrandId()
   const supabase = await createClient()
 
   const { data: categories, error: categoriesError } = await supabase
     .from("menu_categories")
     .select("*")
+    .eq("brand_id", brandId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
 
@@ -22,6 +25,7 @@ export async function getStorefrontMenu(): Promise<CategoryWithItems[]> {
   const { data: items, error: itemsError } = await supabase
     .from("menu_items")
     .select("*")
+    .eq("brand_id", brandId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
 

@@ -8,15 +8,34 @@ import { ProductModalRoot } from "@/components/client/product-modal/ProductModal
 import { TopNav } from "@/components/client/top-nav"
 import type { Category } from "@/types/database"
 import { usePathname } from "next/navigation"
+import { useEffect } from "react"
 
 type ClientChromeProps = {
+  brandSlug: string
   categories: Category[]
   children: React.ReactNode
 }
 
-export function ClientChrome({ categories, children }: ClientChromeProps) {
+export function ClientChrome({
+  brandSlug,
+  categories,
+  children,
+}: ClientChromeProps) {
   const pathname = usePathname()
   const isCheckoutFlow = pathname.startsWith("/checkout")
+
+  useEffect(() => {
+    const previousBrand = document.body.dataset.brand
+    document.body.dataset.brand = brandSlug
+
+    return () => {
+      if (previousBrand) {
+        document.body.dataset.brand = previousBrand
+      } else {
+        delete document.body.dataset.brand
+      }
+    }
+  }, [brandSlug])
 
   if (isCheckoutFlow) {
     return (
@@ -31,9 +50,11 @@ export function ClientChrome({ categories, children }: ClientChromeProps) {
 
   return (
     <>
-      <TopNav />
-      <MainHeader />
-      <MenuCategoryBar categories={categories} />
+      {brandSlug === "the-spot" ? null : <TopNav />}
+      <MainHeader brandSlug={brandSlug} />
+      {brandSlug === "the-spot" ? null : (
+        <MenuCategoryBar brandSlug={brandSlug} categories={categories} />
+      )}
       <ProductModalRoot />
       <DeliveryRoot />
       <CartRoot />

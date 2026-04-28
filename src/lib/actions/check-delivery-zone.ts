@@ -1,6 +1,7 @@
 "use server"
 
 import { formatStreetLineFromNominatim } from "@/lib/nominatim-format-street"
+import { getBrandId } from "@/lib/get-brand-id"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { DeliveryZone } from "@/types/database"
 
@@ -8,10 +9,12 @@ const NOMINATIM = "https://nominatim.openstreetmap.org"
 const USER_AGENT = "KitchPizza/1.0"
 
 export async function getActiveDeliveryZones(): Promise<DeliveryZone[]> {
+  const brandId = await getBrandId()
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from("delivery_zones")
     .select("*")
+    .eq("brand_id", brandId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
 

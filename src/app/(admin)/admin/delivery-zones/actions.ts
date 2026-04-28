@@ -1,5 +1,6 @@
 "use server"
 
+import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
@@ -15,8 +16,10 @@ export type DeliveryZoneInput = {
 }
 
 export async function createDeliveryZone(data: DeliveryZoneInput) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase.from("delivery_zones").insert({
+    brand_id: brandId,
     name: data.name,
     polygon: data.polygon,
     delivery_price_bani: data.delivery_price_bani,
@@ -31,6 +34,7 @@ export async function createDeliveryZone(data: DeliveryZoneInput) {
 }
 
 export async function updateDeliveryZone(id: string, data: DeliveryZoneInput) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase
     .from("delivery_zones")
@@ -45,13 +49,19 @@ export async function updateDeliveryZone(id: string, data: DeliveryZoneInput) {
       sort_order: data.sort_order,
     })
     .eq("id", id)
+    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/delivery-zones")
 }
 
 export async function deleteDeliveryZone(id: string) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await supabase.from("delivery_zones").delete().eq("id", id)
+  const { error } = await supabase
+    .from("delivery_zones")
+    .delete()
+    .eq("id", id)
+    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/delivery-zones")
 }

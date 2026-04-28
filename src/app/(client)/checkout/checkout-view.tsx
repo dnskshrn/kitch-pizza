@@ -35,6 +35,7 @@ import {
   Zap,
 } from "lucide-react"
 import Image from "next/image"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   useCallback,
@@ -108,8 +109,42 @@ function buildDeliveryTimeSlots(): string[] {
   return out
 }
 
+function roundUpToQuarterHour(date: Date): Date {
+  const rounded = new Date(date)
+  const minutes = rounded.getMinutes()
+  const nextQuarter = Math.ceil(minutes / 15) * 15
+  if (nextQuarter === 60) {
+    rounded.setHours(rounded.getHours() + 1, 0, 0, 0)
+  } else {
+    rounded.setMinutes(nextQuarter, 0, 0)
+  }
+  return rounded
+}
+
+function formatTimeSlot(date: Date): string {
+  const hh = String(date.getHours()).padStart(2, "0")
+  const mm = String(date.getMinutes()).padStart(2, "0")
+  return `${hh}:${mm}`
+}
+
+function buildQuickDeliveryTimeSlots(): string[] {
+  const now = Date.now()
+  const end = new Date(now)
+  end.setHours(23, 0, 0, 0)
+
+  const offsetsMinutes = [60, 75, 90, 105, 120]
+  return Array.from(
+    new Set(
+      offsetsMinutes
+        .map((offset) => roundUpToQuarterHour(new Date(now + offset * 60 * 1000)))
+        .filter((slot) => slot.getTime() <= end.getTime())
+        .map(formatTimeSlot),
+    ),
+  )
+}
+
 const inputClassName =
-  "w-full rounded-[12px] bg-[#f2f2f2] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] placeholder:font-medium placeholder:text-[16px] placeholder:text-[#808080] outline-none focus:ring-2 focus:ring-[#ccff00]"
+  "storefront-modal-field w-full rounded-[12px] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] placeholder:font-medium placeholder:text-[16px] placeholder:text-[#808080] outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
 
 /** lg+: подпись 240px слева, контент справа; уже lg — колонка с заголовком над полем (в т.ч. мобилка). */
 const checkoutRow =
@@ -123,8 +158,8 @@ const checkoutLabelTop =
 
 /** Как на витрине (корзина в меню, CTA): плавный ховер + лёгкий press */
 const btnMotion = "cursor-pointer transition-all duration-200 ease-out"
-const checkoutLimeCta = `${btnMotion} hover:bg-[#b8f000] active:scale-[0.97]`
-const checkoutLimeToggleOn = `${btnMotion} hover:bg-[#b8f000] active:scale-[0.98]`
+const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
+const checkoutActiveToggle = `${btnMotion} hover:brightness-95 active:scale-[0.98]`
 const checkoutGrayToggle = `${btnMotion} hover:bg-[#e8e8e8] active:scale-[0.98]`
 const checkoutIconCircle = `${btnMotion} hover:bg-[#e8e8e8] active:scale-[0.96]`
 const checkoutWhiteMini = `${btnMotion} hover:bg-[#f5f5f5] active:scale-[0.98]`
@@ -138,7 +173,17 @@ type FieldErrors = {
   zone?: string
 }
 
-export function CheckoutView() {
+type CheckoutViewProps = {
+  brandName: string
+  brandLogo: string
+  brandSlug: string
+}
+
+export function CheckoutView({
+  brandName,
+  brandLogo,
+  brandSlug,
+}: CheckoutViewProps) {
   const router = useRouter()
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const openCart = useCartStore((s) => s.openCart)
@@ -174,6 +219,7 @@ export function CheckoutView() {
     "asap",
   )
   const [scheduledTime, setScheduledTime] = useState<string>("")
+  const [showCustomTimeSelect, setShowCustomTimeSelect] = useState(false)
   const [promoInput, setPromoInput] = useState("")
   const [comment, setComment] = useState("")
   const [payment, setPayment] = useState<"cash" | "card">("cash")
@@ -189,6 +235,7 @@ export function CheckoutView() {
   const phoneRepeatRef = useRef<HTMLInputElement>(null)
   const addressRef = useRef<HTMLDivElement>(null)
 
+  const quickTimeSlots = useMemo(() => buildQuickDeliveryTimeSlots(), [])
   const timeSlots = useMemo(() => buildDeliveryTimeSlots(), [])
 
   useEffect(() => {
@@ -216,24 +263,26 @@ export function CheckoutView() {
   useEffect(() => {
     if (
       deliveryTimeMode === "scheduled" &&
-      timeSlots.length > 0 &&
+      (quickTimeSlots.length > 0 || timeSlots.length > 0) &&
       !scheduledTime
     ) {
-      setScheduledTime(timeSlots[0] ?? "")
+      setScheduledTime(quickTimeSlots[0] ?? timeSlots[0] ?? "")
     }
-  }, [deliveryTimeMode, timeSlots, scheduledTime])
+  }, [deliveryTimeMode, quickTimeSlots, timeSlots, scheduledTime])
+
+  const showTimeSelect = showCustomTimeSelect || quickTimeSlots.length === 0
 
   const deliveryFeeBani = getDeliveryFeeBani(subtotal)
   const grandTotal = getCartGrandTotalBani()
 
   const hasResolvedAddress = Boolean(resolvedAddress?.trim())
   const deliveryAddressCardBg = !hasResolvedAddress
-    ? "bg-[#f2f2f2]"
+    ? "storefront-checkout-address-empty"
     : selectedZone
-      ? "bg-[#ECFFA1]"
+      ? "storefront-checkout-address-ok"
       : outOfZone
-        ? "bg-[#FFE1D4]"
-        : "bg-[#f2f2f2]"
+        ? "storefront-checkout-address-bad"
+        : "storefront-checkout-address-empty"
 
   const validate = useCallback((): FieldErrors => {
     const next: FieldErrors = {}
@@ -351,45 +400,70 @@ export function CheckoutView() {
   return (
     <div className="flex min-h-screen flex-col pb-[calc(88px+env(safe-area-inset-bottom))] md:pb-0">
       {/* Top bar */}
-      <div className="border-b border-transparent pt-4 md:pt-6">
+      <div
+        className={cn(
+          "border-b border-transparent pt-4 md:pt-6",
+          brandSlug === "the-spot" && "h-[128px] md:h-auto",
+        )}
+      >
         <ClientContainer>
           <div className="flex w-full items-center gap-3 md:justify-between md:gap-6">
-            <div className="flex min-w-0 items-center gap-3 md:gap-6">
+            <div
+              className={cn(
+                "flex min-w-0 items-center gap-3 md:gap-6",
+                brandSlug === "the-spot" &&
+                  "fixed left-5 top-[max(1rem,env(safe-area-inset-top))] z-50 rounded-full bg-[var(--color-bg)] p-2 pr-5 shadow-sm ring-1 ring-black/5 md:static md:rounded-none md:bg-transparent md:p-0 md:pr-0 md:shadow-none md:ring-0",
+              )}
+            >
               <button
                 type="button"
                 onClick={handleBackNav}
                 className={cn(
-                "flex size-11 shrink-0 items-center justify-center rounded-full bg-[#f2f2f2] text-[#242424]",
-                checkoutIconCircle,
-              )}
+                  "storefront-modal-surface flex size-11 shrink-0 items-center justify-center rounded-full text-[#242424]",
+                  checkoutIconCircle,
+                )}
                 aria-label="Назад в корзину"
               >
                 <ChevronLeft className="size-6" strokeWidth={2} />
               </button>
 
               {/* Мобилка: логотип рядом с «Назад» (без степпера) */}
-              <div className="flex shrink-0 items-center md:hidden">
+              <Link
+                href="/"
+                className="flex shrink-0 items-center md:hidden"
+                aria-label={`${brandName} — на главную`}
+              >
                 <Image
-                  src="/kitch-pizza-logo.svg"
-                  alt="Kitch Pizza"
-                  width={220}
-                  height={84}
-                  className="h-[55px] w-auto max-w-[min(200px,52vw)] object-contain object-left"
+                  src={brandLogo}
+                  alt={brandName}
+                  width={brandSlug === "the-spot" ? 80 : 220}
+                  height={brandSlug === "the-spot" ? 47 : 84}
+                  className={cn(
+                    "w-auto max-w-[min(200px,52vw)] object-contain object-left",
+                    brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+                  )}
                   unoptimized
                 />
-              </div>
+              </Link>
 
               {/* md+: логотип слева */}
-              <div className="hidden shrink-0 md:block">
+              <Link
+                href="/"
+                className="hidden shrink-0 md:block"
+                aria-label={`${brandName} — на главную`}
+              >
                 <Image
-                  src="/kitch-pizza-logo.svg"
-                  alt="Kitch Pizza"
-                  width={220}
-                  height={84}
-                  className="h-[55px] w-auto object-contain object-left"
+                  src={brandLogo}
+                  alt={brandName}
+                  width={brandSlug === "the-spot" ? 80 : 220}
+                  height={brandSlug === "the-spot" ? 47 : 84}
+                  className={cn(
+                    "w-auto object-contain object-left",
+                    brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+                  )}
                   unoptimized
                 />
-              </div>
+              </Link>
             </div>
 
             {/* md+: прогресс компактный, справа */}
@@ -403,7 +477,7 @@ export function CheckoutView() {
       <ClientContainer className="flex-1 py-6 md:py-10">
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:gap-8 lg:gap-12">
           {/* Left column */}
-          <div className="flex w-full max-w-full flex-col md:w-[680px] md:max-w-[680px]">
+          <div className="storefront-checkout-form-panel flex w-full max-w-full flex-col md:w-[680px] md:max-w-[680px]">
             <h1 className="hidden text-[32px] font-bold leading-tight text-[#242424] md:block">
               Заказ на доставку
             </h1>
@@ -543,7 +617,7 @@ export function CheckoutView() {
                       </button>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between gap-3 rounded-[12px] bg-[#f2f2f2] p-[16px]">
+                    <div className="storefront-checkout-address-empty flex items-center justify-between gap-3 rounded-[12px] p-[16px]">
                       <p className="min-w-0 flex-1 text-[16px] text-[#808080]">
                         Адрес не указан
                       </p>
@@ -561,7 +635,7 @@ export function CheckoutView() {
                     </div>
                   )
                 ) : (
-                  <div className="rounded-[12px] bg-[#f2f2f2] p-[16px]">
+                  <div className="storefront-checkout-address-empty rounded-[12px] p-[16px]">
                     <p className="text-[16px] font-bold text-[#242424]">
                       bd. Dacia 27
                     </p>
@@ -590,12 +664,15 @@ export function CheckoutView() {
                 <div className="flex w-full gap-3">
                   <button
                     type="button"
-                    onClick={() => setDeliveryTimeMode("asap")}
+                    onClick={() => {
+                      setDeliveryTimeMode("asap")
+                      setShowCustomTimeSelect(false)
+                    }}
                     className={cn(
                       "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                       deliveryTimeMode === "asap"
-                        ? cn("bg-[#ccff00] text-[#242424]", checkoutLimeToggleOn)
-                        : cn("bg-[#f2f2f2] text-[#242424]", checkoutGrayToggle),
+                        ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
+                        : cn("storefront-modal-field text-[#242424]", checkoutGrayToggle),
                     )}
                   >
                     <Zap className="size-[14px] shrink-0" strokeWidth={2} />
@@ -605,12 +682,18 @@ export function CheckoutView() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDeliveryTimeMode("scheduled")}
+                    onClick={() => {
+                      setDeliveryTimeMode("scheduled")
+                      setShowCustomTimeSelect(false)
+                      setScheduledTime((current) =>
+                        current || quickTimeSlots[0] || timeSlots[0] || "",
+                      )
+                    }}
                     className={cn(
                       "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                       deliveryTimeMode === "scheduled"
-                        ? cn("bg-[#ccff00] text-[#242424]", checkoutLimeToggleOn)
-                        : cn("bg-[#f2f2f2] text-[#242424]", checkoutGrayToggle),
+                        ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
+                        : cn("storefront-modal-field text-[#242424]", checkoutGrayToggle),
                     )}
                   >
                     <Clock className="size-[14px] shrink-0" strokeWidth={2} />
@@ -620,22 +703,82 @@ export function CheckoutView() {
                   </button>
                 </div>
                 {deliveryTimeMode === "scheduled" ? (
-                  <div className="mt-4 w-full">
-                    <Select
-                      value={scheduledTime}
-                      onValueChange={setScheduledTime}
-                    >
-                      <SelectTrigger className="h-[50px] w-full rounded-[12px] border-0 bg-[#f2f2f2] px-[16px] font-medium text-[16px] text-[#242424] transition-all duration-200 hover:bg-[#e8e8e8] focus:ring-2 focus:ring-[#ccff00]">
-                        <SelectValue placeholder="Время доставки" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {timeSlots.map((slot) => (
-                          <SelectItem key={slot} value={slot}>
-                            {slot}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="mt-4 flex w-full flex-col gap-3">
+                    {quickTimeSlots.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {quickTimeSlots.map((slot) => {
+                          const isSelected =
+                            scheduledTime === slot && !showCustomTimeSelect
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => {
+                                setScheduledTime(slot)
+                                setShowCustomTimeSelect(false)
+                              }}
+                              className={cn(
+                                "min-h-[44px] rounded-[12px] px-3 text-[15px] font-bold tabular-nums",
+                                isSelected
+                                  ? cn(
+                                      "storefront-checkout-toggle-active",
+                                      checkoutActiveToggle,
+                                    )
+                                  : cn(
+                                      "storefront-modal-field text-[#242424]",
+                                      checkoutGrayToggle,
+                                    ),
+                              )}
+                            >
+                              {slot}
+                            </button>
+                          )
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCustomTimeSelect(true)
+                            setScheduledTime((current) =>
+                              timeSlots.includes(current)
+                                ? current
+                                : timeSlots[0] || current,
+                            )
+                          }}
+                          className={cn(
+                            "min-h-[44px] rounded-[12px] px-3 text-[15px] font-bold",
+                            showCustomTimeSelect
+                              ? cn(
+                                  "storefront-checkout-toggle-active",
+                                  checkoutActiveToggle,
+                                )
+                              : cn(
+                                  "storefront-modal-field text-[#242424]",
+                                  checkoutGrayToggle,
+                                ),
+                          )}
+                        >
+                          Указать время
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {showTimeSelect ? (
+                      <Select
+                        value={scheduledTime}
+                        onValueChange={setScheduledTime}
+                      >
+                        <SelectTrigger className="storefront-modal-field h-[50px] w-full rounded-[12px] border-0 px-[16px] font-medium text-[16px] text-[#242424] transition-all duration-200 hover:bg-[#e8e8e8] focus:ring-2 focus:ring-[var(--color-accent)]">
+                          <SelectValue placeholder="Время доставки" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {timeSlots.map((slot) => (
+                            <SelectItem key={slot} value={slot}>
+                              {slot}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -646,9 +789,9 @@ export function CheckoutView() {
               <span className={checkoutLabelTop}>Промокод</span>
               <div className="min-w-0 flex-1">
                 {appliedPromo ? (
-                  <div className="flex items-center gap-2 rounded-[12px] bg-[#f2f2f2] px-3 py-3">
+                  <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
                     <Check
-                      className="size-5 shrink-0 text-[#5F7600]"
+                      className="storefront-modal-accent size-5 shrink-0"
                       strokeWidth={2.5}
                       aria-hidden
                     />
@@ -684,7 +827,7 @@ export function CheckoutView() {
                         disabled={promoLoading}
                         onChange={(e) => setPromoInput(e.target.value)}
                         onKeyDown={handlePromoKeyDown}
-                        className="min-w-0 flex-1 rounded-[12px] bg-[#f2f2f2] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
+                        className="storefront-modal-field min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
                         aria-label="Промокод"
                         autoComplete="off"
                       />
@@ -756,8 +899,8 @@ export function CheckoutView() {
                       className={cn(
                         "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                         payment === "cash"
-                          ? cn("bg-[#ccff00] text-[#242424]", checkoutLimeToggleOn)
-                          : cn("bg-[#f2f2f2] text-[#242424]", checkoutGrayToggle),
+                          ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
+                          : cn("storefront-modal-field text-[#242424]", checkoutGrayToggle),
                       )}
                     >
                       <Banknote className="size-[14px] shrink-0" strokeWidth={2} />
@@ -769,8 +912,8 @@ export function CheckoutView() {
                       className={cn(
                         "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                         payment === "card"
-                          ? cn("bg-[#ccff00] text-[#242424]", checkoutLimeToggleOn)
-                          : cn("bg-[#f2f2f2] text-[#242424]", checkoutGrayToggle),
+                          ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
+                          : cn("storefront-modal-field text-[#242424]", checkoutGrayToggle),
                       )}
                     >
                       <CreditCard className="size-[14px] shrink-0" strokeWidth={2} />
@@ -790,7 +933,7 @@ export function CheckoutView() {
                           inputMode="numeric"
                           value={changeFrom}
                           onChange={(e) => setChangeFrom(e.target.value)}
-                          className="w-[120px] rounded-[12px] bg-[#f2f2f2] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] outline-none focus:ring-2 focus:ring-[#ccff00]"
+                          className="storefront-modal-field w-[120px] rounded-[12px] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
                           placeholder="0"
                         />
                         <span className="text-[16px] font-medium text-[#242424]">
@@ -840,8 +983,8 @@ export function CheckoutView() {
             onClick={() => void handleSubmit()}
             disabled={orderSubmitting}
             className={cn(
-              "flex h-[54px] w-full items-center justify-center gap-2 rounded-full bg-[#ccff00] text-[20px] font-bold text-[#242424] disabled:opacity-60",
-              checkoutLimeCta,
+              "storefront-modal-cta flex h-[54px] w-full items-center justify-center gap-2 rounded-full text-[20px] font-bold disabled:opacity-60",
+              checkoutCtaMotion,
             )}
           >
             {orderSubmitting ? (
@@ -857,14 +1000,17 @@ export function CheckoutView() {
       </div>
 
       {/* Desktop footer */}
-      <footer className="mt-auto hidden h-[120px] rounded-t-[48px] bg-[#f2f2f2] md:block">
+      <footer className="storefront-modal-field mt-auto hidden h-[120px] rounded-t-[48px] md:block">
         <ClientContainer className="flex h-full items-center justify-between">
           <Image
-            src="/kitch-pizza-logo.svg"
+            src={brandLogo}
             alt=""
-            width={220}
-            height={84}
-            className="h-[55px] w-auto object-contain object-left"
+            width={brandSlug === "the-spot" ? 80 : 220}
+            height={brandSlug === "the-spot" ? 47 : 84}
+            className={cn(
+              "w-auto object-contain object-left",
+              brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+            )}
             unoptimized
           />
           <a

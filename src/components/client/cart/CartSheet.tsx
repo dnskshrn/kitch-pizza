@@ -15,7 +15,7 @@ export function CartSheet({ isOpen, onClose, title, children }: CartSheetProps) 
     <Drawer.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-40 bg-black/50" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[92dvh] flex-col rounded-t-[24px] bg-[#f2f2f2] outline-none">
+        <Drawer.Content className="storefront-modal-bg fixed bottom-0 left-0 right-0 z-50 flex max-h-[92dvh] flex-col rounded-t-[24px] outline-none">
           <Drawer.Title className="sr-only">{title}</Drawer.Title>
           <div
             className="mx-auto mb-0 mt-3 h-1 w-10 shrink-0 rounded-full bg-[#ccc]"

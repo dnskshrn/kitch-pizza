@@ -6,6 +6,7 @@ import {
   ordersCreatedAtBounds,
   type OrdersUrlState,
 } from "@/lib/admin/orders-url"
+import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { OrderWithItems } from "@/types/database"
 
@@ -16,6 +17,7 @@ import type { OrderWithItems } from "@/types/database"
 export async function getOrders(
   filters: OrdersUrlState,
 ): Promise<{ orders: OrderWithItems[]; total: number }> {
+  const brandId = await getAdminBrandId()
   const supabase = createServiceRoleClient()
   const bounds = ordersCreatedAtBounds(filters)
   const from = (filters.page - 1) * ORDERS_PAGE_SIZE
@@ -24,6 +26,7 @@ export async function getOrders(
   let q = supabase
     .from("orders")
     .select("*, order_items(*)", { count: "exact" })
+    .eq("brand_id", brandId)
     .order("created_at", { ascending: false })
 
   if (filters.status) {

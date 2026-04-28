@@ -1,5 +1,6 @@
 import { ClientChrome } from "@/components/client/client-chrome"
 import { getStorefrontCategories } from "@/lib/data/storefront-categories"
+import { headers } from "next/headers"
 import { Inter_Tight } from "next/font/google"
 
 const interTight = Inter_Tight({
@@ -15,12 +16,16 @@ export default async function ClientLayout({
   children: React.ReactNode
 }) {
   const categories = await getStorefrontCategories()
+  const brandSlug = (await headers()).get("x-brand-slug") ?? "kitch-pizza"
 
   return (
     <div
-      className={`${interTight.className} flex min-h-screen flex-col bg-white text-foreground`}
+      data-brand={brandSlug}
+      className={`${interTight.className} flex min-h-screen flex-col bg-[var(--color-bg)] text-foreground`}
     >
-      <ClientChrome categories={categories}>{children}</ClientChrome>
+      <ClientChrome brandSlug={brandSlug} categories={categories}>
+        {children}
+      </ClientChrome>
     </div>
   )
 }

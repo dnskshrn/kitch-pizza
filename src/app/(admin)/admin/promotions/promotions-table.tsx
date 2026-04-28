@@ -21,7 +21,7 @@ function PromoThumb({ url }: { url: string | null }) {
   return (
     <div
       className="relative w-[120px] overflow-hidden rounded-md bg-transparent"
-      style={{ aspectRatio: "4 / 3" }}
+      style={{ aspectRatio: "16 / 9" }}
     >
       {url ? (
         <Image

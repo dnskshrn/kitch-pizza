@@ -135,7 +135,7 @@ export function PromotionDialog({
               <Label>Фото (RU)</Label>
               <div
                 className="relative w-full max-w-full overflow-hidden rounded-md bg-transparent"
-                style={{ aspectRatio: "4 / 3" }}
+                style={{ aspectRatio: "16 / 9" }}
               >
                 {imageUrlRu ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -172,7 +172,7 @@ export function PromotionDialog({
               <Label>Фото (RO)</Label>
               <div
                 className="relative w-full max-w-full overflow-hidden rounded-md bg-transparent"
-                style={{ aspectRatio: "4 / 3" }}
+                style={{ aspectRatio: "16 / 9" }}
               >
                 {imageUrlRo ? (
                   // eslint-disable-next-line @next/next/no-img-element

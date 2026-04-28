@@ -1,0 +1,83 @@
+export type BrandConfig = {
+  slug: string
+  name: string
+  domain: string // production domain
+  devDomain?: string // e.g. 'localhost:3000'
+  logo: string // path in /public
+  phone: string
+  hours: string
+  cartKey: string // localStorage key for cart
+  deliveryKey: string // localStorage key for delivery
+  colors: {
+    accent: string
+    accentBg: string
+    cartPill: string
+    activeDot: string
+  }
+}
+
+export const brands: BrandConfig[] = [
+  {
+    slug: 'kitch-pizza',
+    name: 'Kitch! Pizza',
+    domain: 'kitch-pizza.md',
+    devDomain: 'localhost:3000',
+    logo: '/kitch-pizza-logo.svg',
+    phone: '079 700 290',
+    hours: '11:00 – 23:00',
+    cartKey: 'kitch-pizza-cart',
+    deliveryKey: 'kitch-pizza-delivery',
+    colors: {
+      accent: '#5F7600',
+      accentBg: '#ECFFA1',
+      cartPill: '#ccff00',
+      activeDot: '#8DC63F',
+    },
+  },
+  {
+    slug: 'losos',
+    name: 'LOSOS',
+    domain: 'losos.md',
+    devDomain: 'www.losos.md',
+    logo: '/kitch-pizza-logo.svg', // TODO
+    phone: '079 700 290', // TODO
+    hours: '11:00 – 23:00', // TODO
+    cartKey: 'kitch-pizza-cart', // TODO
+    deliveryKey: 'kitch-pizza-delivery', // TODO
+    colors: {
+      accent: '#5F7600', // TODO
+      accentBg: '#ECFFA1', // TODO
+      cartPill: '#ccff00', // TODO
+      activeDot: '#8DC63F', // TODO
+    },
+  },
+  {
+    slug: 'the-spot',
+    name: 'The Spot',
+    domain: 'thespot.md',
+    devDomain: 'www.thespot.md',
+    logo: '/the-spot-logo.svg',
+    phone: '079 700 290', // TODO
+    hours: '11:00 – 23:00', // TODO
+    cartKey: 'kitch-pizza-cart', // TODO
+    deliveryKey: 'kitch-pizza-delivery', // TODO
+    colors: {
+      accent: '#f25130',
+      accentBg: '#ffebe7',
+      cartPill: '#f25130',
+      activeDot: '#f25130',
+    },
+  },
+]
+
+export function getBrandByHost(host: string): BrandConfig {
+  const hostname = host.split(":")[0] ?? host
+  const brand = brands.find(
+    (b) => b.domain === hostname || b.devDomain === hostname
+  )
+  return brand ?? brands[0] // fallback to first brand
+}
+
+export function getBrandBySlug(slug: string): BrandConfig {
+  return brands.find((b) => b.slug === slug) ?? brands[0]
+}

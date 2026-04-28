@@ -1,6 +1,5 @@
 "use client"
 
-import { BRAND_ACCENT } from "@/lib/client-brand"
 import { getCartItemPrice, getCartItemSummary } from "@/lib/cart-helpers"
 import type { CartLang } from "@/lib/cart-helpers"
 import type { CartItem } from "@/types/cart"
@@ -33,7 +32,7 @@ export function CartItemCard({
   })
 
   return (
-    <div className="flex flex-col rounded-[16px] bg-white p-3">
+    <div className="storefront-modal-surface storefront-modal-card-radius flex flex-col rounded-[16px] p-3">
       <div className="flex gap-3">
         <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-[12px]">
           {cartItem.menuItem.image_url ? (
@@ -78,12 +77,11 @@ export function CartItemCard({
         <button
           type="button"
           onClick={onEdit}
-          className="text-[15px] font-medium transition-opacity hover:opacity-80"
-          style={{ color: BRAND_ACCENT }}
+          className="storefront-modal-accent text-[15px] font-medium transition-opacity hover:opacity-80"
         >
           Изменить
         </button>
-        <div className="inline-flex shrink-0 items-center gap-0 rounded-full bg-[#f2f2f2] p-0.5">
+        <div className="storefront-modal-field inline-flex shrink-0 items-center gap-0 rounded-full p-0.5">
           <button
             type="button"
             onClick={() => onQuantityChange(-1)}

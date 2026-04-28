@@ -1,6 +1,7 @@
 "use server"
 
 import { getCartItemPrice, type CartLang } from "@/lib/cart-helpers"
+import { getBrandId } from "@/lib/get-brand-id"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { CartItem } from "@/types/cart"
 
@@ -50,8 +51,10 @@ function sizeForOrderItem(cartItem: CartItem): "s" | "l" | null {
   return null
 }
 
-export async function createOrder(
+/** Витрина: `resolveBrandId` = getBrandId; админ/POS: getAdminBrandId. */
+export async function executeCreateOrder(
   payload: CreateOrderPayload,
+  resolveBrandId: () => Promise<string>,
 ): Promise<CreateOrderResult> {
   const phone = payload.userPhone.trim()
   const name = payload.userName.trim()
@@ -71,13 +74,16 @@ export async function createOrder(
       : (payload.scheduledTimeSlot?.trim() ?? null)
 
   let supabase
+  let brandId: string
   try {
+    brandId = await resolveBrandId()
     supabase = createServiceRoleClient()
   } catch {
     return { success: false, error: "Сервер временно недоступен" }
   }
 
   const insertRow = {
+    brand_id: brandId,
     user_name: name,
     user_phone: phone,
     status: "new" as const,
@@ -128,9 +134,19 @@ export async function createOrder(
 
   if (itemsError) {
     console.error("[createOrder] order_items insert", itemsError.message)
-    await supabase.from("orders").delete().eq("id", orderId)
+    await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId)
+      .eq("brand_id", brandId)
     return { success: false, error: "Не удалось сохранить состав заказа" }
   }
 
   return { success: true, orderNumber }
+}
+
+export async function createOrder(
+  payload: CreateOrderPayload,
+): Promise<CreateOrderResult> {
+  return executeCreateOrder(payload, getBrandId)
 }

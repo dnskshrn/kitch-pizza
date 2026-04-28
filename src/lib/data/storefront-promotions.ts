@@ -1,12 +1,15 @@
+import { getBrandId } from "@/lib/get-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { StorefrontPromotion } from "@/types/database"
 
 /** Акции для витрины: только активные, по sort_order. */
 export async function getStorefrontPromotions(): Promise<StorefrontPromotion[]> {
+  const brandId = await getBrandId()
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("promotions")
     .select("id, image_url_ru, image_url_ro")
+    .eq("brand_id", brandId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
 

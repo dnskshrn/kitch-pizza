@@ -1,5 +1,6 @@
 "use server"
 
+import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
@@ -16,8 +17,10 @@ export type PromoCodeFormInput = {
 }
 
 export async function createPromoCode(data: PromoCodeFormInput) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase.from("promo_codes").insert({
+    brand_id: brandId,
     code: data.code,
     discount_type: data.discount_type,
     discount_value: data.discount_value,
@@ -33,6 +36,7 @@ export async function createPromoCode(data: PromoCodeFormInput) {
 }
 
 export async function updatePromoCode(id: string, data: PromoCodeFormInput) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase
     .from("promo_codes")
@@ -48,13 +52,19 @@ export async function updatePromoCode(id: string, data: PromoCodeFormInput) {
       description: data.description,
     })
     .eq("id", id)
+    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/promo-codes")
 }
 
 export async function deletePromoCode(id: string) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await supabase.from("promo_codes").delete().eq("id", id)
+  const { error } = await supabase
+    .from("promo_codes")
+    .delete()
+    .eq("id", id)
+    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/promo-codes")
 }

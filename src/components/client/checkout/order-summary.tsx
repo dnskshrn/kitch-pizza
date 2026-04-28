@@ -13,7 +13,7 @@ import Image from "next/image"
 import { useMemo } from "react"
 
 const btnMotion = "cursor-pointer transition-all duration-200 ease-out"
-const checkoutLimeCta = `${btnMotion} hover:bg-[#b8f000] active:scale-[0.97]`
+const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
 
 /** Склонение «N товар(ов)» для RU. */
 function ruGoodsPhrase(n: number): string {
@@ -73,9 +73,9 @@ export function OrderSummary({
   const showCheckoutCta = typeof onCheckout === "function"
 
   return (
-    <div className="rounded-[24px] bg-white p-[36px] shadow-[10px_10px_50px_0px_rgba(52,52,52,0.1)]">
+    <div className="storefront-checkout-card storefront-modal-card-radius rounded-[24px] p-6 md:p-7">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-2">
-        <h2 className="text-[24px] font-bold text-[#242424]">
+        <h2 className="text-[20px] font-bold text-[#242424]">
           Содержимое заказа
         </h2>
         <span className="inline-flex items-center gap-1 text-[12px] font-bold text-[#808080]">
@@ -147,7 +147,7 @@ export function OrderSummary({
         {discount > 0 ? (
           <div className="flex items-center justify-between text-[14px] font-medium">
             <span className="text-[rgba(36,36,36,0.5)]">Скидка</span>
-            <span className="tabular-nums text-[#5F7600]">
+            <span className="storefront-modal-accent tabular-nums">
               −{formatLei(discount)} лей
             </span>
           </div>
@@ -168,8 +168,8 @@ export function OrderSummary({
             onClick={() => void onCheckout?.()}
             disabled={checkoutSubmitting}
             className={cn(
-              "flex h-[54px] w-full items-center justify-center gap-2 rounded-full bg-[#ccff00] text-[20px] font-bold text-[#242424] disabled:opacity-60",
-              checkoutLimeCta,
+              "storefront-modal-cta flex h-12 w-full items-center justify-center gap-2 rounded-full text-[16px] font-bold disabled:opacity-60",
+              checkoutCtaMotion,
             )}
           >
             {checkoutSubmitting ? (

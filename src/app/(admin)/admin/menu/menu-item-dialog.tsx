@@ -476,7 +476,7 @@ function parseGrams(s: string): number | null | "invalid" {
               <img
                 src={imageUrl}
                 alt=""
-                className="mb-2 max-h-40 w-full rounded-md object-cover"
+                className="mb-2 aspect-square w-full max-w-[200px] rounded-md object-cover"
               />
             ) : null}
             <input

@@ -1,5 +1,6 @@
 "use server"
 
+import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
@@ -19,9 +20,11 @@ export async function createCategory(data: {
   sort_order: number
   is_active: boolean
 }) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const slug = (data.slug || toSlug(data.name_ru)).trim() || "category"
   const { error } = await supabase.from("menu_categories").insert({
+    brand_id: brandId,
     name_ru: data.name_ru,
     name_ro: data.name_ro,
     sort_order: data.sort_order,
@@ -42,6 +45,7 @@ export async function updateCategory(
     is_active: boolean
   }
 ) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase
     .from("menu_categories")
@@ -53,13 +57,19 @@ export async function updateCategory(
       is_active: data.is_active,
     })
     .eq("id", id)
+    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/categories")
 }
 
 export async function deleteCategory(id: string) {
+  const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await supabase.from("menu_categories").delete().eq("id", id)
+  const { error } = await supabase
+    .from("menu_categories")
+    .delete()
+    .eq("id", id)
+    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/categories")
 }

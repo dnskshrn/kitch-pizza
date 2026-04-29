@@ -4,10 +4,26 @@ import { brands } from "@/brands/index"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { PosHeaderIconButton } from "@/components/pos/pos-header-icon-button"
-import { Separator } from "@/components/ui/separator"
+import {
+  removeOrderItemPos,
+  updateOrderItemQuantityPos,
+} from "@/lib/actions/pos/update-order-items"
 import { createClient } from "@/lib/supabase/client"
-import type { PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
-import { Phone, XIcon } from "lucide-react"
+import type { PosOrderSource, PosOrderStatus } from "@/types/pos"
+import {
+  CalendarDays,
+  CreditCard,
+  Minus,
+  Phone,
+  Plus,
+  ReceiptText,
+  Trash2,
+  Truck,
+  User,
+  Wallet,
+  XIcon,
+} from "lucide-react"
+import Image from "next/image"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 function accentForBrandSlug(slug: string): string {
@@ -96,14 +112,21 @@ function parseSource(v: unknown): PosOrderSource {
 
 type BrandsEmbed = { slug: string } | { slug: string }[] | null
 
-type MenuItemEmbed = { name_ru: string } | null
+type MenuItemEmbed = { name_ru: string; image_url: string | null } | null
+
+type OrderItemTopping = {
+  name?: string
+  price?: number
+}
 
 type OrderItemRow = {
   id: string
   item_name: string
+  menu_item_id: string | null
   size: string | null
   quantity: number
   price: number
+  toppings: OrderItemTopping[] | null
   menu_items: MenuItemEmbed | MenuItemEmbed[]
 }
 
@@ -148,17 +171,106 @@ function changeFromDisplay(bani: number | null): string {
   return formatMdl(bani)
 }
 
+function unitPriceBani(item: OrderItemRow): number {
+  if (item.quantity <= 0) return Math.round(item.price)
+  return Math.round(item.price / item.quantity)
+}
+
+function itemMenuEmbed(item: OrderItemRow): MenuItemEmbed {
+  return Array.isArray(item.menu_items) ? item.menu_items[0] ?? null : item.menu_items
+}
+
+function itemDisplayName(item: OrderItemRow): string {
+  return item.item_name || itemMenuEmbed(item)?.name_ru || "—"
+}
+
+function DetailCard({
+  title,
+  icon,
+  children,
+  className = "",
+}: {
+  title: string
+  icon: React.ReactNode
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <section className={`rounded-xl bg-white p-4 ${className}`}>
+      <div className="mb-4 flex items-center gap-2">
+        <span className="flex size-8 items-center justify-center rounded-full bg-[#f2f2f2] text-[#242424]">
+          {icon}
+        </span>
+        <h3 className="text-[13px] font-bold uppercase tracking-[0.16em] text-[#808080]">
+          {title}
+        </h3>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function InfoRow({
+  label,
+  value,
+  children,
+}: {
+  label: string
+  value?: React.ReactNode
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="grid grid-cols-[112px_minmax(0,1fr)] gap-3 text-[14px] leading-snug">
+      <dt className="text-[#808080]">{label}</dt>
+      <dd className="min-w-0 font-medium text-[#242424]">
+        {children ?? value ?? "—"}
+      </dd>
+    </div>
+  )
+}
+
+function SummaryRow({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string
+  value: string
+  tone?: "default" | "discount" | "total"
+}) {
+  return (
+    <div
+      className={
+        tone === "total"
+          ? "flex items-baseline justify-between gap-4 pt-2 text-[16px] font-bold text-[#242424]"
+          : "flex items-baseline justify-between gap-4 text-[13px] text-[#808080]"
+      }
+    >
+      <dt>{label}</dt>
+      <dd
+        className={
+          tone === "discount"
+            ? "font-mono tabular-nums text-emerald-700"
+            : "font-mono tabular-nums text-[#242424]"
+        }
+      >
+        {value}
+      </dd>
+    </div>
+  )
+}
+
 type OrderDetailProps = {
   orderId: string
   onClose: () => void
-  onEdit: (order: PosOrder) => void
 }
 
-export function OrderDetail({ orderId, onClose, onEdit }: OrderDetailProps) {
+export function OrderDetail({ orderId, onClose }: OrderDetailProps) {
   const [order, setOrder] = useState<OrderDetailRow | null>(null)
   const [operatorName, setOperatorName] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
+  const [itemBusyId, setItemBusyId] = useState<string | null>(null)
 
   const accent = useMemo(
     () => accentForBrandSlug(order ? brandSlugFromRow(order) : ""),
@@ -172,7 +284,7 @@ export function OrderDetail({ orderId, onClose, onEdit }: OrderDetailProps) {
     const supabase = createClient()
     const { data, error } = await supabase
       .from("orders")
-      .select("*, brands(slug), order_items(*, menu_items(name_ru))")
+      .select("*, brands(slug), order_items(*, menu_items(name_ru, image_url))")
       .eq("id", orderId)
       .maybeSingle()
 
@@ -250,7 +362,52 @@ export function OrderDetail({ orderId, onClose, onEdit }: OrderDetailProps) {
     setStatusBusy(false)
   }
 
-  void onEdit
+  const handleQuantityChange = async (item: OrderItemRow, delta: number) => {
+    if (!order || itemBusyId) return
+    const nextQuantity = item.quantity + delta
+    if (nextQuantity < 1) return
+
+    setItemBusyId(item.id)
+    try {
+      const result = await updateOrderItemQuantityPos({
+        orderId: order.id,
+        itemId: item.id,
+        quantity: nextQuantity,
+      })
+      if (!result.success) throw new Error(result.error)
+      await loadOrder()
+    } catch (error) {
+      console.error(
+        "[order-detail] quantity",
+        error instanceof Error ? error.message : error,
+      )
+    } finally {
+      setItemBusyId(null)
+    }
+  }
+
+  const handleRemoveItem = async (item: OrderItemRow) => {
+    if (!order || itemBusyId) return
+    const items = order.order_items ?? []
+    if (items.length <= 1) return
+
+    setItemBusyId(item.id)
+    try {
+      const result = await removeOrderItemPos({
+        orderId: order.id,
+        itemId: item.id,
+      })
+      if (!result.success) throw new Error(result.error)
+      await loadOrder()
+    } catch (error) {
+      console.error(
+        "[order-detail] remove item",
+        error instanceof Error ? error.message : error,
+      )
+    } finally {
+      setItemBusyId(null)
+    }
+  }
 
   if (loadError && !order) {
     return (
@@ -273,204 +430,206 @@ export function OrderDetail({ orderId, onClose, onEdit }: OrderDetailProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-2">
-          <h2 className="text-lg font-semibold">
-            Заказ #{order.order_number}
-          </h2>
+      <div className="flex shrink-0 items-center justify-between gap-4 px-5 py-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[22px] font-bold leading-none tracking-[-0.03em] text-[#242424]">
+              Заказ #{order.order_number}
+            </h2>
+            <Badge
+              className="max-w-[200px] truncate border-0 text-white"
+              style={{ backgroundColor: accent }}
+              variant="default"
+            >
+              {brandName}
+            </Badge>
+            {statusBadge(order.status)}
+          </div>
+          <p className="mt-2 text-[13px] text-[#808080]">
+            Создан {formatDateTime(order.created_at)}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
           <PosHeaderIconButton onClick={onClose} aria-label="Закрыть">
             <XIcon className="size-5" />
           </PosHeaderIconButton>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
-          <Badge
-            className="max-w-[200px] truncate border-0 text-white"
-            style={{ backgroundColor: accent }}
-            variant="default"
-          >
-            {brandName}
-          </Badge>
-          {statusBadge(order.status)}
-        </div>
-
-        <Separator />
-
-        <section className="space-y-2 px-4 py-3">
-          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            Клиент
-          </h3>
-          <dl className="grid gap-1 text-sm">
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Имя</dt>
-              <dd>{order.user_name?.trim() || "—"}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Телефон</dt>
-              <dd>
-                <a
-                  href={`tel:${order.user_phone.replace(/\s/g, "")}`}
-                  className="text-primary inline-flex items-center gap-1 font-medium hover:underline"
-                >
-                  <Phone className="size-3.5 shrink-0" aria-hidden />
-                  {order.user_phone}
-                </a>
-              </dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">
-                День рождения
-              </dt>
-              <dd>{formatBirthday(order.user_birthday)}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <Separator />
-
-        <section className="space-y-2 px-4 py-3">
-          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            Доставка
-          </h3>
-          <dl className="grid gap-1 text-sm">
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Режим</dt>
-              <dd>
-                {order.delivery_mode === "delivery"
-                  ? "Доставка"
-                  : "Самовывоз"}
-              </dd>
-            </div>
-            {order.delivery_mode === "delivery" ? (
-              <div className="flex gap-2">
-                <dt className="text-muted-foreground w-28 shrink-0">Адрес</dt>
-                <dd className="min-w-0 break-words">
-                  {order.delivery_address?.trim() || "—"}
-                </dd>
-              </div>
-            ) : null}
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Оплата</dt>
-              <dd>{paymentLabel(order.payment_method)}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Сдача с</dt>
-              <dd>{changeFromDisplay(order.change_from)}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <Separator />
-
-        <section className="space-y-2 px-4 py-3">
-          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            Состав заказа
-          </h3>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-muted-foreground">
-                <tr>
-                  <th className="px-2 py-1.5 text-left font-medium">Позиция</th>
-                  <th className="px-2 py-1.5 text-left font-medium">Размер</th>
-                  <th className="px-2 py-1.5 text-right font-medium">Кол-во</th>
-                  <th className="px-2 py-1.5 text-right font-medium">Сумма</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(order.order_items ?? []).map((it) => {
-                  const mi = Array.isArray(it.menu_items)
-                    ? it.menu_items[0]
-                    : it.menu_items
-                  const nm = it.item_name || mi?.name_ru || "—"
-                  return (
-                    <tr key={it.id} className="border-t">
-                      <td className="max-w-[140px] truncate px-2 py-1.5">
-                        {nm}
-                      </td>
-                      <td className="text-muted-foreground px-2 py-1.5">
-                        {it.size?.toUpperCase() ?? "—"}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {it.quantity}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {formatMdl(it.price)}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <Separator />
-
-          <dl className="space-y-1 text-right text-sm">
-            <div className="flex justify-end gap-4">
-              <dt className="text-muted-foreground">Подытог</dt>
-              <dd className="min-w-[5rem] tabular-nums">
-                {formatMdl(subtotalBani)}
-              </dd>
-            </div>
-            <div className="flex justify-end gap-4">
-              <dt className="text-muted-foreground">Доставка</dt>
-              <dd className="min-w-[5rem] tabular-nums">
-                {formatMdl(order.delivery_fee)}
-              </dd>
-            </div>
-            {order.discount > 0 ? (
-              <div className="flex justify-end gap-4">
-                <dt className="text-muted-foreground">Скидка</dt>
-                <dd className="min-w-[5rem] tabular-nums text-emerald-700">
-                  −{formatMdl(order.discount)}
-                </dd>
-              </div>
-            ) : null}
-            <div className="flex justify-end gap-4 font-semibold">
-              <dt>Итого</dt>
-              <dd className="min-w-[5rem] tabular-nums">
-                {formatMdl(order.total)}
-              </dd>
-            </div>
-          </dl>
-        </section>
-
-        <Separator />
-
-        <section className="space-y-2 px-4 py-3 pb-24">
-          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            Служебное
-          </h3>
-          <dl className="grid gap-1 text-sm">
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Источник</dt>
-              <dd>
-                {parseSource(order.source) === "website" ? "Сайт" : "POS"}
-              </dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Оператор</dt>
-              <dd>{operatorName ?? "—"}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Создан</dt>
-              <dd>{formatDateTime(order.created_at)}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Обновлён</dt>
-              <dd>{formatDateTime(order.updated_at)}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground w-28 shrink-0">Комментарий</dt>
-              <dd className="min-w-0 break-words">
-                {order.comment?.trim() || "—"}
-              </dd>
-            </div>
-          </dl>
-        </section>
       </div>
 
-      <div className="bg-background border-border sticky bottom-0 mt-auto shrink-0 space-y-2 border-t p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+        <div className="grid grid-cols-12 gap-4">
+          <div className="col-span-5 flex min-w-0 flex-col gap-4">
+            <DetailCard title="Данные клиента" icon={<User className="size-4" />}>
+              <dl className="grid gap-3">
+                <InfoRow label="Имя" value={order.user_name?.trim() || "—"} />
+                <InfoRow label="Телефон">
+                  <a
+                    href={`tel:${order.user_phone.replace(/\s/g, "")}`}
+                    className="inline-flex min-w-0 items-center gap-2 text-[#242424] hover:underline"
+                  >
+                    <Phone className="size-4 shrink-0 text-[#808080]" aria-hidden />
+                    <span className="truncate">{order.user_phone}</span>
+                  </a>
+                </InfoRow>
+                <InfoRow
+                  label="День рождения"
+                  value={formatBirthday(order.user_birthday)}
+                />
+              </dl>
+            </DetailCard>
+
+            <DetailCard title="Доставка и оплата" icon={<Truck className="size-4" />}>
+              <dl className="grid gap-3">
+                <InfoRow
+                  label="Режим"
+                  value={
+                    order.delivery_mode === "delivery" ? "Доставка" : "Самовывоз"
+                  }
+                />
+                <InfoRow label="Адрес">
+                  <span className="break-words">
+                    {order.delivery_address?.trim() || "—"}
+                  </span>
+                </InfoRow>
+                <InfoRow label="Оплата">
+                  <span className="inline-flex items-center gap-2">
+                    {order.payment_method === "cash" ? (
+                      <Wallet className="size-4 text-[#808080]" aria-hidden />
+                    ) : (
+                      <CreditCard className="size-4 text-[#808080]" aria-hidden />
+                    )}
+                    {paymentLabel(order.payment_method)}
+                  </span>
+                </InfoRow>
+                <InfoRow
+                  label="Сдача с"
+                  value={changeFromDisplay(order.change_from)}
+                />
+              </dl>
+            </DetailCard>
+
+            <DetailCard title="Служебное" icon={<CalendarDays className="size-4" />}>
+              <dl className="grid gap-3">
+                <InfoRow
+                  label="Источник"
+                  value={parseSource(order.source) === "website" ? "Сайт" : "POS"}
+                />
+                <InfoRow label="Оператор" value={operatorName ?? "—"} />
+                <InfoRow label="Обновлён" value={formatDateTime(order.updated_at)} />
+                <InfoRow label="Комментарий">
+                  <span className="break-words">
+                    {order.comment?.trim() || "—"}
+                  </span>
+                </InfoRow>
+              </dl>
+            </DetailCard>
+          </div>
+
+          <DetailCard
+            title="Данные о заказе"
+            icon={<ReceiptText className="size-4" />}
+            className="col-span-7 min-w-0"
+          >
+            <div className="space-y-3">
+              {(order.order_items ?? []).map((item) => {
+                const embed = itemMenuEmbed(item)
+                const imageUrl = embed?.image_url
+                const toppings = item.toppings ?? []
+                const isBusy = itemBusyId === item.id
+                const canRemove = (order.order_items?.length ?? 0) > 1
+
+                return (
+                  <article
+                    key={item.id}
+                    className="flex items-center gap-3 rounded-xl bg-[#f2f2f2] p-3"
+                  >
+                    <div className="relative size-14 shrink-0 overflow-hidden rounded-full bg-white">
+                      {imageUrl ? (
+                        <Image
+                          src={imageUrl}
+                          alt=""
+                          fill
+                          className="object-cover"
+                          sizes="56px"
+                        />
+                      ) : null}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-1 text-[14px] font-bold text-[#242424]">
+                        {itemDisplayName(item)}
+                        {item.size ? ` · ${item.size.toUpperCase()}` : ""}
+                      </p>
+                      {toppings.length > 0 ? (
+                        <p className="mt-1 line-clamp-1 text-[12px] text-[#808080]">
+                          {toppings.map((t) => t.name).filter(Boolean).join(", ")}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 font-mono text-[12px] tabular-nums text-[#808080]">
+                        {formatMdl(unitPriceBani(item))} / шт.
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2 rounded-full bg-white p-1">
+                      <button
+                        type="button"
+                        aria-label="Уменьшить количество"
+                        disabled={isBusy || item.quantity <= 1}
+                        onClick={() => void handleQuantityChange(item, -1)}
+                        className="flex size-7 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Minus className="size-3.5" />
+                      </button>
+                      <span className="w-5 text-center font-mono text-[13px] font-bold tabular-nums text-[#242424]">
+                        {item.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Увеличить количество"
+                        disabled={isBusy}
+                        onClick={() => void handleQuantityChange(item, 1)}
+                        className="flex size-7 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Plus className="size-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="w-[92px] shrink-0 text-right font-mono text-[13px] font-bold tabular-nums text-[#242424]">
+                      {formatMdl(item.price)}
+                    </div>
+
+                    <button
+                      type="button"
+                      aria-label="Удалить позицию"
+                      disabled={isBusy || !canRemove}
+                      onClick={() => void handleRemoveItem(item)}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-full text-[#808080] transition-colors hover:bg-white hover:text-[#242424] disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </article>
+                )
+              })}
+            </div>
+
+            <dl className="mt-4 rounded-xl bg-[#f2f2f2] p-4">
+              <SummaryRow label="Подытог" value={formatMdl(subtotalBani)} />
+              <SummaryRow label="Доставка" value={formatMdl(order.delivery_fee)} />
+              {order.discount > 0 ? (
+                <SummaryRow
+                  label={order.promo_code ? `Скидка · ${order.promo_code}` : "Скидка"}
+                  value={`−${formatMdl(order.discount)}`}
+                  tone="discount"
+                />
+              ) : null}
+              <SummaryRow label="Итого" value={formatMdl(order.total)} tone="total" />
+            </dl>
+          </DetailCard>
+        </div>
+      </div>
+
+      <div className="mt-auto shrink-0 space-y-2 border-t border-[#e8e8e8] bg-white p-3">
         {order.status === "done" || order.status === "cancelled" ? (
           <p className="text-muted-foreground text-center text-sm">
             {order.status === "done"

@@ -52,6 +52,22 @@ function readLang(): CartLang {
   return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
 }
 
+function hasBoutiqueCheckout(brandSlug: string): boolean {
+  return brandSlug === "the-spot" || brandSlug === "losos"
+}
+
+function getCheckoutLogoSize(brandSlug: string) {
+  if (brandSlug === "the-spot") {
+    return { width: 80, height: 47, className: "h-[42px]" }
+  }
+
+  if (brandSlug === "losos") {
+    return { width: 176, height: 56, className: "h-[42px]" }
+  }
+
+  return { width: 220, height: 84, className: "h-[55px]" }
+}
+
 /** Значение из модалки доставки; пусто → «-». */
 function deliveryDetailOrDash(value: string): string {
   const t = value.trim()
@@ -185,6 +201,8 @@ export function CheckoutView({
   brandSlug,
 }: CheckoutViewProps) {
   const router = useRouter()
+  const hasBoutiqueLayout = hasBoutiqueCheckout(brandSlug)
+  const checkoutLogoSize = getCheckoutLogoSize(brandSlug)
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const openCart = useCartStore((s) => s.openCart)
 
@@ -403,7 +421,7 @@ export function CheckoutView({
       <div
         className={cn(
           "border-b border-transparent pt-4 md:pt-6",
-          brandSlug === "the-spot" && "h-[104px] md:h-auto",
+          hasBoutiqueLayout && "h-[104px] md:h-auto",
         )}
       >
         <ClientContainer>
@@ -411,7 +429,7 @@ export function CheckoutView({
             <div
               className={cn(
                 "flex min-w-0 items-center gap-3 md:gap-6",
-                brandSlug === "the-spot" &&
+                hasBoutiqueLayout &&
                   "fixed left-5 top-[max(1rem,env(safe-area-inset-top))] z-50 rounded-full bg-[var(--color-bg)] p-2 pr-5 shadow-sm ring-1 ring-black/5 md:static md:rounded-none md:bg-transparent md:p-0 md:pr-0 md:shadow-none md:ring-0",
               )}
             >
@@ -436,11 +454,11 @@ export function CheckoutView({
                 <Image
                   src={brandLogo}
                   alt={brandName}
-                  width={brandSlug === "the-spot" ? 80 : 220}
-                  height={brandSlug === "the-spot" ? 47 : 84}
+                  width={checkoutLogoSize.width}
+                  height={checkoutLogoSize.height}
                   className={cn(
                     "w-auto max-w-[min(200px,52vw)] object-contain object-left",
-                    brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+                    checkoutLogoSize.className,
                   )}
                   unoptimized
                 />
@@ -455,11 +473,11 @@ export function CheckoutView({
                 <Image
                   src={brandLogo}
                   alt={brandName}
-                  width={brandSlug === "the-spot" ? 80 : 220}
-                  height={brandSlug === "the-spot" ? 47 : 84}
+                  width={checkoutLogoSize.width}
+                  height={checkoutLogoSize.height}
                   className={cn(
                     "w-auto object-contain object-left",
-                    brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+                    checkoutLogoSize.className,
                   )}
                   unoptimized
                 />
@@ -477,13 +495,13 @@ export function CheckoutView({
       <ClientContainer
         className={cn(
           "flex-1 py-6 md:py-10",
-          brandSlug === "the-spot" && "max-md:py-4",
+          hasBoutiqueLayout && "max-md:py-4",
         )}
       >
         <div
           className={cn(
             "flex flex-col gap-8 md:flex-row md:items-start md:gap-8 lg:gap-12",
-            brandSlug === "the-spot" && "max-md:gap-5",
+            hasBoutiqueLayout && "max-md:gap-5",
           )}
         >
           {/* Left column */}
@@ -495,7 +513,7 @@ export function CheckoutView({
             <h2
               className={cn(
                 "mt-8 text-[24px] font-bold leading-tight text-[#242424] md:mt-0 md:hidden",
-                brandSlug === "the-spot" && "max-md:mt-3",
+                hasBoutiqueLayout && "max-md:mt-3",
               )}
             >
               Контактные данные
@@ -504,7 +522,7 @@ export function CheckoutView({
             <div
               className={cn(
                 "mt-5 flex flex-col gap-5 md:mt-6",
-                brandSlug === "the-spot" && "max-md:mt-4",
+                hasBoutiqueLayout && "max-md:mt-4",
               )}
             >
             {/* Contact */}
@@ -906,7 +924,7 @@ export function CheckoutView({
             <section
               className={cn(
                 "mt-10 border-t border-[#f0f0f0] pt-10 md:mt-12 md:pt-12",
-                brandSlug === "the-spot" &&
+                hasBoutiqueLayout &&
                   "max-md:mt-8 max-md:border-[rgb(36_36_36/0.08)] max-md:pt-8",
               )}
             >
@@ -1031,11 +1049,11 @@ export function CheckoutView({
           <Image
             src={brandLogo}
             alt=""
-            width={brandSlug === "the-spot" ? 80 : 220}
-            height={brandSlug === "the-spot" ? 47 : 84}
+            width={checkoutLogoSize.width}
+            height={checkoutLogoSize.height}
             className={cn(
               "w-auto object-contain object-left",
-              brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+              checkoutLogoSize.className,
             )}
             unoptimized
           />

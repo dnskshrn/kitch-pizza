@@ -43,6 +43,22 @@ function readLang(): CartLang {
   return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
 }
 
+function hasBoutiqueCheckout(brandSlug: string): boolean {
+  return brandSlug === "the-spot" || brandSlug === "losos"
+}
+
+function getCheckoutLogoSize(brandSlug: string) {
+  if (brandSlug === "the-spot") {
+    return { width: 80, height: 47, className: "h-[42px]" }
+  }
+
+  if (brandSlug === "losos") {
+    return { width: 176, height: 56, className: "h-[42px]" }
+  }
+
+  return { width: 220, height: 84, className: "h-[55px]" }
+}
+
 const checkoutCtaMotion =
   "cursor-pointer transition-all duration-200 ease-out hover:brightness-95 active:scale-[0.97]"
 const checkoutIconCircle =
@@ -61,6 +77,8 @@ export function CheckoutSuccessView({
 }: CheckoutSuccessViewProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const hasBoutiqueLayout = hasBoutiqueCheckout(brandSlug)
+  const checkoutLogoSize = getCheckoutLogoSize(brandSlug)
   const rawName = searchParams.get("name") ?? ""
   const customerName = rawName.trim()
 
@@ -124,7 +142,7 @@ export function CheckoutSuccessView({
       <div
         className={cn(
           "border-b border-transparent pt-4 md:pt-6",
-          brandSlug === "the-spot" && "h-[128px] md:h-auto",
+          hasBoutiqueLayout && "h-[128px] md:h-auto",
         )}
       >
         <ClientContainer>
@@ -132,7 +150,7 @@ export function CheckoutSuccessView({
             <div
               className={cn(
                 "flex min-w-0 items-center gap-3 md:gap-6",
-                brandSlug === "the-spot" &&
+                hasBoutiqueLayout &&
                   "fixed left-5 top-[max(1rem,env(safe-area-inset-top))] z-50 rounded-full bg-[var(--color-bg)] p-2 pr-5 shadow-sm ring-1 ring-black/5 md:static md:rounded-none md:bg-transparent md:p-0 md:pr-0 md:shadow-none md:ring-0",
               )}
             >
@@ -156,11 +174,11 @@ export function CheckoutSuccessView({
                 <Image
                   src={brandLogo}
                   alt={brandName}
-                  width={brandSlug === "the-spot" ? 80 : 220}
-                  height={brandSlug === "the-spot" ? 47 : 84}
+                  width={checkoutLogoSize.width}
+                  height={checkoutLogoSize.height}
                   className={cn(
                     "w-auto max-w-[min(200px,52vw)] object-contain object-left",
-                    brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+                    checkoutLogoSize.className,
                   )}
                   unoptimized
                 />
@@ -174,11 +192,11 @@ export function CheckoutSuccessView({
                 <Image
                   src={brandLogo}
                   alt={brandName}
-                  width={brandSlug === "the-spot" ? 80 : 220}
-                  height={brandSlug === "the-spot" ? 47 : 84}
+                  width={checkoutLogoSize.width}
+                  height={checkoutLogoSize.height}
                   className={cn(
                     "w-auto object-contain object-left",
-                    brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+                    checkoutLogoSize.className,
                   )}
                   unoptimized
                 />
@@ -277,11 +295,11 @@ export function CheckoutSuccessView({
           <Image
             src={brandLogo}
             alt=""
-            width={brandSlug === "the-spot" ? 80 : 220}
-            height={brandSlug === "the-spot" ? 47 : 84}
+            width={checkoutLogoSize.width}
+            height={checkoutLogoSize.height}
             className={cn(
               "w-auto object-contain object-left",
-              brandSlug === "the-spot" ? "h-[42px]" : "h-[55px]",
+              checkoutLogoSize.className,
             )}
             unoptimized
           />

@@ -41,6 +41,10 @@ function theSpotCardWidthExpr(windowWidth: number): string {
   return "calc((100% - 40px) / 3)"
 }
 
+function hasBoutiquePromotions(brandSlug: string): boolean {
+  return brandSlug === "the-spot" || brandSlug === "losos"
+}
+
 export type PromotionsSliderProps = {
   brandSlug?: string
   promotions: StorefrontPromotion[]
@@ -63,14 +67,14 @@ export function PromotionsSlider({
   const isMobile = windowWidth < 760
   const showArrows = promotions.length > 1
 
-  const isTheSpot = brandSlug === "the-spot"
-  const sectionClassName = isTheSpot ? "mb-5 w-full md:mb-5" : "w-full"
+  const hasBoutiqueLayout = hasBoutiquePromotions(brandSlug)
+  const sectionClassName = hasBoutiqueLayout ? "mb-5 w-full md:mb-5" : "w-full"
   const theSpotMobileCardHeight =
-    isTheSpot && isMobile ? "clamp(180px, calc(56.25vw - 18px), 220px)" : undefined
+    hasBoutiqueLayout && isMobile ? "clamp(180px, calc(56.25vw - 18px), 220px)" : undefined
 
   const cardWidth = useMemo(
-    () => (isTheSpot ? theSpotCardWidthExpr(windowWidth) : cardWidthExpr(windowWidth)),
-    [isTheSpot, windowWidth],
+    () => (hasBoutiqueLayout ? theSpotCardWidthExpr(windowWidth) : cardWidthExpr(windowWidth)),
+    [hasBoutiqueLayout, windowWidth],
   )
 
   useEffect(() => {
@@ -91,9 +95,9 @@ export function PromotionsSlider({
     const el = scrollRef.current
     const first = el?.firstElementChild as HTMLElement | undefined
     if (!first) return 0
-    const gap = isTheSpot && windowWidth >= 760 ? 20 : GAP_PX
+    const gap = hasBoutiqueLayout && windowWidth >= 760 ? 20 : GAP_PX
     return first.offsetWidth + gap
-  }, [isTheSpot, windowWidth])
+  }, [hasBoutiqueLayout, windowWidth])
 
   const getMaxIndex = useCallback((): number => {
     const el = scrollRef.current
@@ -158,14 +162,14 @@ export function PromotionsSlider({
   }, [activeIndex, clearAutoslideTimeout, scheduleAutoslide])
 
   const onTouchStart = (e: React.TouchEvent) => {
-    if (!isTheSpot && !isMobile) return
+    if (!hasBoutiqueLayout && !isMobile) return
     scheduleAutoslide()
     touchStartX.current = e.touches[0]?.clientX ?? null
     touchStartIndex.current = activeIndex
   }
 
   const onTouchEnd = (e: React.TouchEvent) => {
-    if (!isTheSpot && !isMobile) return
+    if (!hasBoutiqueLayout && !isMobile) return
     const start = touchStartX.current
     touchStartX.current = null
     if (start == null) return
@@ -179,7 +183,7 @@ export function PromotionsSlider({
     scrollToIndex(touchStartIndex.current + (dx > 0 ? 1 : -1))
   }
 
-  if (isTheSpot && promotions.length === 0) {
+  if (hasBoutiqueLayout && promotions.length === 0) {
     return (
       <section id="promotions" className={sectionClassName} aria-label="Акции">
         <div className="flex gap-4 overflow-x-auto py-2 md:gap-5 md:overflow-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -241,7 +245,7 @@ export function PromotionsSlider({
               <article
                 key={p.id}
                 className={
-                  isTheSpot
+                  hasBoutiqueLayout
                     ? "relative z-0 shrink-0 snap-start overflow-hidden rounded-[var(--radius-card)] bg-white"
                     : "relative shrink-0 snap-start overflow-hidden rounded-2xl bg-transparent"
                 }

@@ -66,7 +66,6 @@ export default function PosHomePage() {
           <OrderDetail
             orderId={panel.orderId}
             onClose={handleClosePanel}
-            onEdit={() => {}}
           />
         ) : null}
         {panel.mode === "create" ? (

@@ -22,6 +22,14 @@ export default async function ClientLayout({
     <div
       data-brand={brandSlug}
       className={`${interTight.className} flex min-h-screen flex-col bg-[var(--color-bg)] text-foreground`}
+      style={
+        brandSlug === "losos"
+          ? {
+              fontFamily:
+                '"Google Sans", "Product Sans", var(--font-sans), ui-sans-serif, system-ui, sans-serif',
+            }
+          : undefined
+      }
     >
       <ClientChrome brandSlug={brandSlug} categories={categories}>
         {children}

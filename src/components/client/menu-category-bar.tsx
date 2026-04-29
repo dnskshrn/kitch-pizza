@@ -37,10 +37,14 @@ function menuCategorySectionId(slug: string): string {
   return `menu-category-${slug}`
 }
 
+function hasBoutiqueMenu(brandSlug: string): boolean {
+  return brandSlug === "the-spot" || brandSlug === "losos"
+}
+
 function getScrollOffset(brandSlug: string): number {
   if (typeof window === "undefined") return 120
   const isMobile = window.matchMedia("(max-width: 767px)").matches
-  if (brandSlug === "the-spot") return isMobile ? 142 : 156
+  if (hasBoutiqueMenu(brandSlug)) return isMobile ? 142 : 156
   return isMobile ? 84 : 96
 }
 
@@ -176,7 +180,7 @@ export function MenuCategoryBar({
   const itemCount = useCartStore(selectCartItemCount)
   const subtotal = useCartStore(selectCartSubtotal)
   const openCart = useCartStore((s) => s.openCart)
-  const isTheSpot = brandSlug === "the-spot"
+  const isBoutiqueMenu = hasBoutiqueMenu(brandSlug)
 
   useEffect(() => {
     setLang(readLang())
@@ -269,7 +273,7 @@ export function MenuCategoryBar({
   )
 
   if (categories.length === 0) {
-    if (isTheSpot) {
+    if (isBoutiqueMenu) {
       return <TheSpotFloatingCart subtotal={subtotal} onOpen={openCart} />
     }
 
@@ -297,7 +301,7 @@ export function MenuCategoryBar({
     )
   }
 
-  if (isTheSpot) {
+  if (isBoutiqueMenu) {
     return (
       <>
         <TheSpotCategoryBar
@@ -536,7 +540,7 @@ function TheSpotFloatingCart({
       <div className="mb-2 flex items-center justify-center gap-2 px-3 text-[10px] text-[var(--color-text)]">
         <Pizza className="size-4 shrink-0" strokeWidth={2.2} />
         <span className="truncate">
-          Доставляем заказы от 1500 ₽. Добавьте еще на 880 ₽
+          Добавьте любимые позиции в корзину
         </span>
       </div>
       <button

@@ -114,9 +114,47 @@
   --radius-md: 0.75rem;
 }
 
-[data-brand="the-spot"] {
+[data-brand="losos"] {
+  --color-accent: #ff6b5f;
+  --color-bg: #f4f4f6;
+  --color-text: #201a18;
+  --color-muted: rgb(32 26 24 / 62%);
+  --color-surface: #ffffff;
+  --color-accent-soft: #ffe2dc;
+  --color-accent-text: #9b3c34;
+  --radius-card: 28px;
+  --radius-button: 100px;
+  --radius-input: 22px;
+
+  --background: #f4f4f6;
+  --foreground: #201a18;
+  --card: #ffffff;
+  --card-foreground: #201a18;
+  --popover: #ffffff;
+  --popover-foreground: #201a18;
+  --primary: #ff6b5f;
+  --primary-foreground: #ffffff;
+  --secondary: #ffffff;
+  --secondary-foreground: #201a18;
+  --muted: #ffffff;
+  --muted-foreground: rgb(32 26 24 / 62%);
+  --accent: #ffe2dc;
+  --accent-foreground: #9b3c34;
+  --border: #ffffff;
+  --input: #ffffff;
+  --ring: #ff6b5f;
+  --radius: 1.75rem;
+  --radius-md: 1.375rem;
+}
+
+[data-brand="the-spot"],
+[data-brand="losos"] {
   background: var(--color-bg);
   color: var(--color-text);
+}
+
+[data-brand="losos"] {
+  font-family: "Google Sans", "Product Sans", var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Storefront modal primitives: Kitch keeps the existing lime/gray system,
@@ -200,61 +238,74 @@
   color: #242424;
 }
 
-[data-brand="the-spot"] .storefront-modal-bg {
+[data-brand="the-spot"] .storefront-modal-bg,
+[data-brand="losos"] .storefront-modal-bg {
   background: var(--color-bg);
 }
 
-[data-brand="the-spot"] .storefront-modal-surface {
+[data-brand="the-spot"] .storefront-modal-surface,
+[data-brand="losos"] .storefront-modal-surface {
   background: var(--color-surface);
 }
 
-[data-brand="the-spot"] .storefront-modal-field {
+[data-brand="the-spot"] .storefront-modal-field,
+[data-brand="losos"] .storefront-modal-field {
   background: var(--color-bg);
 }
 
-[data-brand="the-spot"] .storefront-modal-soft {
+[data-brand="the-spot"] .storefront-modal-soft,
+[data-brand="losos"] .storefront-modal-soft {
   background: var(--color-accent-soft);
 }
 
-[data-brand="the-spot"] .storefront-modal-cta {
+[data-brand="the-spot"] .storefront-modal-cta,
+[data-brand="losos"] .storefront-modal-cta {
   background: var(--color-accent);
   color: #ffffff;
 }
 
-[data-brand="the-spot"] .storefront-modal-accent {
+[data-brand="the-spot"] .storefront-modal-accent,
+[data-brand="losos"] .storefront-modal-accent {
   color: var(--color-accent);
 }
 
-[data-brand="the-spot"] .storefront-modal-accent-bg {
+[data-brand="the-spot"] .storefront-modal-accent-bg,
+[data-brand="losos"] .storefront-modal-accent-bg {
   background: var(--color-accent);
 }
 
-[data-brand="the-spot"] .storefront-modal-mode-active {
+[data-brand="the-spot"] .storefront-modal-mode-active,
+[data-brand="losos"] .storefront-modal-mode-active {
   background: var(--color-accent);
   color: #ffffff;
 }
 
-[data-brand="the-spot"] .storefront-modal-card-radius {
+[data-brand="the-spot"] .storefront-modal-card-radius,
+[data-brand="losos"] .storefront-modal-card-radius {
   border-radius: var(--radius-card);
 }
 
-[data-brand="the-spot"] .storefront-checkout-card {
+[data-brand="the-spot"] .storefront-checkout-card,
+[data-brand="losos"] .storefront-checkout-card {
   background: var(--color-surface);
   box-shadow: none;
 }
 
-[data-brand="the-spot"] .storefront-checkout-form-panel {
+[data-brand="the-spot"] .storefront-checkout-form-panel,
+[data-brand="losos"] .storefront-checkout-form-panel {
   background: transparent;
   border-radius: var(--radius-card);
   padding: 0;
 }
 
-[data-brand="the-spot"] .storefront-checkout-form-panel .storefront-modal-field {
+[data-brand="the-spot"] .storefront-checkout-form-panel .storefront-modal-field,
+[data-brand="losos"] .storefront-checkout-form-panel .storefront-modal-field {
   background: var(--color-surface);
 }
 
 @media (max-width: 767px) {
-  [data-brand="the-spot"] .storefront-checkout-form-panel {
+  [data-brand="the-spot"] .storefront-checkout-form-panel,
+  [data-brand="losos"] .storefront-checkout-form-panel {
     margin-left: 0;
     margin-right: 0;
     width: 100%;
@@ -263,7 +314,8 @@
 }
 
 @media (min-width: 768px) {
-  [data-brand="the-spot"] .storefront-checkout-form-panel {
+  [data-brand="the-spot"] .storefront-checkout-form-panel,
+  [data-brand="losos"] .storefront-checkout-form-panel {
     padding: 28px;
     margin-left: 0;
     margin-right: 0;
@@ -272,36 +324,85 @@
   }
 }
 
-[data-brand="the-spot"] .storefront-checkout-progress-active {
+[data-brand="the-spot"] .storefront-checkout-progress-active,
+[data-brand="losos"] .storefront-checkout-progress-active {
   background: var(--color-accent-soft);
   color: var(--color-accent-text);
 }
 
-[data-brand="the-spot"] .storefront-checkout-progress-muted {
+[data-brand="the-spot"] .storefront-checkout-progress-muted,
+[data-brand="losos"] .storefront-checkout-progress-muted {
   background: var(--color-surface);
   color: var(--color-muted);
 }
 
-[data-brand="the-spot"] .storefront-checkout-toggle-active {
+[data-brand="the-spot"] .storefront-checkout-toggle-active,
+[data-brand="losos"] .storefront-checkout-toggle-active {
   background: var(--color-accent);
   color: #ffffff;
 }
 
-[data-brand="the-spot"] .storefront-checkout-address-empty {
+[data-brand="the-spot"] .storefront-checkout-address-empty,
+[data-brand="losos"] .storefront-checkout-address-empty {
   background: var(--color-surface);
 }
 
-[data-brand="the-spot"] .storefront-checkout-address-ok {
+[data-brand="the-spot"] .storefront-checkout-address-ok,
+[data-brand="losos"] .storefront-checkout-address-ok {
   background: var(--color-accent-soft);
 }
 
-[data-brand="the-spot"] .storefront-checkout-address-bad {
+[data-brand="the-spot"] .storefront-checkout-address-bad,
+[data-brand="losos"] .storefront-checkout-address-bad {
   background: var(--color-accent-soft);
 }
 
-[data-brand="the-spot"] .storefront-checkout-success-hero {
+[data-brand="the-spot"] .storefront-checkout-success-hero,
+[data-brand="losos"] .storefront-checkout-success-hero {
   background: var(--color-accent-soft);
   color: var(--color-text);
+}
+
+.the-spot-menu-overlay {
+  animation: the-spot-menu-open 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top center;
+  will-change: clip-path, transform, opacity;
+}
+
+.the-spot-menu-content {
+  animation: the-spot-menu-content-open 220ms cubic-bezier(0.22, 1, 0.36, 1) 45ms both;
+  will-change: transform, opacity;
+}
+
+@keyframes the-spot-menu-open {
+  from {
+    clip-path: inset(0 0 100% 0 round 0 0 28px 28px);
+    opacity: 0.96;
+    transform: translateY(-8px);
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 0);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes the-spot-menu-content-open {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .the-spot-menu-overlay,
+  .the-spot-menu-content {
+    animation: none;
+  }
 }
 
 @theme inline {

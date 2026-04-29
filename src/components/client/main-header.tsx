@@ -7,7 +7,7 @@ import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import Image from "next/image"
 import Link from "next/link"
-import { Bike, MapPin, Menu } from "lucide-react"
+import { Bike, MapPin, Menu, X } from "lucide-react"
 import { useEffect, useState } from "react"
 
 const LANG_KEY = "lang"
@@ -22,6 +22,40 @@ const ADDRESS_BG = "#f3f4f6"
 /** Фиксированная ширина полосы доставки на десктопе (не растягивается на всю колонку). */
 const DELIVERY_BAR_MAX_WIDTH_CLASS = "max-w-[520px]"
 const PHONE_TEL = "tel:+37379700290"
+
+function hasBoutiqueHeader(brandSlug: string): boolean {
+  return brandSlug === "the-spot" || brandSlug === "losos"
+}
+
+function getHeaderLogoMeta(brandSlug: string) {
+  if (brandSlug === "the-spot") {
+    return {
+      src: "/the-spot-logo.svg",
+      alt: "The Spot",
+      width: 80,
+      height: 47,
+      className: "h-[40px] w-[68px] md:h-[42px] md:w-[72px]",
+    }
+  }
+
+  if (brandSlug === "losos") {
+    return {
+      src: "/Losos_Logo.svg",
+      alt: "LOSOS",
+      width: 176,
+      height: 56,
+      className: "h-[40px] w-[126px] md:h-[42px] md:w-[132px]",
+    }
+  }
+
+  return {
+    src: "/kitch-pizza-logo.svg",
+    alt: "Kitch Pizza",
+    width: 121,
+    height: 56,
+    className: "h-10 w-auto md:h-12",
+  }
+}
 
 function PhoneNumberDisplay({ className }: { className?: string }) {
   return (
@@ -39,20 +73,20 @@ function truncAddress(s: string, max: number): string {
 }
 
 function Logo({ brandSlug = "kitch-pizza" }: { brandSlug?: string }) {
-  const isTheSpot = brandSlug === "the-spot"
+  const logo = getHeaderLogoMeta(brandSlug)
 
   return (
     <Link
       href="/"
       className="inline-flex shrink-0 cursor-pointer items-center transition-all duration-200 hover:opacity-90"
-      aria-label={isTheSpot ? "The Spot — на главную" : "Kitch Pizza — на главную"}
+      aria-label={`${logo.alt} — на главную`}
     >
       <Image
-        src={isTheSpot ? "/the-spot-logo.svg" : "/kitch-pizza-logo.svg"}
-        alt={isTheSpot ? "The Spot" : "Kitch Pizza"}
-        width={isTheSpot ? 80 : 121}
-        height={isTheSpot ? 47 : 56}
-        className={isTheSpot ? "h-[40px] w-[68px] md:h-[42px] md:w-[72px]" : "h-10 w-auto md:h-12"}
+        src={logo.src}
+        alt={logo.alt}
+        width={logo.width}
+        height={logo.height}
+        className={logo.className}
         priority
         unoptimized
       />
@@ -120,6 +154,7 @@ function DeliveryBanner({
 }
 
 function TheSpotDesktopHeader({
+  brandSlug,
   addressLabel,
   menuOpen,
   overlayLang,
@@ -127,6 +162,7 @@ function TheSpotDesktopHeader({
   onOpenMenu,
   onLangChange,
 }: {
+  brandSlug: string
   addressLabel: string
   menuOpen: boolean
   overlayLang: Lang
@@ -144,7 +180,7 @@ function TheSpotDesktopHeader({
     <div className="hidden w-full md:block">
       <div className="flex min-h-[64px] w-full items-center gap-2 rounded-full bg-white p-2 shadow-[0_14px_42px_rgba(36,36,36,0.04)] md:-mx-2 md:w-[calc(100%+1rem)] lg:-mx-4 lg:w-[calc(100%+2rem)] lg:gap-3">
         <div className="flex min-w-[96px] shrink-0 justify-start pl-2 lg:min-w-[120px]">
-          <Logo brandSlug="the-spot" />
+          <Logo brandSlug={brandSlug} />
         </div>
 
         <button
@@ -250,8 +286,8 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
         : "str. Dacia 35"
 
   const etaMinutes = selectedZone?.delivery_time_min ?? 42
-  const isTheSpot = brandSlug === "the-spot"
-  const menuLinks = isTheSpot
+  const hasBoutiqueLayout = hasBoutiqueHeader(brandSlug)
+  const menuLinks = hasBoutiqueLayout
     ? ([
         { href: "#menu", label: "Меню" },
         { href: "#promotions", label: "Акции" },
@@ -316,13 +352,15 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
   return (
     <header
       className={
-        isTheSpot
-          ? "sticky top-0 z-30 bg-transparent"
+        hasBoutiqueLayout
+          ? menuOpen
+            ? "sticky top-0 z-[120] bg-transparent"
+            : "sticky top-0 z-30 bg-transparent"
           : "bg-white"
       }
     >
-      <ClientContainer className={isTheSpot ? "px-4 py-3 md:px-4 md:py-5 lg:px-4" : "py-3"}>
-        {isTheSpot ? (
+      <ClientContainer className={hasBoutiqueLayout ? "px-4 py-3 md:px-4 md:py-5 lg:px-4" : "py-3"}>
+        {hasBoutiqueLayout ? (
           <>
             <div className="md:hidden">
               <div className="flex h-[63px] w-full items-center gap-3 rounded-full bg-white p-2">
@@ -355,6 +393,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
               </div>
             </div>
             <TheSpotDesktopHeader
+              brandSlug={brandSlug}
               addressLabel={theSpotAddressLabel}
               menuOpen={menuOpen}
               overlayLang={overlayLang}
@@ -409,7 +448,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
 
         <div
           className={
-            isTheSpot
+            hasBoutiqueLayout
               ? "hidden"
               : "hidden md:grid md:grid-cols-[auto_1fr_auto] md:items-center md:gap-6"
           }
@@ -440,63 +479,174 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
       {menuOpen ? (
         <div
           className={
-            isTheSpot
-              ? "fixed inset-0 z-50 flex flex-col bg-white lg:hidden"
-              : "fixed inset-0 z-50 flex flex-col bg-white md:hidden"
+            hasBoutiqueLayout
+              ? "the-spot-menu-overlay fixed inset-0 z-[120] flex flex-col overflow-hidden bg-[var(--color-bg)] lg:hidden"
+              : "fixed inset-0 z-[120] flex flex-col bg-white md:hidden"
           }
           role="dialog"
           aria-modal="true"
           aria-label="Меню"
         >
-          <ClientContainer className="flex h-11 items-center justify-end">
-            <button
-              type="button"
-              className="cursor-pointer p-1 transition-all duration-200 active:scale-[0.97]"
-              aria-label="Закрыть меню"
-              onClick={() => setMenuOpen(false)}
-            >
-              <svg
-                className="size-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </ClientContainer>
-          <ClientContainer className="flex flex-1 flex-col gap-1 overflow-y-auto py-4">
-            {menuLinks.map((link) => (
-              <a
-                key={link.label}
-                href={link.href}
-                className="cursor-pointer py-3 text-base transition-all duration-200 hover:text-foreground/80"
-                onClick={() => setMenuOpen(false)}
-              >
-                {link.label}
-              </a>
-            ))}
-            {isTheSpot ? null : (
-              <a
-                href="#"
-                className="mt-2 inline-flex w-fit cursor-pointer rounded-full bg-[#ECFFA1] px-4 py-2 font-semibold text-[#5F7600] transition-all duration-200 hover:bg-[#dff090] active:scale-[0.97]"
-                onClick={() => setMenuOpen(false)}
-              >
-                Акции
-              </a>
-            )}
-          </ClientContainer>
-          <ClientContainer className="py-4">
-            <div className="flex flex-col gap-4">
-              {scheduleBlock}
-              {overlayLangBlock}
-            </div>
-          </ClientContainer>
+          {hasBoutiqueLayout ? (
+            <>
+              <div
+                className="pointer-events-none absolute -right-20 top-20 size-56 rounded-full bg-[var(--color-accent-soft)] opacity-80"
+                aria-hidden
+              />
+              <div
+                className="pointer-events-none absolute -left-24 bottom-28 size-64 rounded-full bg-white/70"
+                aria-hidden
+              />
+              <ClientContainer className="the-spot-menu-content relative z-10 flex items-center justify-between px-4 py-[max(0.75rem,env(safe-area-inset-top))]">
+                <div className="flex h-[63px] min-w-0 flex-1 items-center rounded-full bg-white px-4 shadow-[0_16px_42px_rgba(36,36,36,0.06)]">
+                  <Logo brandSlug={brandSlug} />
+                </div>
+                <button
+                  type="button"
+                  className="ml-3 flex size-[63px] shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.06)] transition-all duration-200 active:scale-[0.96]"
+                  aria-label="Закрыть меню"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  <X className="size-7" strokeWidth={2} />
+                </button>
+              </ClientContainer>
+
+              <ClientContainer className="the-spot-menu-content relative z-10 flex flex-1 flex-col overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
+                <nav className="flex flex-col gap-3" aria-label="Навигация The Spot">
+                  {menuLinks.map((link, index) => (
+                    <a
+                      key={link.label}
+                      href={link.href}
+                      className="group flex min-h-[72px] cursor-pointer items-center justify-between rounded-[24px] bg-white px-5 text-[28px] font-black leading-none tracking-[-0.04em] text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.04)] transition-all duration-200 active:scale-[0.98]"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <span>{link.label}</span>
+                      <span className="flex size-9 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[15px] font-bold tracking-normal text-[var(--color-accent-text)] transition-colors group-active:bg-[var(--color-accent)] group-active:text-white">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                    </a>
+                  ))}
+                </nav>
+
+                <div className="mt-5 grid gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      openDeliveryModal()
+                    }}
+                    className="flex cursor-pointer items-center gap-3 rounded-[24px] bg-white p-4 text-left shadow-[0_16px_42px_rgba(36,36,36,0.04)] transition-all duration-200 active:scale-[0.98]"
+                  >
+                    <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-white">
+                      <Bike className="size-5" strokeWidth={2.2} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[12px] font-medium text-[var(--color-muted)]">
+                        Адрес доставки
+                      </span>
+                      <span className="mt-1 block truncate text-[16px] font-bold text-[var(--color-text)]">
+                        {theSpotAddressLabel}
+                      </span>
+                    </span>
+                  </button>
+
+                  <a
+                    href={PHONE_TEL}
+                    className="flex cursor-pointer items-center gap-3 rounded-[24px] bg-white p-4 text-[16px] font-bold text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.04)] transition-all duration-200 active:scale-[0.98]"
+                    aria-label="Позвонить 079 700 290"
+                  >
+                    <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]">
+                      <PhoneIcon className="size-5" />
+                    </span>
+                    <span>079 700 290</span>
+                  </a>
+                </div>
+
+                <div className="mt-auto flex items-end justify-between gap-4 pt-6">
+                  <div className="text-[12px] font-medium leading-relaxed text-[var(--color-muted)]">
+                    <span className="block">График работы</span>
+                    <span className="block font-bold text-[var(--color-text)]">
+                      11:00 – 23:00
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1 rounded-full bg-white p-1 text-[13px] font-bold shadow-[0_16px_42px_rgba(36,36,36,0.04)]">
+                    <button
+                      type="button"
+                      onClick={() => setOverlayLang("RU")}
+                      className={
+                        overlayLang === "RU"
+                          ? "rounded-full bg-[var(--color-accent)] px-4 py-2 text-white"
+                          : "rounded-full px-4 py-2 text-[var(--color-muted)] transition-all duration-200"
+                      }
+                    >
+                      RU
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOverlayLang("RO")}
+                      className={
+                        overlayLang === "RO"
+                          ? "rounded-full bg-[var(--color-accent)] px-4 py-2 text-white"
+                          : "rounded-full px-4 py-2 text-[var(--color-muted)] transition-all duration-200"
+                      }
+                    >
+                      RO
+                    </button>
+                  </div>
+                </div>
+              </ClientContainer>
+            </>
+          ) : (
+            <>
+              <ClientContainer className="flex h-11 items-center justify-end">
+                <button
+                  type="button"
+                  className="cursor-pointer p-1 transition-all duration-200 active:scale-[0.97]"
+                  aria-label="Закрыть меню"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  <svg
+                    className="size-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </ClientContainer>
+              <ClientContainer className="flex flex-1 flex-col gap-1 overflow-y-auto py-4">
+                {menuLinks.map((link) => (
+                  <a
+                    key={link.label}
+                    href={link.href}
+                    className="cursor-pointer py-3 text-base transition-all duration-200 hover:text-foreground/80"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {link.label}
+                  </a>
+                ))}
+                <a
+                  href="#"
+                  className="mt-2 inline-flex w-fit cursor-pointer rounded-full bg-[#ECFFA1] px-4 py-2 font-semibold text-[#5F7600] transition-all duration-200 hover:bg-[#dff090] active:scale-[0.97]"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  Акции
+                </a>
+              </ClientContainer>
+              <ClientContainer className="py-4">
+                <div className="flex flex-col gap-4">
+                  {scheduleBlock}
+                  {overlayLangBlock}
+                </div>
+              </ClientContainer>
+            </>
+          )}
         </div>
       ) : null}
     </header>

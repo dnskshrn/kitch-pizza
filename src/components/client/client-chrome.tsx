@@ -17,6 +17,10 @@ type ClientChromeProps = {
   children: React.ReactNode
 }
 
+function hasBoutiqueStorefront(brandSlug: string): boolean {
+  return brandSlug === "the-spot" || brandSlug === "losos"
+}
+
 export function ClientChrome({
   brandSlug,
   categories,
@@ -24,6 +28,7 @@ export function ClientChrome({
 }: ClientChromeProps) {
   const pathname = usePathname()
   const isCheckoutFlow = pathname.startsWith("/checkout")
+  const isBoutiqueStorefront = hasBoutiqueStorefront(brandSlug)
 
   useEffect(() => {
     const previousBrand = document.body.dataset.brand
@@ -53,9 +58,9 @@ export function ClientChrome({
   return (
     <>
       <StorefrontHaptics />
-      {brandSlug === "the-spot" ? null : <TopNav />}
+      {isBoutiqueStorefront ? null : <TopNav />}
       <MainHeader brandSlug={brandSlug} />
-      {brandSlug === "the-spot" ? null : (
+      {isBoutiqueStorefront ? null : (
         <MenuCategoryBar brandSlug={brandSlug} categories={categories} />
       )}
       <ProductModalRoot />

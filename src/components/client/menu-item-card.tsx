@@ -12,6 +12,10 @@ export type MenuItemCardProps = {
   lang: "RU" | "RO"
 }
 
+function hasTheSpotCard(brandSlug: string): boolean {
+  return brandSlug === "the-spot"
+}
+
 function formatLeiFromBani(bani: number, lang: "RU" | "RO"): string {
   const lei = bani / 100
   const formatted = lei.toLocaleString("ro-MD", {
@@ -131,12 +135,70 @@ export function MenuItemCard({
   const aria = cardAriaLabel(name, priceMain, lang)
 
   const openModal = () => openProductModal(item)
-  const isTheSpot = brandSlug === "the-spot"
+  const isTheSpot = hasTheSpotCard(brandSlug)
+  const isLosos = brandSlug === "losos"
 
   return (
     <div className="h-full md:flex md:flex-col">
       {/* Mobile: вся строка — одна кнопка */}
-      {isTheSpot ? (
+      {isLosos ? (
+        <button
+          type="button"
+          onClick={openModal}
+          aria-label={aria}
+          className="group flex w-full flex-col overflow-hidden rounded-[18px] bg-white text-left md:hidden"
+        >
+          <div className="relative aspect-[1.08] w-full overflow-hidden bg-white">
+            {item.image_url ? (
+              <Image
+                src={item.image_url}
+                alt=""
+                fill
+                className="object-contain p-4 transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                sizes="50vw"
+              />
+            ) : null}
+            {item.tag ? (
+              <span className="absolute left-4 top-4 z-10 max-w-[78px] rounded-[10px] bg-[#ff5a2f] px-2.5 py-1.5 text-center text-[10px] font-bold leading-[0.98] text-white">
+                {item.tag.toLowerCase() === "новинка" ? (
+                  <>
+                    новый
+                    <br />
+                    рецепт
+                  </>
+                ) : (
+                  item.tag
+                )}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex min-h-[150px] w-full flex-col border-t border-[#f0f0f2] px-4 pb-4 pt-4">
+            <h3 className="line-clamp-2 text-[21px] font-bold leading-[1.08] tracking-[-0.035em] text-[var(--color-text)]">
+              {name}
+            </h3>
+            <div className="mt-auto flex items-end justify-between gap-3 pt-5">
+              <div className="min-w-0">
+                {priceCompare ? (
+                  <p className="mb-1 text-[13px] font-normal leading-none text-[#8f8f95] line-through tabular-nums">
+                    {priceCompare.replace("лей", "MDL")}
+                  </p>
+                ) : null}
+                {priceMain ? (
+                  <p className="text-[17px] font-bold leading-none tracking-[-0.02em] text-[var(--color-text)] tabular-nums">
+                    {priceMain.replace("лей", "MDL")}
+                  </p>
+                ) : null}
+              </div>
+              <span
+                className="flex h-[54px] w-[64px] shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] text-[38px] font-light leading-none text-[#77777d] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white"
+                aria-hidden
+              >
+                +
+              </span>
+            </div>
+          </div>
+        </button>
+      ) : isTheSpot ? (
         <button
           type="button"
           onClick={openModal}
@@ -237,7 +299,71 @@ export function MenuItemCard({
       )}
 
       {/* Desktop: вся карточка — одна кнопка */}
-      {isTheSpot ? (
+      {isLosos ? (
+        <button
+          type="button"
+          onClick={openModal}
+          aria-label={aria}
+          className="group hidden h-full w-full flex-col overflow-hidden rounded-[18px] bg-white text-left transition-transform duration-200 hover:-translate-y-0.5 md:flex"
+        >
+          <div className="relative aspect-[1.08] w-full overflow-hidden bg-white">
+            {item.image_url ? (
+              <Image
+                src={item.image_url}
+                alt=""
+                fill
+                className="object-contain p-5 transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                sizes="(max-width: 1023px) 31vw, (max-width: 1279px) 30vw, 286px"
+              />
+            ) : (
+              <div
+                className="flex h-full w-full items-center justify-center text-xs text-[var(--color-muted)]"
+                aria-hidden
+              >
+                {lang === "RO" ? "Fără foto" : "Нет фото"}
+              </div>
+            )}
+            {item.tag ? (
+              <span className="absolute left-7 top-7 z-10 max-w-[92px] rounded-[12px] bg-[#ff5a2f] px-3 py-2 text-center text-[14px] font-bold leading-[0.98] text-white">
+                {item.tag.toLowerCase() === "новинка" ? (
+                  <>
+                    новый
+                    <br />
+                    рецепт
+                  </>
+                ) : (
+                  item.tag
+                )}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex min-h-[188px] w-full flex-1 flex-col border-t border-[#f0f0f2] px-7 pb-7 pt-7">
+            <h3 className="line-clamp-2 text-[24px] font-bold leading-[1.08] tracking-[-0.035em] text-[var(--color-text)] lg:text-[28px]">
+              {name}
+            </h3>
+            <div className="mt-auto flex items-end justify-between gap-4 pt-6">
+              <div className="min-w-0">
+                {priceCompare ? (
+                  <p className="mb-2 text-[16px] font-normal leading-none text-[#8f8f95] line-through tabular-nums">
+                    {priceCompare.replace("лей", "MDL")}
+                  </p>
+                ) : null}
+                {priceMain ? (
+                  <p className="text-[22px] font-bold leading-none tracking-[-0.02em] text-[var(--color-text)] tabular-nums">
+                    {priceMain.replace("лей", "MDL")}
+                  </p>
+                ) : null}
+              </div>
+              <span
+                className="flex h-[64px] w-[78px] shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] text-[46px] font-light leading-none text-[#77777d] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white"
+                aria-hidden
+              >
+                +
+              </span>
+            </div>
+          </div>
+        </button>
+      ) : isTheSpot ? (
         <button
           type="button"
           onClick={openModal}

@@ -39,16 +39,16 @@ export const brands: BrandConfig[] = [
     name: 'LOSOS',
     domain: 'losos.md',
     devDomain: 'www.losos.md',
-    logo: '/kitch-pizza-logo.svg', // TODO
+    logo: '/Losos_Logo.svg',
     phone: '079 700 290', // TODO
     hours: '11:00 – 23:00', // TODO
-    cartKey: 'kitch-pizza-cart', // TODO
-    deliveryKey: 'kitch-pizza-delivery', // TODO
+    cartKey: 'losos-cart',
+    deliveryKey: 'losos-delivery',
     colors: {
-      accent: '#5F7600', // TODO
-      accentBg: '#ECFFA1', // TODO
-      cartPill: '#ccff00', // TODO
-      activeDot: '#8DC63F', // TODO
+      accent: '#ff6b5f',
+      accentBg: '#ffe2dc',
+      cartPill: '#ff6b5f',
+      activeDot: '#ff6b5f',
     },
   },
   {

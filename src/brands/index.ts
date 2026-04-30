@@ -71,7 +71,7 @@ export const brands: BrandConfig[] = [
 ]
 
 export function getBrandByHost(host: string): BrandConfig {
-  const hostname = host.split(":")[0] ?? host
+  const hostname = (host.split(":")[0] ?? host).replace(/^www\./, '')
   const brand = brands.find(
     (b) => b.domain === hostname || b.devDomain === hostname
   )

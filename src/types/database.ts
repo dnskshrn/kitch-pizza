@@ -10,6 +10,7 @@ export type Category = {
 
 export type MenuItem = {
   id: string
+  brand_id: string
   category_id: string
   name_ru: string
   name_ro: string
@@ -88,6 +89,21 @@ export type StorefrontPromotion = {
 export type CategoryWithItems = {
   category: Category
   items: MenuItem[]
+}
+
+/** Строка карусели «Новое и популярное»: порядок хранится отдельно от меню. */
+export type FeaturedMenuItem = {
+  id: string
+  brand_id: string
+  menu_item_id: string
+  sort_order: number
+  created_at: string
+}
+
+export type FeaturedMenuItemWithItem = FeaturedMenuItem & {
+  menu_item: MenuItem & {
+    category: { id: string; name_ru: string; name_ro: string } | null
+  }
 }
 
 /** Таблица `promo_codes`; `code` хранится в верхнем регистре. */

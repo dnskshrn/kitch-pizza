@@ -146,20 +146,20 @@ export function MenuItemCard({
           type="button"
           onClick={openModal}
           aria-label={aria}
-          className="group flex w-full flex-col overflow-hidden rounded-[18px] bg-white text-left md:hidden"
+          className="group flex w-full flex-col overflow-hidden rounded-[12px] bg-white text-left md:hidden"
         >
-          <div className="relative aspect-[1.08] w-full overflow-hidden bg-white">
+          <div className="relative aspect-square w-full overflow-hidden bg-white">
             {item.image_url ? (
               <Image
                 src={item.image_url}
                 alt=""
                 fill
-                className="object-contain p-4 transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                 sizes="50vw"
               />
             ) : null}
             {item.tag ? (
-              <span className="absolute left-4 top-4 z-10 max-w-[78px] rounded-[10px] bg-[#ff5a2f] px-2.5 py-1.5 text-center text-[10px] font-bold leading-[0.98] text-white">
+              <span className="absolute left-3 top-3 z-10 max-w-[76px] rounded-[10px] bg-[var(--color-accent)] px-2.5 py-1.5 text-center text-[10px] font-semibold leading-[0.98] text-white">
                 {item.tag.toLowerCase() === "новинка" ? (
                   <>
                     новый
@@ -172,25 +172,25 @@ export function MenuItemCard({
               </span>
             ) : null}
           </div>
-          <div className="flex min-h-[150px] w-full flex-col border-t border-[#f0f0f2] px-4 pb-4 pt-4">
-            <h3 className="line-clamp-2 text-[21px] font-bold leading-[1.08] tracking-[-0.035em] text-[var(--color-text)]">
+          <div className="flex w-full flex-1 flex-col gap-4 p-4">
+            <h3 className="line-clamp-2 text-[16px] font-semibold leading-[1.12] tracking-[-0.02em] text-[var(--color-text)]">
               {name}
             </h3>
-            <div className="mt-auto flex items-end justify-between gap-3 pt-5">
+            <div className="mt-auto flex items-center justify-between gap-3">
               <div className="min-w-0">
                 {priceCompare ? (
-                  <p className="mb-1 text-[13px] font-normal leading-none text-[#8f8f95] line-through tabular-nums">
+                  <p className="mb-1 text-[12px] font-normal leading-none text-[rgb(36_36_36_/_60%)] line-through tabular-nums">
                     {priceCompare.replace("лей", "MDL")}
                   </p>
                 ) : null}
                 {priceMain ? (
-                  <p className="text-[17px] font-bold leading-none tracking-[-0.02em] text-[var(--color-text)] tabular-nums">
+                  <p className="text-[15px] font-semibold leading-none text-[var(--color-text)] tabular-nums">
                     {priceMain.replace("лей", "MDL")}
                   </p>
                 ) : null}
               </div>
               <span
-                className="flex h-[54px] w-[64px] shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] text-[38px] font-light leading-none text-[#77777d] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white"
+                className="flex h-9 min-w-12 shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] px-4 text-[24px] font-light leading-none text-[#808080] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white"
                 aria-hidden
               >
                 +
@@ -304,15 +304,15 @@ export function MenuItemCard({
           type="button"
           onClick={openModal}
           aria-label={aria}
-          className="group hidden h-full w-full flex-col overflow-hidden rounded-[18px] bg-white text-left transition-transform duration-200 hover:-translate-y-0.5 md:flex"
+          className="group hidden h-full w-full flex-col overflow-hidden rounded-[12px] bg-white text-left transition-transform duration-200 hover:-translate-y-0.5 md:flex"
         >
-          <div className="relative aspect-[1.08] w-full overflow-hidden bg-white">
+          <div className="relative aspect-square w-full overflow-hidden bg-white">
             {item.image_url ? (
               <Image
                 src={item.image_url}
                 alt=""
                 fill
-                className="object-contain p-5 transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                 sizes="(max-width: 1023px) 31vw, (max-width: 1279px) 30vw, 286px"
               />
             ) : (
@@ -324,7 +324,7 @@ export function MenuItemCard({
               </div>
             )}
             {item.tag ? (
-              <span className="absolute left-7 top-7 z-10 max-w-[92px] rounded-[12px] bg-[#ff5a2f] px-3 py-2 text-center text-[14px] font-bold leading-[0.98] text-white">
+              <span className="absolute left-4 top-4 z-10 max-w-[88px] rounded-[12px] bg-[var(--color-accent)] px-3 py-2 text-center text-[12px] font-semibold leading-[0.98] text-white">
                 {item.tag.toLowerCase() === "новинка" ? (
                   <>
                     новый
@@ -337,25 +337,25 @@ export function MenuItemCard({
               </span>
             ) : null}
           </div>
-          <div className="flex min-h-[188px] w-full flex-1 flex-col border-t border-[#f0f0f2] px-7 pb-7 pt-7">
-            <h3 className="line-clamp-2 text-[24px] font-bold leading-[1.08] tracking-[-0.035em] text-[var(--color-text)] lg:text-[28px]">
+          <div className="flex w-full flex-1 flex-col gap-4 p-4">
+            <h3 className="line-clamp-2 text-[20px] font-semibold leading-[1.12] tracking-[-0.02em] text-[var(--color-text)]">
               {name}
             </h3>
-            <div className="mt-auto flex items-end justify-between gap-4 pt-6">
+            <div className="mt-auto flex items-center justify-between gap-4">
               <div className="min-w-0">
                 {priceCompare ? (
-                  <p className="mb-2 text-[16px] font-normal leading-none text-[#8f8f95] line-through tabular-nums">
+                  <p className="mb-1 text-[12px] font-normal leading-none text-[rgb(36_36_36_/_60%)] line-through tabular-nums">
                     {priceCompare.replace("лей", "MDL")}
                   </p>
                 ) : null}
                 {priceMain ? (
-                  <p className="text-[22px] font-bold leading-none tracking-[-0.02em] text-[var(--color-text)] tabular-nums">
+                  <p className="text-[16px] font-semibold leading-none text-[var(--color-text)] tabular-nums">
                     {priceMain.replace("лей", "MDL")}
                   </p>
                 ) : null}
               </div>
               <span
-                className="flex h-[64px] w-[78px] shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] text-[46px] font-light leading-none text-[#77777d] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white"
+                className="flex h-[43px] min-w-[64px] shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] px-6 text-[28px] font-light leading-none text-[#808080] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white"
                 aria-hidden
               >
                 +

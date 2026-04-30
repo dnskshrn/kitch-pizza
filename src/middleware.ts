@@ -49,6 +49,15 @@ export async function middleware(request: NextRequest) {
     })
   }
 
+  const isCheckoutRoute = pathname.startsWith("/checkout")
+
+  if (isCheckoutRoute) {
+    const token = request.cookies.get("storefront-session")?.value
+    if (!token) {
+      return NextResponse.redirect(new URL("/", request.url))
+    }
+  }
+
   const isAdminRoute = pathname.startsWith("/admin")
   const isAdminLoginPage = pathname === "/admin/login"
 

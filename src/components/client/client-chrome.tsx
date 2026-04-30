@@ -1,5 +1,6 @@
 "use client"
 
+import { AuthModal } from "@/components/client/auth/auth-modal"
 import { CartRoot } from "@/components/client/cart/CartRoot"
 import { DeliveryRoot } from "@/components/client/delivery-modal"
 import { MainHeader } from "@/components/client/main-header"
@@ -50,6 +51,7 @@ export function ClientChrome({
         <ProductModalRoot />
         <DeliveryRoot />
         <CartRoot />
+        <AuthModal />
         <main className="flex-1">{children}</main>
       </>
     )
@@ -66,6 +68,7 @@ export function ClientChrome({
       <ProductModalRoot />
       <DeliveryRoot />
       <CartRoot />
+      <AuthModal />
       <main className="flex-1">{children}</main>
     </>
   )

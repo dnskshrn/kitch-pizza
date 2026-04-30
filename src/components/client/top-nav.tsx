@@ -1,5 +1,6 @@
 "use client"
 
+import { AuthButton } from "@/components/client/auth/auth-button"
 import { ClientContainer } from "@/components/client/client-container"
 import { useEffect, useState } from "react"
 
@@ -92,6 +93,7 @@ export function TopNav() {
         </nav>
 
         <div className="hidden flex-1 items-center justify-end gap-6 md:flex">
+          <AuthButton />
           {scheduleBlock}
           {langBlock}
         </div>

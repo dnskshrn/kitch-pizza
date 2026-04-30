@@ -40,7 +40,7 @@ export const brands: BrandConfig[] = [
     domain: 'losos.md',
     devDomain: 'www.losos.md',
     logo: '/Losos_Logo.svg',
-    phone: '079 700 290', // TODO
+    phone: '079 200 190',
     hours: '11:00 – 23:00', // TODO
     cartKey: 'losos-cart',
     deliveryKey: 'losos-delivery',
@@ -57,7 +57,7 @@ export const brands: BrandConfig[] = [
     domain: 'thespot.md',
     devDomain: '192.168.50.137',
     logo: '/the-spot-logo.svg',
-    phone: '079 700 290', // TODO
+    phone: '079 200 120',
     hours: '11:00 – 23:00', // TODO
     cartKey: 'kitch-pizza-cart', // TODO
     deliveryKey: 'kitch-pizza-delivery', // TODO

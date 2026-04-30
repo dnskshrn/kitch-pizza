@@ -4,6 +4,7 @@ import { createOrder } from "@/lib/actions/create-order"
 import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
 import { OrderSummary } from "@/components/client/checkout/order-summary"
+import { CheckoutSkeleton } from "@/components/client/storefront-skeletons"
 import { promoErrorMessage, type StorefrontMessages } from "@/lib/i18n/storefront"
 import {
   getCartGrandTotalBani,
@@ -395,7 +396,11 @@ export function CheckoutView({
     }
   }
 
-  if (!hydrated || items.length === 0) {
+  if (!hydrated) {
+    return <CheckoutSkeleton brandSlug={brandSlug} />
+  }
+
+  if (items.length === 0) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center text-[#808080]">
         {t.checkout.loading}

@@ -9,6 +9,7 @@ export type CreateOrderPosItem = {
   size: "s" | "l" | null
   price: number
   qty: number
+  toppings?: { name: string; price: number }[]
 }
 
 export type CreateOrderPosInput = {
@@ -150,7 +151,7 @@ export async function createOrderPos(
     item_name: it.name,
     size: it.size,
     quantity: it.qty,
-    toppings: [] as { name: string; price: number }[],
+    toppings: (it.toppings ?? []) as { name: string; price: number }[],
     price: Math.round(it.price) * it.qty,
   }))
 

@@ -10,6 +10,7 @@ export type RightPanelState =
   | { mode: "idle" }
   | { mode: "detail"; orderId: string }
   | { mode: "create" }
+  | { mode: "add-items"; orderId: string }
 
 function PosRightIdle({ onNewOrder }: { onNewOrder: () => void }) {
   return (
@@ -28,7 +29,9 @@ export default function PosHomePage() {
   const [panel, setPanel] = useState<RightPanelState>({ mode: "idle" })
 
   const selectedOrderId =
-    panel.mode === "detail" ? panel.orderId : null
+    panel.mode === "detail" || panel.mode === "add-items"
+      ? panel.orderId
+      : null
 
   const handleSelectOrder = useCallback((id: string) => {
     setPanel({ mode: "detail", orderId: id })
@@ -66,6 +69,21 @@ export default function PosHomePage() {
           <OrderDetail
             orderId={panel.orderId}
             onClose={handleClosePanel}
+            onAddItemsToOrder={(id) =>
+              setPanel({ mode: "add-items", orderId: id })
+            }
+          />
+        ) : null}
+        {panel.mode === "add-items" ? (
+          <OrderForm
+            extendOrderId={panel.orderId}
+            onExtendDone={() =>
+              setPanel({ mode: "detail", orderId: panel.orderId })
+            }
+            onClose={() =>
+              setPanel({ mode: "detail", orderId: panel.orderId })
+            }
+            onOrderCreated={handleOrderCreated}
           />
         ) : null}
         {panel.mode === "create" ? (

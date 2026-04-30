@@ -1,15 +1,10 @@
 "use client"
 
-import { brands } from "@/brands/index"
+import { PosBrandMark } from "@/components/pos/pos-brand-mark"
 import { cn } from "@/lib/utils"
 import type { PosOrder, PosOrderStatus } from "@/types/pos"
 import { MapPin, Phone, Store, Truck, User } from "lucide-react"
 
-function brandNameForSlug(slug: string): string {
-  return brands.find((x) => x.slug === slug)?.name ?? slug
-}
-
-/** Форматирует время заказа как HH:MM */
 function formatOrderTime(iso: string): string {
   const date = new Date(iso)
   const h = date.getHours().toString().padStart(2, "0")
@@ -137,7 +132,6 @@ export function OrderCard({
   onSelect,
   onStatusChange,
 }: OrderCardProps) {
-  const brandName = brandNameForSlug(order.brand_slug)
   const orderTime = formatOrderTime(order.created_at)
   const displayName = order.user_name?.trim() || "—"
   const addressLine =
@@ -174,9 +168,7 @@ export function OrderCard({
             <Truck className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
           )}
 
-          <span className="rounded-full bg-[#f2f2f2] px-2 py-0.5 text-[11px] leading-none text-[#808080]">
-            {brandName}
-          </span>
+          <PosBrandMark brandSlug={order.brand_slug} />
 
           <span className="font-mono text-[15px] font-bold tabular-nums text-[#242424]">
             {orderTime}

@@ -3,6 +3,12 @@
 import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
 import { OrderSummary } from "@/components/client/checkout/order-summary"
+import { CheckoutSkeleton } from "@/components/client/storefront-skeletons"
+import {
+  getBrandCallLabel,
+  getBrandPhone,
+  getBrandPhoneHref,
+} from "@/lib/brand-phone"
 import {
   getCartGrandTotalBani,
   selectCartDiscount,
@@ -73,6 +79,9 @@ export function CheckoutSuccessView({
   const searchParams = useSearchParams()
   const hasBoutiqueLayout = hasBoutiqueCheckout(brandSlug)
   const checkoutLogoSize = getCheckoutLogoSize(brandSlug)
+  const brandPhone = getBrandPhone(brandSlug)
+  const brandPhoneHref = getBrandPhoneHref(brandPhone)
+  const brandCallLabel = getBrandCallLabel(brandPhone, lang)
   const rawName = searchParams.get("name") ?? ""
   const customerName = rawName.trim()
 
@@ -114,11 +123,7 @@ export function CheckoutSuccessView({
   }
 
   if (!hydrated || !deliveryHydrated) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center text-[#808080]">
-        {t.checkout.loading}
-      </div>
-    )
+    return <CheckoutSkeleton brandSlug={brandSlug} />
   }
 
   return (
@@ -209,11 +214,12 @@ export function CheckoutSuccessView({
                   {t.success.willCall}
                 </p>
                 <a
-                  href="tel:+37379700290"
+                  href={brandPhoneHref}
+                  aria-label={brandCallLabel}
                   className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-[14px] font-bold text-[#242424] shadow-sm transition-opacity hover:opacity-90"
                 >
                   <Phone className="size-5 shrink-0" strokeWidth={2} aria-hidden />
-                  079 700 290
+                  {brandPhone}
                 </a>
                 <p className="mt-3 max-w-sm text-[13px] leading-snug text-[#5c5c5c]">
                   {t.success.phoneHelp}

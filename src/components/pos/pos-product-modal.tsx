@@ -58,13 +58,47 @@ function normalizeOne<T>(v: T | T[] | null | undefined): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v
 }
 
+/** Предзаполнение при редактировании уже сохранённой строки заказа в POS. */
+export type PosProductModalEditDraft = {
+  orderItemId: string
+  qty: number
+  size: "s" | "l" | null
+  toppings: { name: string; price: number }[]
+}
+
+/** Предзаполнение при правке позиции в корзине (создание заказа POS). */
+export type PosProductModalCartEditDraft = {
+  cartIndex: number
+  qty: number
+  size: "s" | "l" | null
+  toppings: { name: string; price: number }[]
+}
+
 type PosProductModalProps = {
   item: PosProductModalMenuItem | null
   onClose: () => void
   onAdd: (cartItem: PosCartItem) => void
+  /** Если задано — режим правки строки заказа. */
+  editDraft?: PosProductModalEditDraft | null
+  /** Сохранение состава строки (асинхронно, ошибки см. родитель). */
+  onEditSave?: (orderItemId: string, cartItem: PosCartItem) => Promise<void>
+  /** Режим правки строки корзины на шаге меню / оформления. */
+  cartEditDraft?: PosProductModalCartEditDraft | null
+  onCartEditSave?: (
+    cartIndex: number,
+    cartItem: PosCartItem,
+  ) => void | Promise<void>
 }
 
-export function PosProductModal({ item, onClose, onAdd }: PosProductModalProps) {
+export function PosProductModal({
+  item,
+  onClose,
+  onAdd,
+  editDraft,
+  onEditSave,
+  cartEditDraft,
+  onCartEditSave,
+}: PosProductModalProps) {
   const [qty, setQty] = useState(1)
   const [selectedSize, setSelectedSize] = useState<"s" | "l" | null>(null)
   const [selectedByGroup, setSelectedByGroup] = useState<Record<string, string[]>>(
@@ -73,6 +107,12 @@ export function PosProductModal({ item, onClose, onAdd }: PosProductModalProps) 
   const [groups, setGroups] = useState<UiGroup[]>([])
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupsError, setGroupsError] = useState<string | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editSaveError, setEditSaveError] = useState<string | null>(null)
+
+  const isOrderLineEdit = Boolean(editDraft && onEditSave)
+  const isCartEdit = Boolean(cartEditDraft && onCartEditSave)
+  const isEditMode = isOrderLineEdit || isCartEdit
 
   const resetForItem = useCallback((next: PosProductModalMenuItem) => {
     setQty(1)
@@ -83,9 +123,50 @@ export function PosProductModal({ item, onClose, onAdd }: PosProductModalProps) 
   }, [])
 
   useEffect(() => {
+    setEditSaveError(null)
     if (!item) return
-    resetForItem(item)
-  }, [item, resetForItem])
+    if (editDraft && isOrderLineEdit) {
+      setQty(editDraft.qty)
+      setSelectedSize(item.has_sizes ? (editDraft.size ?? "s") : null)
+      setSelectedByGroup({})
+    } else if (cartEditDraft && isCartEdit) {
+      setQty(cartEditDraft.qty)
+      setSelectedSize(item.has_sizes ? (cartEditDraft.size ?? "s") : null)
+      setSelectedByGroup({})
+    } else {
+      resetForItem(item)
+    }
+  }, [item, editDraft, cartEditDraft, isOrderLineEdit, isCartEdit, resetForItem])
+
+  useEffect(() => {
+    if (!item) return
+    const draft =
+      editDraft && isOrderLineEdit
+        ? editDraft
+        : cartEditDraft && isCartEdit
+          ? cartEditDraft
+          : null
+    if (!draft || (!isOrderLineEdit && !isCartEdit) || groupsLoading || groups.length === 0) {
+      return
+    }
+    const next: Record<string, string[]> = {}
+    const snapNames = draft.toppings.map((t) => t.name)
+    for (const g of groups) {
+      const ids = g.toppings
+        .filter((t) => snapNames.includes(t.name_ru))
+        .map((t) => t.id)
+      if (ids.length > 0) next[g.id] = ids
+    }
+    setSelectedByGroup(next)
+  }, [
+    item,
+    editDraft,
+    cartEditDraft,
+    isOrderLineEdit,
+    isCartEdit,
+    groupsLoading,
+    groups,
+  ])
 
   useEffect(() => {
     if (!item) {
@@ -233,9 +314,9 @@ export function PosProductModal({ item, onClose, onAdd }: PosProductModalProps) 
     (!item.has_sizes || selectedSize !== null) &&
     unitTotalBani > 0
 
-  const handleAdd = () => {
-    if (!item || !canAdd) return
-    onAdd({
+  const handlePrimaryAction = async () => {
+    if (!item || !canAdd || editSaving) return
+    const payload: PosCartItem = {
       menuItemId: item.id,
       name: item.name_ru,
       size: item.has_sizes ? selectedSize : null,
@@ -243,7 +324,38 @@ export function PosProductModal({ item, onClose, onAdd }: PosProductModalProps) 
       qty,
       imageUrl: item.image_url ?? undefined,
       toppings: selectedToppingsPayload,
-    })
+    }
+    if (isOrderLineEdit && editDraft && onEditSave) {
+      setEditSaving(true)
+      setEditSaveError(null)
+      try {
+        await onEditSave(editDraft.orderItemId, payload)
+        onClose()
+      } catch (err) {
+        setEditSaveError(
+          err instanceof Error ? err.message : "Не удалось сохранить",
+        )
+      } finally {
+        setEditSaving(false)
+      }
+      return
+    }
+    if (isCartEdit && cartEditDraft && onCartEditSave) {
+      setEditSaving(true)
+      setEditSaveError(null)
+      try {
+        await onCartEditSave(cartEditDraft.cartIndex, payload)
+        onClose()
+      } catch (err) {
+        setEditSaveError(
+          err instanceof Error ? err.message : "Не удалось сохранить",
+        )
+      } finally {
+        setEditSaving(false)
+      }
+      return
+    }
+    onAdd(payload)
     onClose()
   }
 
@@ -423,14 +535,29 @@ export function PosProductModal({ item, onClose, onAdd }: PosProductModalProps) 
               </div>
             </div>
 
+            {isEditMode && editSaveError ? (
+              <p className="text-destructive shrink-0 px-4 pt-2 pb-1 text-center text-sm">
+                {editSaveError}
+              </p>
+            ) : null}
+
             <DialogFooter className="mx-0 mb-0 mt-0 shrink-0 border-t bg-background px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:flex-col">
               <Button
                 type="button"
-                className="h-12 min-h-12 w-full text-[15px]"
-                disabled={!canAdd}
-                onClick={handleAdd}
+                className="inline-flex h-12 min-h-12 w-full items-center justify-center text-[15px]"
+                disabled={!canAdd || editSaving}
+                onClick={() => void handlePrimaryAction()}
               >
-                Добавить в заказ — {formatLei(lineTotalBani)} MDL
+                {editSaving ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    Сохранение…
+                  </>
+                ) : isEditMode ? (
+                  `Сохранить — ${formatLei(lineTotalBani)} MDL`
+                ) : (
+                  `Добавить в заказ — ${formatLei(lineTotalBani)} MDL`
+                )}
               </Button>
             </DialogFooter>
           </>

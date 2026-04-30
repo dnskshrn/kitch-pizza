@@ -98,6 +98,61 @@ export async function createTopping(data: {
   revalidateToppings()
 }
 
+export async function copyToppingToGroup(data: {
+  topping_id: string
+  group_id: string
+}) {
+  const brandId = await getAdminBrandId()
+  const supabase = await createClient()
+
+  const { data: topping, error: readError } = await supabase
+    .from("toppings")
+    .select("name_ru, name_ro, price, sort_order, is_active, image_url")
+    .eq("id", data.topping_id)
+    .eq("brand_id", brandId)
+    .maybeSingle()
+
+  if (readError) throw new Error(readError.message)
+  if (!topping) throw new Error("Топпинг не найден")
+
+  const { data: group, error: groupError } = await supabase
+    .from("topping_groups")
+    .select("id")
+    .eq("id", data.group_id)
+    .eq("brand_id", brandId)
+    .maybeSingle()
+
+  if (groupError) throw new Error(groupError.message)
+  if (!group) throw new Error("Группа топпингов не найдена")
+
+  const { data: existing, error: existingError } = await supabase
+    .from("toppings")
+    .select("id")
+    .eq("brand_id", brandId)
+    .eq("group_id", data.group_id)
+    .eq("name_ru", topping.name_ru)
+    .eq("name_ro", topping.name_ro)
+    .eq("price", topping.price)
+    .maybeSingle()
+
+  if (existingError) throw new Error(existingError.message)
+  if (existing) throw new Error("Такой топпинг уже есть в выбранной группе")
+
+  const { error } = await supabase.from("toppings").insert({
+    brand_id: brandId,
+    group_id: data.group_id,
+    name_ru: topping.name_ru,
+    name_ro: topping.name_ro,
+    price: topping.price,
+    sort_order: topping.sort_order,
+    is_active: topping.is_active,
+    image_url: topping.image_url,
+  })
+
+  if (error) throw new Error(error.message)
+  revalidateToppings()
+}
+
 export async function updateTopping(
   id: string,
   data: {

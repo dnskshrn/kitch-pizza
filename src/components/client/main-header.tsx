@@ -3,6 +3,11 @@
 import { ClientContainer } from "@/components/client/client-container"
 import { BRAND_ACCENT } from "@/lib/client-brand"
 import { NAV_LINKS } from "@/components/client/top-nav"
+import {
+  getBrandCallLabel,
+  getBrandPhone,
+  getBrandPhoneHref,
+} from "@/lib/brand-phone"
 import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import type { Lang, StorefrontMessages } from "@/lib/i18n/storefront"
@@ -14,7 +19,6 @@ import { useEffect, useState } from "react"
 const ADDRESS_BG = "#f3f4f6"
 /** Фиксированная ширина полосы доставки на десктопе (не растягивается на всю колонку). */
 const DELIVERY_BAR_MAX_WIDTH_CLASS = "max-w-[520px]"
-const PHONE_TEL = "tel:+37379700290"
 
 function hasBoutiqueHeader(brandSlug: string): boolean {
   return brandSlug === "the-spot" || brandSlug === "losos"
@@ -50,7 +54,17 @@ function getHeaderLogoMeta(brandSlug: string) {
   }
 }
 
-function PhoneNumberDisplay({ className }: { className?: string }) {
+function PhoneNumberDisplay({
+  className,
+  phone,
+}: {
+  className?: string
+  phone: string
+}) {
+  if (phone !== "079 700 290") {
+    return <span className={className}>{phone}</span>
+  }
+
   return (
     <span className={className}>
       <span className="font-bold not-italic">079 </span>
@@ -159,6 +173,9 @@ function DeliveryBanner({
 function TheSpotDesktopHeader({
   brandSlug,
   addressLabel,
+  brandPhone,
+  brandPhoneHref,
+  brandCallLabel,
   menuOpen,
   overlayLang,
   onOpenAddress,
@@ -168,6 +185,9 @@ function TheSpotDesktopHeader({
 }: {
   brandSlug: string
   addressLabel: string
+  brandPhone: string
+  brandPhoneHref: string
+  brandCallLabel: string
   menuOpen: boolean
   overlayLang: Lang
   onOpenAddress: () => void
@@ -246,12 +266,12 @@ function TheSpotDesktopHeader({
         </div>
 
         <a
-          href={PHONE_TEL}
+          href={brandPhoneHref}
           className="hidden h-11 shrink-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-4 text-[14px] font-bold text-[var(--color-text)] transition-all duration-200 hover:brightness-[0.98] xl:flex"
-          aria-label={t.common.callPhone}
+          aria-label={brandCallLabel}
         >
           <PhoneIcon className="size-4" />
-          <span>079 700 290</span>
+          <span>{brandPhone}</span>
         </a>
 
         <button
@@ -271,6 +291,9 @@ function TheSpotDesktopHeader({
 export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const { lang: overlayLang, setLang: setOverlayLang, t } = useLanguage()
+  const brandPhone = getBrandPhone(brandSlug)
+  const brandPhoneHref = getBrandPhoneHref(brandPhone)
+  const brandCallLabel = getBrandCallLabel(brandPhone, overlayLang)
 
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const deliveryMode = useDeliveryStore((s) => s.mode)
@@ -393,6 +416,9 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
             <TheSpotDesktopHeader
               brandSlug={brandSlug}
               addressLabel={theSpotAddressLabel}
+              brandPhone={brandPhone}
+              brandPhoneHref={brandPhoneHref}
+              brandCallLabel={brandCallLabel}
               menuOpen={menuOpen}
               overlayLang={overlayLang}
               onOpenAddress={openDeliveryModal}
@@ -430,9 +456,9 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
               <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
             </div>
             <a
-              href={PHONE_TEL}
+              href={brandPhoneHref}
               className="text-foreground flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#f3f4f6] p-2.5 transition-all duration-200 hover:brightness-[0.97] active:scale-[0.98]"
-              aria-label={t.common.callPhone}
+              aria-label={brandCallLabel}
             >
               <PhoneIcon className="size-6" />
             </a>
@@ -466,12 +492,12 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
           </div>
           <div className="flex justify-end">
             <a
-              href={PHONE_TEL}
+              href={brandPhoneHref}
               className="text-foreground inline-flex cursor-pointer items-center gap-2 rounded-full bg-[#f3f4f6] px-4 py-2.5 transition-all duration-200 hover:brightness-[0.97] active:scale-[0.98]"
-              aria-label={t.common.callPhone}
+              aria-label={brandCallLabel}
             >
               <PhoneIcon className="size-5 shrink-0" />
-              <PhoneNumberDisplay className="text-lg tracking-tight" />
+              <PhoneNumberDisplay phone={brandPhone} className="text-lg tracking-tight" />
             </a>
           </div>
         </div>
@@ -552,14 +578,14 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
                   </button>
 
                   <a
-                    href={PHONE_TEL}
+                    href={brandPhoneHref}
                     className="flex cursor-pointer items-center gap-3 rounded-[24px] bg-white p-4 text-[16px] font-bold text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.04)] transition-all duration-200 active:scale-[0.98]"
-                    aria-label={t.common.callPhone}
+                    aria-label={brandCallLabel}
                   >
                     <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]">
                       <PhoneIcon className="size-5" />
                     </span>
-                    <span>{t.common.phoneNumber}</span>
+                    <span>{brandPhone}</span>
                   </a>
                 </div>
 

@@ -5,8 +5,9 @@ import {
   PosHeaderIconButton,
   posHeaderCloseButtonClassName,
 } from "@/components/pos/pos-header-icon-button"
+import { PosBrandMark } from "@/components/pos/pos-brand-mark"
 import { PosProductModal } from "@/components/pos/pos-product-modal"
-import { Card, CardContent } from "@/components/ui/card"
+import { SwipeToDelete } from "@/components/pos/swipe-to-delete"
 import {
   Form,
   FormControl,
@@ -16,15 +17,18 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
 import type { DeliveryZoneCheckResultPos } from "@/lib/actions/pos/check-delivery-zone-pos"
 import { createOrderPos } from "@/lib/actions/pos/create-order-pos"
+import { addOrderItemsPos } from "@/lib/actions/pos/update-order-items"
 import { validatePromoCode } from "@/lib/actions/validate-promo-code"
 import { calcPromoDiscount } from "@/lib/discount"
 import { createClient } from "@/lib/supabase/client"
+import { cn } from "@/lib/utils"
 import type { MenuItem } from "@/types/database"
 import type { PosCartItem } from "@/types/pos"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -40,11 +44,10 @@ import {
   Plus,
   ShoppingBag,
   Truck,
-  X,
   XIcon,
 } from "lucide-react"
 import Image from "next/image"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -197,83 +200,94 @@ function ProductCard({
   )
 }
 
-/* ─── Строка корзины ──────────────────────────────────────────── */
+/* ─── Строка корзины: два ряда — заголовок + иконка, затем кол-во и сумма ─ */
 function CartItemRow({
   line,
   idx,
   onUpdateQty,
   onRemove,
+  onOpenLine,
 }: {
   line: PosCartItem
   idx: number
   onUpdateQty: (idx: number, delta: number) => void
   onRemove: (idx: number) => void
+  onOpenLine: (idx: number) => void
 }) {
   return (
-    <div className="border-b border-border px-4 py-3">
-      <div className="flex items-start gap-3">
-        {/* Миниатюра */}
-        <div className="relative size-9 shrink-0 overflow-hidden rounded-full bg-muted">
-          {line.imageUrl ? (
-            <Image
-              src={line.imageUrl}
-              alt=""
-              fill
-              className="object-cover"
-              sizes="36px"
-            />
-          ) : null}
-        </div>
-        {/* Название */}
-        <div className="min-w-0 flex-1">
-          <p className="line-clamp-1 text-sm font-bold text-foreground">
-            {line.name}
-            {line.size ? ` · ${line.size.toUpperCase()}` : ""}
-          </p>
-          {line.toppings.length > 0 ? (
-            <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-              {line.toppings.map((t) => t.name).join(", ")}
+    <SwipeToDelete onDelete={() => onRemove(idx)}>
+      <article
+        role="button"
+        tabIndex={0}
+        onClick={() => onOpenLine(idx)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            onOpenLine(idx)
+          }
+        }}
+        className="flex cursor-pointer flex-col gap-2 rounded-lg bg-[#f2f2f2] p-2 outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-[#242424]/30"
+      >
+        <div className="flex items-start gap-2">
+          <div className="relative size-10 shrink-0 overflow-hidden rounded-full bg-white">
+            {line.imageUrl ? (
+              <Image
+                src={line.imageUrl}
+                alt=""
+                fill
+                className="object-cover"
+                sizes="40px"
+              />
+            ) : null}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="line-clamp-2 text-[13px] font-bold leading-tight text-[#242424]">
+              {line.name}
+              {line.size ? ` · ${line.size.toUpperCase()}` : ""}
             </p>
-          ) : null}
+            {line.toppings.length > 0 ? (
+              <p className="mt-0.5 line-clamp-1 text-[11px] leading-tight text-[#808080]">
+                {line.toppings.map((t) => t.name).join(", ")}
+              </p>
+            ) : null}
+          </div>
         </div>
-        {/* Удалить */}
-        <button
-          type="button"
-          onClick={() => onRemove(idx)}
-          aria-label="Удалить"
-          className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <X className="size-3.5" />
-        </button>
-      </div>
-      {/* Счётчик + цена */}
-      <div className="mt-2.5 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => onUpdateQty(idx, -1)}
-            aria-label="Меньше"
-            className="flex size-6 items-center justify-center rounded-full border border-border text-foreground transition-colors hover:border-foreground active:bg-muted"
-          >
-            <Minus className="size-3" />
-          </button>
-          <span className="w-4 text-center font-mono text-sm tabular-nums text-foreground">
-            {line.qty}
+
+        <div className="flex items-center justify-between gap-3 pl-12">
+          <div className="flex shrink-0 items-center gap-1 rounded-full bg-white p-0.5">
+            <button
+              type="button"
+              aria-label="Уменьшить количество"
+              disabled={line.qty <= 1}
+              onClick={(e) => {
+                e.stopPropagation()
+                onUpdateQty(idx, -1)
+              }}
+              className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Minus className="size-3.5" />
+            </button>
+            <span className="w-5 text-center font-mono text-[12px] font-bold tabular-nums text-[#242424]">
+              {line.qty}
+            </span>
+            <button
+              type="button"
+              aria-label="Увеличить количество"
+              onClick={(e) => {
+                e.stopPropagation()
+                onUpdateQty(idx, 1)
+              }}
+              className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          </div>
+          <span className="min-w-0 shrink-0 text-right font-mono text-[13px] font-bold tabular-nums text-[#242424]">
+            {formatMdl(line.price * line.qty)}
           </span>
-          <button
-            type="button"
-            onClick={() => onUpdateQty(idx, 1)}
-            aria-label="Больше"
-            className="flex size-6 items-center justify-center rounded-full border border-border text-foreground transition-colors hover:border-foreground active:bg-muted"
-          >
-            <Plus className="size-3" />
-          </button>
         </div>
-        <span className="font-mono text-sm font-bold tabular-nums text-foreground">
-          {formatMdlAmount(line.price * line.qty)} лей
-        </span>
-      </div>
-    </div>
+      </article>
+    </SwipeToDelete>
   )
 }
 
@@ -284,22 +298,31 @@ function CartPanel({
   subtotalBani,
   onUpdateQty,
   onRemove,
+  onOpenLine,
   onNext,
   nextLabel,
   nextDisabled,
+  errorBanner,
 }: {
   cart: PosCartItem[]
   cartCount: number
   subtotalBani: number
   onUpdateQty: (idx: number, delta: number) => void
   onRemove: (idx: number) => void
+  onOpenLine: (idx: number) => void
   onNext: () => void
   nextLabel: string
   nextDisabled: boolean
+  errorBanner?: string | null
 }) {
   return (
     /* Серая полоса-отступ справа — часть родительского bg-[#f2f2f2] */
     <div className="flex min-h-0 w-[300px] shrink-0 flex-col p-3 pl-0">
+      {errorBanner ? (
+        <p className="text-destructive mb-2 px-1 text-center text-xs leading-snug">
+          {errorBanner}
+        </p>
+      ) : null}
       <aside className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
         {/* Заголовок */}
         <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-5 py-3.5">
@@ -320,7 +343,7 @@ function CartPanel({
               Корзина пуста
             </p>
           ) : (
-            <div>
+            <div className="space-y-2 p-3 pr-2">
               {cart.map((line, idx) => (
                 <CartItemRow
                   key={`${line.menuItemId}-${line.size ?? "x"}-${idx}`}
@@ -328,6 +351,7 @@ function CartPanel({
                   idx={idx}
                   onUpdateQty={onUpdateQty}
                   onRemove={onRemove}
+                  onOpenLine={onOpenLine}
                 />
               ))}
             </div>
@@ -389,11 +413,23 @@ function FormHeader({
 /* ─── Основной компонент ──────────────────────────────────────── */
 type OrderFormProps = {
   onClose: () => void
-  onOrderCreated: (orderId: string) => void
+  /** Новый заказ после шага «Оформление». */
+  onOrderCreated?: (orderId: string) => void
+  /** Если задан UUID — форма открывается на шаге меню для добавления позиций к существующему заказу. */
+  extendOrderId?: string
+  /** После успешного addOrderItemsPos или отмены «назад» со шага меню. */
+  onExtendDone?: () => void
 }
 
-export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
-  const [step, setStep] = useState<1 | 2 | 3>(1)
+export function OrderForm({
+  onClose,
+  onOrderCreated,
+  extendOrderId,
+  onExtendDone,
+}: OrderFormProps) {
+  const [step, setStep] = useState<1 | 2 | 3>(() =>
+    extendOrderId ? 2 : 1,
+  )
   const [selectedBrand, setSelectedBrand] = useState<BrandConfig | null>(null)
   const [brandId, setBrandId] = useState<string | null>(null)
   const [categories, setCategories] = useState<MenuCategoryRow[]>([])
@@ -402,6 +438,8 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
   const [menuLoading, setMenuLoading] = useState(false)
   const [cart, setCart] = useState<PosCartItem[]>([])
   const [modalItem, setModalItem] = useState<MenuItemRow | null>(null)
+  const [cartEditIndex, setCartEditIndex] = useState<number | null>(null)
+  const cartModalBusyRef = useRef(false)
 
   const [promoInput, setPromoInput] = useState("")
   const [promoResult, setPromoResult] = useState<
@@ -415,6 +453,17 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
 
   const [zoneResult, setZoneResult] = useState<DeliveryZoneCheckResultPos | null>(null)
   const [zoneChecking, setZoneChecking] = useState(false)
+
+  const [extendPrep, setExtendPrep] = useState<{
+    loading: boolean
+    error: string | null
+  }>(() => ({
+    loading: Boolean(extendOrderId),
+    error: null,
+  }))
+  const [extendOrderNumber, setExtendOrderNumber] = useState<number | null>(null)
+  const [extendSubmitting, setExtendSubmitting] = useState(false)
+  const [extendError, setExtendError] = useState<string | null>(null)
 
   const form = useForm<CheckoutFormValues>({
     resolver: zodResolver(checkoutSchema),
@@ -501,6 +550,60 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
   useEffect(() => {
     if (selectedBrand) void resolveBrandId(selectedBrand.slug)
   }, [selectedBrand, resolveBrandId])
+
+  useEffect(() => {
+    if (!extendOrderId) {
+      setExtendPrep({ loading: false, error: null })
+      setExtendOrderNumber(null)
+      setExtendError(null)
+      return
+    }
+
+    let cancelled = false
+    setExtendPrep({ loading: true, error: null })
+
+    void (async () => {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from("orders")
+        .select("order_number, brands(slug)")
+        .eq("id", extendOrderId)
+        .maybeSingle()
+
+      if (cancelled) return
+
+      if (error || !data) {
+        setExtendPrep({ loading: false, error: "Не удалось загрузить заказ" })
+        return
+      }
+
+      const bEmbed = data.brands as { slug: string } | { slug: string }[] | null
+      const slug = Array.isArray(bEmbed) ? bEmbed[0]?.slug : bEmbed?.slug
+      if (!slug) {
+        setExtendPrep({ loading: false, error: "Бренд заказа не найден" })
+        return
+      }
+
+      const cfg = brands.find((x) => x.slug === slug)
+      if (!cfg) {
+        setExtendPrep({ loading: false, error: "Неизвестный бренд" })
+        return
+      }
+
+      setSelectedBrand(cfg)
+      setExtendOrderNumber(data.order_number as number)
+      setCart([])
+      setModalItem(null)
+      setPromoInput("")
+      setPromoResult(null)
+      setPromoError(null)
+      setExtendPrep({ loading: false, error: null })
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [extendOrderId])
 
   const loadCategories = useCallback(async (bid: string) => {
     const supabase = createClient()
@@ -595,6 +698,7 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
 
   const handleProductClick = useCallback(
     (row: MenuItemRow) => {
+      setCartEditIndex(null)
       const hasToppingGroups = (row.menu_item_topping_groups?.length ?? 0) > 0
       if (!row.has_sizes && !hasToppingGroups) {
         const price = unitPriceBani(row, null)
@@ -621,7 +725,7 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
       const row = next[idx]
       if (!row) return prev
       const q = row.qty + delta
-      if (q <= 0) return prev.filter((_, i) => i !== idx)
+      if (q < 1) return prev
       next[idx] = { ...row, qty: q }
       return next
     })
@@ -630,6 +734,37 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
   const removeLine = (idx: number) => {
     setCart((prev) => prev.filter((_, i) => i !== idx))
   }
+
+  const closeProductModal = useCallback(() => {
+    setModalItem(null)
+    setCartEditIndex(null)
+  }, [])
+
+  const openCartLineModal = useCallback(async (idx: number) => {
+    if (cartModalBusyRef.current) return
+    const line = cart[idx]
+    if (!line) return
+    cartModalBusyRef.current = true
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from("menu_items")
+        .select(
+          "id, name_ru, description_ru, category_id, price, has_sizes, size_s_price, size_l_price, size_s_label, size_l_label, image_url, menu_item_topping_groups(id)",
+        )
+        .eq("id", line.menuItemId)
+        .maybeSingle()
+
+      if (error || !data) {
+        console.error("[order-form] cart line modal", error?.message ?? "empty")
+        return
+      }
+      setCartEditIndex(idx)
+      setModalItem(data as MenuItemRow)
+    } finally {
+      cartModalBusyRef.current = false
+    }
+  }, [cart])
 
   const applyPromo = async () => {
     const code = promoInput.trim()
@@ -670,6 +805,10 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
         size: c.size,
         price: c.price,
         qty: c.qty,
+        toppings: c.toppings.map((t) => ({
+          name: t.name,
+          price: Math.round(t.price),
+        })),
       })),
       userName: values.userName,
       userPhone: values.userPhone,
@@ -692,7 +831,39 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
       setSubmitError(res.error)
       return
     }
-    onOrderCreated(res.orderId)
+    onOrderCreated?.(res.orderId)
+  }
+
+  const submitExtendItems = async () => {
+    if (!extendOrderId || cart.length === 0) return
+    setExtendError(null)
+    setExtendSubmitting(true)
+    try {
+      const res = await addOrderItemsPos({
+        orderId: extendOrderId,
+        lines: cart.map((c) => ({
+          menuItemId: c.menuItemId,
+          name:
+            c.toppings.length > 0
+              ? `${c.name} + ${c.toppings.map((t) => t.name).join(", ")}`
+              : c.name,
+          size: c.size,
+          unitPriceBani: c.price,
+          qty: c.qty,
+          toppings: c.toppings.map((t) => ({
+            name: t.name,
+            price: Math.round(t.price),
+          })),
+        })),
+      })
+      if (!res.success) {
+        setExtendError(res.error)
+        return
+      }
+      onExtendDone?.()
+    } finally {
+      setExtendSubmitting(false)
+    }
   }
 
   const onSubmit = form.handleSubmit(submitCheckout)
@@ -730,8 +901,31 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
     </nav>
   )
 
+  if (extendOrderId && extendPrep.loading) {
+    return (
+      <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 p-6 text-sm">
+        <Loader2
+          className="size-8 animate-spin text-foreground/60"
+          aria-hidden
+        />
+        Загрузка заказа…
+      </div>
+    )
+  }
+
+  if (extendOrderId && extendPrep.error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 p-6">
+        <p className="text-destructive text-center text-sm">{extendPrep.error}</p>
+        <Button type="button" variant="outline" onClick={onClose}>
+          Закрыть
+        </Button>
+      </div>
+    )
+  }
+
   /* ── Шаг 1: выбор бренда ── */
-  if (step === 1) {
+  if (step === 1 && !extendOrderId) {
     return (
       <div className="flex h-full min-h-0 flex-col">
         <FormHeader
@@ -743,15 +937,20 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
           stepIndicator={stepIndicator}
           onClose={onClose}
         />
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4 pt-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 pt-3">
           {brands.map((b) => (
-            <Card
+            <button
               key={b.slug}
-              className="hover:bg-muted/40 cursor-pointer border-l-4 py-0 transition-colors"
-              style={{ borderLeftColor: b.colors.accent }}
+              type="button"
+              className={cn(
+                "flex min-h-[min(28vh,180px)] flex-1 cursor-pointer flex-col items-center justify-center gap-4 rounded-xl border-2 bg-white px-6 py-8 shadow-sm transition-all",
+                "hover:bg-muted/30 hover:brightness-[0.99] active:scale-[0.99]",
+              )}
+              style={{ borderColor: b.colors.accent }}
               onClick={() => {
                 setCart([])
                 setModalItem(null)
+                setCartEditIndex(null)
                 setPromoInput("")
                 setPromoResult(null)
                 setPromoError(null)
@@ -759,11 +958,20 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
                 setStep(2)
               }}
             >
-              <CardContent className="p-4">
-                <p className="text-base font-bold">{b.name}</p>
-                <p className="text-muted-foreground text-sm">{b.domain}</p>
-              </CardContent>
-            </Card>
+              <div className="flex h-16 w-full max-w-[220px] shrink-0 items-center justify-center">
+                <Image
+                  src={b.logo}
+                  alt={b.name}
+                  width={240}
+                  height={96}
+                  className="max-h-16 w-auto max-w-full object-contain"
+                  unoptimized
+                />
+              </div>
+              <span className="text-center text-sm font-bold text-foreground">
+                {b.name}
+              </span>
+            </button>
           ))}
         </div>
       </div>
@@ -780,13 +988,19 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
             <>
               <PosHeaderIconButton
                 aria-label="Назад"
-                onClick={() => setStep(1)}
+                onClick={() =>
+                  extendOrderId ? onExtendDone?.() : setStep(1)
+                }
               >
                 <ArrowLeft className="size-4" />
               </PosHeaderIconButton>
-              <span className="min-w-0 truncate text-sm font-bold text-foreground">
-                {selectedBrand.name}
-              </span>
+              {extendOrderId && extendOrderNumber != null ? (
+                <span className="min-w-0 truncate text-sm font-bold text-foreground">
+                  {`Добавить к заказу #${extendOrderNumber}`}
+                </span>
+              ) : (
+                <PosBrandMark brandSlug={selectedBrand.slug} size="md" />
+              )}
             </>
           }
           stepIndicator={stepIndicator}
@@ -806,7 +1020,7 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
               >
                 {/* Заголовок секции */}
                 <p className="shrink-0 px-4 pt-4 pb-3 text-center text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
-                  Оформление заказа
+                  {extendOrderId ? "Добавить позиции" : "Оформление заказа"}
                 </p>
 
                 {/* Горизонтальные табы категорий */}
@@ -880,16 +1094,49 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
             subtotalBani={subtotalBani}
             onUpdateQty={updateQty}
             onRemove={removeLine}
-            onNext={() => setStep(3)}
-            nextLabel="К оформлению"
-            nextDisabled={cart.length === 0}
+            onOpenLine={(idx) => void openCartLineModal(idx)}
+            onNext={() =>
+              extendOrderId ? void submitExtendItems() : setStep(3)
+            }
+            nextLabel={
+              extendSubmitting
+                ? "Сохранение…"
+                : extendOrderId
+                  ? "Добавить к заказу"
+                  : "К оформлению"
+            }
+            nextDisabled={cart.length === 0 || extendSubmitting}
+            errorBanner={extendOrderId ? extendError : null}
           />
         </div>
 
         <PosProductModal
           item={modalItem}
-          onClose={() => setModalItem(null)}
+          onClose={closeProductModal}
           onAdd={(c) => addCartItem(c)}
+          cartEditDraft={
+            cartEditIndex !== null &&
+            modalItem &&
+            cart[cartEditIndex] &&
+            cart[cartEditIndex]!.menuItemId === modalItem.id
+              ? {
+                  cartIndex: cartEditIndex,
+                  qty: cart[cartEditIndex]!.qty,
+                  size: cart[cartEditIndex]!.size,
+                  toppings: cart[cartEditIndex]!.toppings.map((t) => ({
+                    name: t.name,
+                    price: t.price,
+                  })),
+                }
+              : null
+          }
+          onCartEditSave={async (cartIndex, c) => {
+            setCart((prev) => {
+              const next = [...prev]
+              if (next[cartIndex]) next[cartIndex] = c
+              return next
+            })
+          }}
         />
       </div>
     )
@@ -897,9 +1144,10 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
 
   /* ── Шаг 3: оформление ── */
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Навигационная шапка */}
-      <FormHeader
+    <>
+      <div className="flex h-full min-h-0 flex-col">
+        {/* Навигационная шапка */}
+        <FormHeader
         leftSlot={
           <>
             <PosHeaderIconButton
@@ -917,8 +1165,8 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
         onClose={onClose}
       />
 
-      {/* Контент: форма + сводка */}
-      <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
+        {/* Контент: форма + сводка */}
+        <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
 
         {/* ── ЦЕНТР: форма — белая карточка в сером острове ── */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 pr-0">
@@ -1173,15 +1421,18 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {cart.map((line, idx) => (
-                <CartItemRow
-                  key={`${line.menuItemId}-${line.size ?? "x"}-${idx}`}
-                  line={line}
-                  idx={idx}
-                  onUpdateQty={updateQty}
-                  onRemove={removeLine}
-                />
-              ))}
+              <div className="space-y-2 p-3 pr-2">
+                {cart.map((line, idx) => (
+                  <CartItemRow
+                    key={`${line.menuItemId}-${line.size ?? "x"}-${idx}`}
+                    line={line}
+                    idx={idx}
+                    onUpdateQty={updateQty}
+                    onRemove={removeLine}
+                    onOpenLine={(i) => void openCartLineModal(i)}
+                  />
+                ))}
+              </div>
             </div>
 
             <div className="shrink-0 border-t border-border p-5 space-y-2">
@@ -1218,7 +1469,37 @@ export function OrderForm({ onClose, onOrderCreated }: OrderFormProps) {
           </aside>
         </div>
       </div>
-    </div>
+      </div>
+
+      <PosProductModal
+        item={modalItem}
+        onClose={closeProductModal}
+        onAdd={(c) => addCartItem(c)}
+        cartEditDraft={
+          cartEditIndex !== null &&
+          modalItem &&
+          cart[cartEditIndex] &&
+          cart[cartEditIndex]!.menuItemId === modalItem.id
+            ? {
+                cartIndex: cartEditIndex,
+                qty: cart[cartEditIndex]!.qty,
+                size: cart[cartEditIndex]!.size,
+                toppings: cart[cartEditIndex]!.toppings.map((t) => ({
+                  name: t.name,
+                  price: t.price,
+                })),
+              }
+            : null
+        }
+        onCartEditSave={async (cartIndex, c) => {
+          setCart((prev) => {
+            const next = [...prev]
+            if (next[cartIndex]) next[cartIndex] = c
+            return next
+          })
+        }}
+      />
+    </>
   )
 }
 

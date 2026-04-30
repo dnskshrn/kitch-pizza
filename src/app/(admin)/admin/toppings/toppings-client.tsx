@@ -20,6 +20,7 @@ import { Plus, Pencil, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ToppingGroupDialog } from "./topping-group-dialog"
 import { ToppingDialog } from "./topping-dialog"
+import { AddExistingToppingDialog } from "./add-existing-topping-dialog"
 
 function leiFromBani(bani: number) {
   return (bani / 100).toLocaleString("ro-MD", {
@@ -38,6 +39,7 @@ export function ToppingsClient({ groups, toppings }: Props) {
   const [groupCreateOpen, setGroupCreateOpen] = useState(false)
   const [editGroup, setEditGroup] = useState<ToppingGroup | null>(null)
   const [toppingCreateOpen, setToppingCreateOpen] = useState(false)
+  const [addExistingOpen, setAddExistingOpen] = useState(false)
   const [editTopping, setEditTopping] = useState<Topping | null>(null)
   const [pending, startTransition] = useTransition()
 
@@ -160,14 +162,26 @@ export function ToppingsClient({ groups, toppings }: Props) {
         </div>
 
         <div className="min-w-0 flex-1 space-y-3">
-          <Button
-            className="gap-2"
-            disabled={!selectedId}
-            onClick={() => setToppingCreateOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-            Топпинг
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              className="gap-2"
+              disabled={!selectedId}
+              onClick={() => setToppingCreateOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Топпинг
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              disabled={!selectedId || toppings.length === toppingsForGroup.length}
+              onClick={() => setAddExistingOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Существующий
+            </Button>
+          </div>
 
           {!selectedId ? (
             <p className="text-muted-foreground text-sm">
@@ -273,6 +287,12 @@ export function ToppingsClient({ groups, toppings }: Props) {
         mode="create"
         groupId={selectedId}
         topping={null}
+      />
+      <AddExistingToppingDialog
+        open={addExistingOpen}
+        onOpenChange={setAddExistingOpen}
+        groupId={selectedId}
+        toppings={toppings}
       />
       <ToppingDialog
         open={!!editTopping}

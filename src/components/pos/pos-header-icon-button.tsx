@@ -15,7 +15,7 @@ export const posHeaderIconButtonClassName = cn(
 /** Кнопка «Закрыть» (X) — белая плашка на сером фоне панели. */
 export const posHeaderCloseButtonClassName = cn(
   "shrink-0 size-10 min-h-10 min-w-10 rounded-lg border-0",
-  "bg-white !text-foreground shadow-sm",
+  "bg-white !text-foreground shadow-none",
   "hover:!bg-zinc-100 active:!bg-zinc-200",
   "focus-visible:ring-2 focus-visible:ring-ring/50",
 )

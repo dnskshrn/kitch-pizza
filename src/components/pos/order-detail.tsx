@@ -1,15 +1,22 @@
 "use client"
 
-import { brands } from "@/brands/index"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { PosHeaderIconButton } from "@/components/pos/pos-header-icon-button"
+import { PosBrandMark } from "@/components/pos/pos-brand-mark"
+import { PosProductModal } from "@/components/pos/pos-product-modal"
+import {
+  PosHeaderIconButton,
+  posHeaderCloseButtonClassName,
+} from "@/components/pos/pos-header-icon-button"
+import { SwipeToDelete } from "@/components/pos/swipe-to-delete"
 import {
   removeOrderItemPos,
+  updateOrderItemCompositionPos,
   updateOrderItemQuantityPos,
 } from "@/lib/actions/pos/update-order-items"
 import { createClient } from "@/lib/supabase/client"
-import type { PosOrderSource, PosOrderStatus } from "@/types/pos"
+import type { MenuItem } from "@/types/database"
+import type { PosCartItem, PosOrderSource, PosOrderStatus } from "@/types/pos"
 import {
   CalendarDays,
   CreditCard,
@@ -17,7 +24,6 @@ import {
   Phone,
   Plus,
   ReceiptText,
-  Trash2,
   Truck,
   User,
   Wallet,
@@ -25,14 +31,6 @@ import {
 } from "lucide-react"
 import Image from "next/image"
 import { useCallback, useEffect, useMemo, useState } from "react"
-
-function accentForBrandSlug(slug: string): string {
-  return brands.find((x) => x.slug === slug)?.colors.accent ?? "#888"
-}
-
-function brandNameForSlug(slug: string): string {
-  return brands.find((x) => x.slug === slug)?.name ?? slug
-}
 
 function formatMdl(bani: number): string {
   return `${(bani / 100).toLocaleString("ru-RU", {
@@ -130,6 +128,22 @@ type OrderItemRow = {
   menu_items: MenuItemEmbed | MenuItemEmbed[]
 }
 
+type EditMenuItemModalRow = Pick<
+  MenuItem,
+  | "id"
+  | "name_ru"
+  | "description_ru"
+  | "price"
+  | "has_sizes"
+  | "size_s_price"
+  | "size_l_price"
+  | "size_s_label"
+  | "size_l_label"
+  | "image_url"
+> & {
+  menu_item_topping_groups?: { id: string }[] | null
+}
+
 type OrderDetailRow = {
   id: string
   order_number: number
@@ -184,6 +198,20 @@ function itemDisplayName(item: OrderItemRow): string {
   return item.item_name || itemMenuEmbed(item)?.name_ru || "—"
 }
 
+function itemDisplayTitle(item: OrderItemRow): string {
+  const displayName = itemDisplayName(item)
+  const toppingNames = (item.toppings ?? [])
+    .map((t) => t.name?.trim())
+    .filter(Boolean)
+
+  if (toppingNames.length === 0) return displayName
+
+  const plusIndex = displayName.indexOf(" + ")
+  if (plusIndex >= 0) return displayName.slice(0, plusIndex).trim()
+
+  return displayName
+}
+
 function DetailCard({
   title,
   icon,
@@ -201,7 +229,7 @@ function DetailCard({
         <span className="flex size-8 items-center justify-center rounded-full bg-[#f2f2f2] text-[#242424]">
           {icon}
         </span>
-        <h3 className="text-[13px] font-bold uppercase tracking-[0.16em] text-[#808080]">
+        <h3 className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-[#808080]">
           {title}
         </h3>
       </div>
@@ -263,21 +291,22 @@ function SummaryRow({
 type OrderDetailProps = {
   orderId: string
   onClose: () => void
+  /** Открывает шаг с меню (добавить позиции к существующему заказу). */
+  onAddItemsToOrder: (orderId: string) => void
 }
 
-export function OrderDetail({ orderId, onClose }: OrderDetailProps) {
+export function OrderDetail({ orderId, onClose, onAddItemsToOrder }: OrderDetailProps) {
   const [order, setOrder] = useState<OrderDetailRow | null>(null)
   const [operatorName, setOperatorName] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
   const [itemBusyId, setItemBusyId] = useState<string | null>(null)
+  const [productEditModal, setProductEditModal] = useState<{
+    menuRow: EditMenuItemModalRow
+    line: OrderItemRow
+  } | null>(null)
 
-  const accent = useMemo(
-    () => accentForBrandSlug(order ? brandSlugFromRow(order) : ""),
-    [order],
-  )
   const brandSlug = order ? brandSlugFromRow(order) : ""
-  const brandName = brandNameForSlug(brandSlug)
 
   const loadOrder = useCallback(async () => {
     setLoadError(null)
@@ -409,11 +438,82 @@ export function OrderDetail({ orderId, onClose }: OrderDetailProps) {
     }
   }
 
+  const normalizedSizeFromLine = (line: OrderItemRow): "s" | "l" | null => {
+    const s = line.size?.toLowerCase() ?? ""
+    if (s === "s") return "s"
+    if (s === "l") return "l"
+    return null
+  }
+
+  const openEditMenuItemModal = async (line: OrderItemRow) => {
+    const menuId = line.menu_item_id
+    if (!menuId || itemBusyId) return
+
+    setItemBusyId(line.id)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from("menu_items")
+        .select(
+          "id, name_ru, description_ru, price, has_sizes, size_s_price, size_l_price, size_s_label, size_l_label, image_url, menu_item_topping_groups(id)",
+        )
+        .eq("id", menuId)
+        .maybeSingle()
+
+      if (error || !data) {
+        console.error(
+          "[order-detail] edit load menu_item",
+          error?.message ?? "empty",
+        )
+        return
+      }
+      setProductEditModal({
+        menuRow: data as EditMenuItemModalRow,
+        line,
+      })
+    } finally {
+      setItemBusyId(null)
+    }
+  }
+
+  const handleEditLineSave = async (
+    itemIdLine: string,
+    cartPayload: PosCartItem,
+  ) => {
+    if (!order || !cartPayload.menuItemId) return
+    const toppingsDb = cartPayload.toppings.map((t) => ({
+      name: t.name,
+      price: Math.round(t.price),
+    }))
+    const displayName =
+      toppingsDb.length > 0
+        ? `${cartPayload.name} + ${toppingsDb.map((x) => x.name).join(", ")}`
+        : cartPayload.name
+
+    const result = await updateOrderItemCompositionPos({
+      orderId: order.id,
+      itemId: itemIdLine,
+      menuItemId: cartPayload.menuItemId,
+      itemName: displayName,
+      size: cartPayload.size,
+      quantity: cartPayload.qty,
+      unitPriceBani: cartPayload.price,
+      toppings: toppingsDb,
+    })
+    if (!result.success) throw new Error(result.error)
+    setProductEditModal(null)
+    await loadOrder()
+  }
+
   if (loadError && !order) {
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-6">
         <p className="text-destructive text-center text-sm">{loadError}</p>
-        <PosHeaderIconButton aria-label="Закрыть" onClick={onClose}>
+        <PosHeaderIconButton
+          aria-label="Закрыть"
+          className={posHeaderCloseButtonClassName}
+          onClick={onClose}
+        >
           <XIcon className="size-5" />
         </PosHeaderIconButton>
       </div>
@@ -436,13 +536,9 @@ export function OrderDetail({ orderId, onClose }: OrderDetailProps) {
             <h2 className="text-[22px] font-bold leading-none tracking-[-0.03em] text-[#242424]">
               Заказ #{order.order_number}
             </h2>
-            <Badge
-              className="max-w-[200px] truncate border-0 text-white"
-              style={{ backgroundColor: accent }}
-              variant="default"
-            >
-              {brandName}
-            </Badge>
+            {brandSlug ? (
+              <PosBrandMark brandSlug={brandSlug} size="md" />
+            ) : null}
             {statusBadge(order.status)}
           </div>
           <p className="mt-2 text-[13px] text-[#808080]">
@@ -451,7 +547,11 @@ export function OrderDetail({ orderId, onClose }: OrderDetailProps) {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <PosHeaderIconButton onClick={onClose} aria-label="Закрыть">
+          <PosHeaderIconButton
+            onClick={onClose}
+            aria-label="Закрыть"
+            className={posHeaderCloseButtonClassName}
+          >
             <XIcon className="size-5" />
           </PosHeaderIconButton>
         </div>
@@ -526,108 +626,170 @@ export function OrderDetail({ orderId, onClose }: OrderDetailProps) {
             </DetailCard>
           </div>
 
-          <DetailCard
-            title="Данные о заказе"
-            icon={<ReceiptText className="size-4" />}
-            className="col-span-7 min-w-0"
-          >
-            <div className="space-y-3">
-              {(order.order_items ?? []).map((item) => {
-                const embed = itemMenuEmbed(item)
-                const imageUrl = embed?.image_url
-                const toppings = item.toppings ?? []
-                const isBusy = itemBusyId === item.id
-                const canRemove = (order.order_items?.length ?? 0) > 1
+          <div className="col-span-7 flex min-h-[min(420px,calc(100vh-340px))] min-w-0 flex-col lg:min-h-[480px]">
+            <section className="flex min-h-full min-w-0 flex-1 flex-col rounded-xl bg-white p-4">
+              <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#f2f2f2] text-[#242424]">
+                    <ReceiptText className="size-4" aria-hidden />
+                  </span>
+                  <h3 className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-[#808080]">
+                    Данные о заказе
+                  </h3>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 shrink-0 rounded-lg border border-[#f2f2f2] bg-white px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[#242424] shadow-none hover:bg-[#f2f2f2]"
+                  onClick={() => onAddItemsToOrder(order.id)}
+                >
+                  Добавить к заказу
+                </Button>
+              </div>
 
-                return (
-                  <article
-                    key={item.id}
-                    className="flex items-center gap-3 rounded-xl bg-[#f2f2f2] p-3"
-                  >
-                    <div className="relative size-14 shrink-0 overflow-hidden rounded-full bg-white">
-                      {imageUrl ? (
-                        <Image
-                          src={imageUrl}
-                          alt=""
-                          fill
-                          className="object-cover"
-                          sizes="56px"
-                        />
-                      ) : null}
-                    </div>
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-0">
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <div className="space-y-2 pr-1">
+                    {(order.order_items ?? []).map((itemRow) => {
+                      const embed = itemMenuEmbed(itemRow)
+                      const imageUrl = embed?.image_url
+                      const toppings = itemRow.toppings ?? []
+                      const isBusy = itemBusyId === itemRow.id
+                      const canRemove = (order.order_items?.length ?? 0) > 1
+                      const hasMenuBinding = Boolean(itemRow.menu_item_id)
 
-                    <div className="min-w-0 flex-1">
-                      <p className="line-clamp-1 text-[14px] font-bold text-[#242424]">
-                        {itemDisplayName(item)}
-                        {item.size ? ` · ${item.size.toUpperCase()}` : ""}
-                      </p>
-                      {toppings.length > 0 ? (
-                        <p className="mt-1 line-clamp-1 text-[12px] text-[#808080]">
-                          {toppings.map((t) => t.name).filter(Boolean).join(", ")}
-                        </p>
-                      ) : null}
-                      <p className="mt-1 font-mono text-[12px] tabular-nums text-[#808080]">
-                        {formatMdl(unitPriceBani(item))} / шт.
-                      </p>
-                    </div>
+                      return (
+                        <SwipeToDelete
+                          key={itemRow.id}
+                          disabled={isBusy || !canRemove}
+                          onDelete={() => void handleRemoveItem(itemRow)}
+                        >
+                        <article
+                          className="flex flex-wrap items-center gap-2 rounded-lg bg-[#f2f2f2] p-2 sm:flex-nowrap sm:gap-2.5"
+                        >
+                          <div className="relative size-12 shrink-0 overflow-hidden rounded-full bg-white">
+                            {imageUrl ? (
+                              <Image
+                                src={imageUrl}
+                                alt=""
+                                fill
+                                className="object-cover"
+                                sizes="48px"
+                              />
+                            ) : null}
+                          </div>
 
-                    <div className="flex shrink-0 items-center gap-2 rounded-full bg-white p-1">
-                      <button
-                        type="button"
-                        aria-label="Уменьшить количество"
-                        disabled={isBusy || item.quantity <= 1}
-                        onClick={() => void handleQuantityChange(item, -1)}
-                        className="flex size-7 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        <Minus className="size-3.5" />
-                      </button>
-                      <span className="w-5 text-center font-mono text-[13px] font-bold tabular-nums text-[#242424]">
-                        {item.quantity}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Увеличить количество"
-                        disabled={isBusy}
-                        onClick={() => void handleQuantityChange(item, 1)}
-                        className="flex size-7 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        <Plus className="size-3.5" />
-                      </button>
-                    </div>
+                          <div className="min-w-0 flex-1 basis-[120px]">
+                            <p className="line-clamp-1 text-[13px] font-bold leading-tight text-[#242424]">
+                              {itemDisplayTitle(itemRow)}
+                              {itemRow.size ? ` · ${itemRow.size.toUpperCase()}` : ""}
+                            </p>
+                            {toppings.length > 0 ? (
+                              <p className="mt-0.5 line-clamp-1 text-[11px] leading-tight text-[#808080]">
+                                {toppings
+                                  .map((t) => t.name)
+                                  .filter(Boolean)
+                                  .join(", ")}
+                              </p>
+                            ) : null}
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                              <span className="font-mono text-[11px] tabular-nums text-[#808080]">
+                                {formatMdl(unitPriceBani(itemRow))} / шт.
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 shrink-0 rounded-full px-2.5 text-[11px] font-bold text-[#242424] hover:bg-white active:bg-[#e8e8e8] disabled:opacity-40"
+                                disabled={isBusy || !hasMenuBinding}
+                                onClick={() => void openEditMenuItemModal(itemRow)}
+                              >
+                                Изменить
+                              </Button>
+                            </div>
+                          </div>
 
-                    <div className="w-[92px] shrink-0 text-right font-mono text-[13px] font-bold tabular-nums text-[#242424]">
-                      {formatMdl(item.price)}
-                    </div>
+                          <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2 sm:ml-0 sm:gap-2.5">
+                            <div className="flex shrink-0 items-center gap-1 rounded-full bg-white p-0.5">
+                              <button
+                                type="button"
+                                aria-label="Уменьшить количество"
+                                disabled={isBusy || itemRow.quantity <= 1}
+                                onClick={() => void handleQuantityChange(itemRow, -1)}
+                                className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <Minus className="size-3.5" />
+                              </button>
+                              <span className="w-5 text-center font-mono text-[12px] font-bold tabular-nums text-[#242424]">
+                                {itemRow.quantity}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label="Увеличить количество"
+                                disabled={isBusy}
+                                onClick={() => void handleQuantityChange(itemRow, 1)}
+                                className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <Plus className="size-3.5" />
+                              </button>
+                            </div>
 
-                    <button
-                      type="button"
-                      aria-label="Удалить позицию"
-                      disabled={isBusy || !canRemove}
-                      onClick={() => void handleRemoveItem(item)}
-                      className="flex size-8 shrink-0 items-center justify-center rounded-full text-[#808080] transition-colors hover:bg-white hover:text-[#242424] disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  </article>
-                )
-              })}
-            </div>
+                            <div className="flex min-w-[6.5rem] items-center gap-2">
+                              <div className="min-w-[5.5rem] shrink-0 text-right font-mono text-[12px] font-bold tabular-nums text-[#242424]">
+                                {formatMdl(itemRow.price)}
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                        </SwipeToDelete>
+                      )
+                    })}
+                  </div>
+                </div>
 
-            <dl className="mt-4 rounded-xl bg-[#f2f2f2] p-4">
-              <SummaryRow label="Подытог" value={formatMdl(subtotalBani)} />
-              <SummaryRow label="Доставка" value={formatMdl(order.delivery_fee)} />
-              {order.discount > 0 ? (
-                <SummaryRow
-                  label={order.promo_code ? `Скидка · ${order.promo_code}` : "Скидка"}
-                  value={`−${formatMdl(order.discount)}`}
-                  tone="discount"
-                />
-              ) : null}
-              <SummaryRow label="Итого" value={formatMdl(order.total)} tone="total" />
-            </dl>
-          </DetailCard>
+                <dl className="mt-4 shrink-0 rounded-xl bg-[#f2f2f2] p-4 pt-6">
+                  <SummaryRow label="Подытог" value={formatMdl(subtotalBani)} />
+                  <SummaryRow label="Доставка" value={formatMdl(order.delivery_fee)} />
+                  {order.discount > 0 ? (
+                    <SummaryRow
+                      label={
+                        order.promo_code ? `Скидка · ${order.promo_code}` : "Скидка"
+                      }
+                      value={`−${formatMdl(order.discount)}`}
+                      tone="discount"
+                    />
+                  ) : null}
+                  <SummaryRow label="Итого" value={formatMdl(order.total)} tone="total" />
+                </dl>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
+
+      <PosProductModal
+        item={productEditModal?.menuRow ?? null}
+        editDraft={
+          productEditModal
+            ? {
+                orderItemId: productEditModal.line.id,
+                qty: productEditModal.line.quantity,
+                size: normalizedSizeFromLine(productEditModal.line),
+                toppings: (productEditModal.line.toppings ?? []).flatMap((t) => {
+                  const name = typeof t?.name === "string" ? t.name : ""
+                  const priceRaw = typeof t?.price === "number" ? t.price : NaN
+                  if (!name || !Number.isFinite(priceRaw)) return []
+                  return [{ name, price: Math.round(priceRaw) }]
+                }),
+              }
+            : null
+        }
+        onEditSave={(lineId, cartLine) =>
+          handleEditLineSave(lineId, cartLine)
+        }
+        onAdd={() => {}}
+        onClose={() => setProductEditModal(null)}
+      />
 
       <div className="mt-auto shrink-0 space-y-2 border-t border-[#e8e8e8] bg-white p-3">
         {order.status === "done" || order.status === "cancelled" ? (

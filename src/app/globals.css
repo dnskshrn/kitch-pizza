@@ -115,7 +115,7 @@
 }
 
 [data-brand="losos"] {
-  --color-accent: #ff6b5f;
+  --color-accent: #f25130;
   --color-bg: #f4f4f6;
   --color-text: #201a18;
   --color-muted: rgb(32 26 24 / 62%);
@@ -151,10 +151,6 @@
 [data-brand="losos"] {
   background: var(--color-bg);
   color: var(--color-text);
-}
-
-[data-brand="losos"] {
-  font-family: "Google Sans", "Product Sans", var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Storefront modal primitives: Kitch keeps the existing lime/gray system,
@@ -484,6 +480,7 @@
   }
   html {
     @apply font-sans;
+    font-family: "Google Sans", "Product Sans", var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   }
 }
 

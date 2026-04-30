@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { useLanguage } from "@/lib/store/language-store"
 
 export type CheckoutProgressStep = 1 | 2 | 3
 
@@ -7,22 +8,23 @@ type CheckoutProgressStepsProps = {
 }
 
 export function CheckoutProgressSteps({ activeStep }: CheckoutProgressStepsProps) {
+  const { t } = useLanguage()
   return (
     <div
       className="flex w-max max-w-full items-center gap-1 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] md:gap-3"
-      aria-label="Этапы оформления заказа"
+      aria-label={t.checkout.stepsLabel}
     >
-      <StepPill n={1} label="Корзина" active={activeStep === 1} />
+      <StepPill n={1} label={t.checkout.stepCart} active={activeStep === 1} />
       <div
         className="h-0 w-6 shrink-0 border-t-2 border-dashed border-[#ccc] md:w-8"
         aria-hidden
       />
-      <StepPill n={2} label="Оформление заказа" active={activeStep === 2} />
+      <StepPill n={2} label={t.checkout.stepCheckout} active={activeStep === 2} />
       <div
         className="h-0 w-6 shrink-0 border-t-2 border-dashed border-[#ccc] md:w-8"
         aria-hidden
       />
-      <StepPill n={3} label="Заказ отправлен" active={activeStep === 3} />
+      <StepPill n={3} label={t.checkout.stepSent} active={activeStep === 3} />
     </div>
   )
 }

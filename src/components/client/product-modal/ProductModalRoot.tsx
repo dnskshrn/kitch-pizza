@@ -1,7 +1,15 @@
 "use client"
 
 import { fetchToppingsForMenuItem } from "@/lib/data/storefront-item-toppings"
+import {
+  formatMoney,
+  formatWeightGrams,
+  pickLocalizedDescription,
+  pickLocalizedName,
+  type Lang,
+} from "@/lib/i18n/storefront"
 import { useCartStore } from "@/lib/store/cart-store"
+import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
 import type { MenuItem, Topping } from "@/types/database"
 import { cn } from "@/lib/utils"
@@ -16,24 +24,7 @@ import {
 } from "./SizeSelector"
 import { ToppingCard } from "./ToppingCard"
 
-const LANG_KEY = "lang"
 const DESKTOP_EXIT_MS = 300
-
-type Lang = "RU" | "RO"
-
-function readLang(): Lang {
-  if (typeof window === "undefined") return "RU"
-  return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
-}
-
-function formatLeiFromBani(bani: number, lang: Lang): string {
-  const lei = bani / 100
-  const formatted = lei.toLocaleString("ro-MD", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
-  return lang === "RO" ? `${formatted} lei` : `${formatted} лей`
-}
 
 function getBasePriceBani(item: MenuItem, size: PizzaSize): number {
   if (item.has_sizes) {
@@ -58,19 +49,23 @@ function totalBani(
 }
 
 /** Плашка «размер + вес» для шапки модалки; null — не показывать. */
-function getWeightPillLabel(item: MenuItem, selectedSize: PizzaSize): string | null {
+function getWeightPillLabel(
+  item: MenuItem,
+  selectedSize: PizzaSize,
+  lang: Lang,
+): string | null {
   if (!item.has_sizes) {
     if (item.weight_grams == null) return null
     const portion = item.size_l_label?.trim()
-    if (portion) return `${portion}, ${item.weight_grams}гр`
-    return `${item.weight_grams}гр`
+    if (portion) return `${portion}, ${formatWeightGrams(item.weight_grams, lang)}`
+    return formatWeightGrams(item.weight_grams, lang)
   }
   const sw = item.size_s_weight
   const lw = item.size_l_weight
   if (sw == null && lw == null) return null
   const activeLabel = getItemSizeLabel(item, selectedSize)
   const active = selectedSize === "l" ? lw : sw
-  if (active != null) return `${activeLabel}, ${active}гр`
+  if (active != null) return `${activeLabel}, ${formatWeightGrams(active, lang)}`
   return activeLabel
 }
 
@@ -146,7 +141,7 @@ export function ProductModalRoot() {
   const [visible, setVisible] = useState(false)
   const [rendered, setRendered] = useState(false)
 
-  const [lang, setLang] = useState<Lang>("RU")
+  const { lang, t } = useLanguage()
   const [toppings, setToppings] = useState<Topping[]>([])
   const [selectedSize, setSelectedSize] = useState<PizzaSize>("l")
   const [selectedToppingIds, setSelectedToppingIds] = useState<string[]>([])
@@ -172,15 +167,6 @@ export function ProductModalRoot() {
       return () => clearTimeout(timer)
     }
   }, [isOpen])
-
-  useEffect(() => {
-    setLang(readLang())
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === LANG_KEY) setLang(readLang())
-    }
-    window.addEventListener("storage", onStorage)
-    return () => window.removeEventListener("storage", onStorage)
-  }, [])
 
   useEffect(() => {
     if (!isOpen || !storeItem) return
@@ -235,12 +221,12 @@ export function ProductModalRoot() {
     }
   }, [close, panelItem, selectedSize, selectedToppingIds, toppings])
 
-  const addToCartLabel = lang === "RO" ? "În coș" : "В корзину"
-  const closeLabel = lang === "RO" ? "Închide" : "Закрыть"
+  const addToCartLabel = t.product.addToCart
+  const closeLabel = t.product.close
 
   const totalLabel = useMemo(() => {
     if (!panelItem) return ""
-    return formatLeiFromBani(
+    return formatMoney(
       totalBani(panelItem, selectedSize, toppings, selectedToppingIds),
       lang,
     )
@@ -248,19 +234,15 @@ export function ProductModalRoot() {
 
   const weightPillLabel = useMemo(() => {
     if (!panelItem) return null
-    return getWeightPillLabel(panelItem, selectedSize)
-  }, [panelItem, selectedSize])
+    return getWeightPillLabel(panelItem, selectedSize, lang)
+  }, [panelItem, selectedSize, lang])
 
   const titleName = panelItem
-    ? lang === "RO"
-      ? panelItem.name_ro
-      : panelItem.name_ru
+    ? pickLocalizedName(panelItem, lang)
     : ""
 
   const descriptionText = panelItem
-    ? lang === "RO"
-      ? panelItem.description_ro
-      : panelItem.description_ru
+    ? pickLocalizedDescription(panelItem, lang)
     : null
 
   const imageBlock =
@@ -280,7 +262,7 @@ export function ProductModalRoot() {
             className="flex h-full w-full items-center justify-center text-sm text-zinc-400"
             aria-hidden
           >
-            {lang === "RO" ? "Fără foto" : "Нет фото"}
+            {t.common.noPhoto}
           </div>
         )}
       </div>
@@ -303,7 +285,7 @@ export function ProductModalRoot() {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-bold leading-tight text-[#242424]">
-              {lang === "RO" ? panelItem.name_ro : panelItem.name_ru}
+              {pickLocalizedName(panelItem, lang)}
             </h2>
             {weightPillLabel ? (
               <span className="storefront-modal-field inline-flex shrink-0 items-center rounded-full border border-[#ccc] px-3 py-1 text-sm font-medium text-[rgba(36,36,36,0.5)]">
@@ -332,8 +314,8 @@ export function ProductModalRoot() {
                 topping={t}
                 selected={selectedToppingIds.includes(t.id)}
                 onToggle={() => toggleTopping(t.id)}
-                name={lang === "RO" ? t.name_ro : t.name_ru}
-                priceLabel={formatLeiFromBani(t.price, lang)}
+                name={pickLocalizedName(t, lang)}
+                priceLabel={formatMoney(t.price, lang)}
               />
             ))}
           </div>

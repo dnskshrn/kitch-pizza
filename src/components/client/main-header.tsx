@@ -5,19 +5,12 @@ import { BRAND_ACCENT } from "@/lib/client-brand"
 import { NAV_LINKS } from "@/components/client/top-nav"
 import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import type { Lang, StorefrontMessages } from "@/lib/i18n/storefront"
+import { useLanguage } from "@/lib/store/language-store"
 import Image from "next/image"
 import Link from "next/link"
 import { Bike, MapPin, Menu, X } from "lucide-react"
 import { useEffect, useState } from "react"
-
-const LANG_KEY = "lang"
-
-type Lang = "RU" | "RO"
-
-function readStoredLang(): Lang {
-  if (typeof window === "undefined") return "RU"
-  return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
-}
 const ADDRESS_BG = "#f3f4f6"
 /** Фиксированная ширина полосы доставки на десктопе (не растягивается на всю колонку). */
 const DELIVERY_BAR_MAX_WIDTH_CLASS = "max-w-[520px]"
@@ -72,14 +65,20 @@ function truncAddress(s: string, max: number): string {
   return `${t.slice(0, Math.max(0, max - 1))}…`
 }
 
-function Logo({ brandSlug = "kitch-pizza" }: { brandSlug?: string }) {
+function Logo({
+  brandSlug = "kitch-pizza",
+  homeLabel,
+}: {
+  brandSlug?: string
+  homeLabel: (brandName: string) => string
+}) {
   const logo = getHeaderLogoMeta(brandSlug)
 
   return (
     <Link
       href="/"
       className="inline-flex shrink-0 cursor-pointer items-center transition-all duration-200 hover:opacity-90"
-      aria-label={`${logo.alt} — на главную`}
+      aria-label={homeLabel(logo.alt)}
     >
       <Image
         src={logo.src}
@@ -115,10 +114,12 @@ function DeliveryBanner({
   addressLabel,
   etaMinutes,
   onOpenAddress,
+  t,
 }: {
   addressLabel: string
   etaMinutes: number
   onOpenAddress: () => void
+  t: StorefrontMessages
 }) {
   return (
     <div
@@ -127,19 +128,21 @@ function DeliveryBanner({
     >
       <div className="min-w-0">
         <p className="text-sm font-bold leading-tight text-foreground">
-          Доставляем пиццу{" "}
-          <span style={{ color: BRAND_ACCENT }}>Ботаника</span>
+          {t.header.deliveryTitle}{" "}
+          <span style={{ color: BRAND_ACCENT }}>{t.header.deliveryArea}</span>
         </p>
         <p className="text-muted-foreground mt-1 text-xs">
-          Привезем за{" "}
-          <span className="font-bold text-foreground">~{etaMinutes} мин</span>
+          {t.header.etaPrefix}{" "}
+          <span className="font-bold text-foreground">
+            ~{etaMinutes} {t.header.etaSuffix}
+          </span>
         </p>
       </div>
       <button
         type="button"
         onClick={onOpenAddress}
         className="flex w-full max-w-full shrink-0 cursor-pointer items-center gap-2 rounded-full bg-white px-3 py-2.5 text-left text-sm text-foreground transition-all duration-200 hover:brightness-[0.98] sm:w-auto"
-        aria-label="Адрес доставки"
+        aria-label={t.header.deliveryAddress}
       >
         <MapPin
           className="size-4 shrink-0"
@@ -161,6 +164,7 @@ function TheSpotDesktopHeader({
   onOpenAddress,
   onOpenMenu,
   onLangChange,
+  t,
 }: {
   brandSlug: string
   addressLabel: string
@@ -169,30 +173,31 @@ function TheSpotDesktopHeader({
   onOpenAddress: () => void
   onOpenMenu: () => void
   onLangChange: (lang: Lang) => void
+  t: StorefrontMessages
 }) {
   const navLinks = [
-    { href: "#menu", label: "Меню" },
-    { href: "#promotions", label: "Акции" },
-    { href: "#contacts", label: "Контакты" },
+    { href: "#menu", label: t.common.menu },
+    { href: "#promotions", label: t.common.promotions },
+    { href: "#contacts", label: t.common.contacts },
   ] as const
 
   return (
     <div className="hidden w-full md:block">
       <div className="flex min-h-[64px] w-full items-center gap-2 rounded-full bg-white p-2 shadow-[0_14px_42px_rgba(36,36,36,0.04)] md:-mx-2 md:w-[calc(100%+1rem)] lg:-mx-4 lg:w-[calc(100%+2rem)] lg:gap-3">
         <div className="flex min-w-[96px] shrink-0 justify-start pl-2 lg:min-w-[120px]">
-          <Logo brandSlug={brandSlug} />
+          <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
         </div>
 
         <button
           type="button"
           onClick={onOpenAddress}
           className="flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--color-bg)] px-4 text-left transition-all duration-200 hover:brightness-[0.98] lg:max-w-[340px]"
-          aria-label="Адрес доставки"
+          aria-label={t.header.deliveryAddress}
         >
           <Bike className="size-4 shrink-0 text-[var(--color-text)]" strokeWidth={2.2} />
           <span className="min-w-0">
             <span className="block truncate text-[11px] font-normal leading-none text-[var(--color-muted)]">
-              Адрес доставки
+              {t.header.deliveryAddress}
             </span>
             <span className="mt-1 block truncate text-[14px] font-bold leading-none text-[var(--color-text)]">
               {addressLabel}
@@ -202,7 +207,7 @@ function TheSpotDesktopHeader({
 
         <nav
           className="hidden min-w-0 flex-1 items-center justify-center gap-2 lg:flex"
-          aria-label="Навигация The Spot"
+          aria-label={t.header.navigationLabel}
         >
           {navLinks.map((link) => (
             <a
@@ -243,7 +248,7 @@ function TheSpotDesktopHeader({
         <a
           href={PHONE_TEL}
           className="hidden h-11 shrink-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-4 text-[14px] font-bold text-[var(--color-text)] transition-all duration-200 hover:brightness-[0.98] xl:flex"
-          aria-label="Позвонить 079 700 290"
+          aria-label={t.common.callPhone}
         >
           <PhoneIcon className="size-4" />
           <span>079 700 290</span>
@@ -253,7 +258,7 @@ function TheSpotDesktopHeader({
           type="button"
           className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[var(--color-bg)] text-[var(--color-text)] transition-all duration-200 active:scale-[0.97] lg:hidden"
           aria-expanded={menuOpen}
-          aria-label={menuOpen ? "Закрыть меню" : "Открыть меню"}
+          aria-label={menuOpen ? t.header.closeMenu : t.header.openMenu}
           onClick={onOpenMenu}
         >
           <Menu className="size-6" strokeWidth={2} />
@@ -265,7 +270,7 @@ function TheSpotDesktopHeader({
 
 export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [overlayLang, setOverlayLang] = useState<Lang>("RU")
+  const { lang: overlayLang, setLang: setOverlayLang, t } = useLanguage()
 
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const deliveryMode = useDeliveryStore((s) => s.mode)
@@ -274,39 +279,32 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
 
   const addressLabel =
     deliveryMode === "pickup"
-      ? "Самовывоз · bd. Dacia 27"
+      ? t.header.pickupShort
       : resolvedAddress
         ? truncAddress(resolvedAddress, 42)
-        : "Укажите ваш адрес"
+        : t.header.addressPlaceholder
   const theSpotAddressLabel =
     deliveryMode === "pickup"
-      ? "Самовывоз · bd. Dacia 27"
+      ? t.header.pickupShort
       : resolvedAddress
         ? truncAddress(resolvedAddress, 34)
-        : "str. Dacia 35"
+        : t.header.theSpotFallbackAddress
 
   const etaMinutes = selectedZone?.delivery_time_min ?? 42
   const hasBoutiqueLayout = hasBoutiqueHeader(brandSlug)
   const menuLinks = hasBoutiqueLayout
     ? ([
-        { href: "#menu", label: "Меню" },
-        { href: "#promotions", label: "Акции" },
-        { href: "#contacts", label: "Контакты" },
+        { href: "#menu", label: t.common.menu },
+        { href: "#promotions", label: t.common.promotions },
+        { href: "#contacts", label: t.common.contacts },
       ] as const)
-    : NAV_LINKS
-
-  useEffect(() => {
-    setOverlayLang(readStoredLang())
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    window.localStorage.setItem(LANG_KEY, overlayLang)
-  }, [overlayLang])
+    : NAV_LINKS.map((link) => ({
+        href: link.href,
+        label: t.nav[link.labelKey],
+      }))
 
   useEffect(() => {
     if (!menuOpen) return
-    setOverlayLang(readStoredLang())
     const prev = document.body.style.overflow
     document.body.style.overflow = "hidden"
     return () => {
@@ -316,7 +314,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
 
   const scheduleBlock = (
     <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 text-[12px]">
-      <span>График работы</span>
+      <span>{t.common.schedule}</span>
       <span className="whitespace-nowrap">11:00 – 23:00</span>
     </div>
   )
@@ -364,17 +362,17 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
           <>
             <div className="md:hidden">
               <div className="flex h-[63px] w-full items-center gap-3 rounded-full bg-white p-2">
-                <Logo brandSlug={brandSlug} />
+                <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
                 <button
                   type="button"
                   onClick={openDeliveryModal}
                   className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--color-bg)] px-4 py-2 text-center"
-                  aria-label="Адрес доставки"
+                  aria-label={t.header.deliveryAddress}
                 >
                   <Bike className="size-5 shrink-0 text-[var(--color-text)]" strokeWidth={2.2} />
                   <span className="min-w-0 leading-none">
                     <span className="block truncate text-[10px] font-normal text-[var(--color-muted)]">
-                      Адрес доставки
+                      {t.header.deliveryAddress}
                     </span>
                     <span className="mt-1 block truncate text-[14px] font-bold text-[var(--color-text)]">
                       {theSpotAddressLabel}
@@ -385,7 +383,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
                   type="button"
                   className="flex h-full w-[51px] shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-[var(--color-text)] transition-all duration-200 active:scale-[0.97]"
                   aria-expanded={menuOpen}
-                  aria-label={menuOpen ? "Закрыть меню" : "Открыть меню"}
+                  aria-label={menuOpen ? t.header.closeMenu : t.header.openMenu}
                   onClick={() => setMenuOpen((o) => !o)}
                 >
                   <Menu className="h-7 w-7" strokeWidth={2} />
@@ -400,6 +398,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
               onOpenAddress={openDeliveryModal}
               onOpenMenu={() => setMenuOpen((o) => !o)}
               onLangChange={setOverlayLang}
+              t={t}
             />
           </>
         ) : (
@@ -409,7 +408,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
               type="button"
               className="text-foreground -ml-1 flex shrink-0 cursor-pointer p-1 transition-all duration-200 active:scale-[0.97]"
               aria-expanded={menuOpen}
-              aria-label={menuOpen ? "Закрыть меню" : "Открыть меню"}
+              aria-label={menuOpen ? t.header.closeMenu : t.header.openMenu}
               onClick={() => setMenuOpen((o) => !o)}
             >
               <svg
@@ -428,12 +427,12 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
               </svg>
             </button>
             <div className="flex min-w-0 flex-1 justify-center">
-              <Logo brandSlug={brandSlug} />
+              <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
             </div>
             <a
               href={PHONE_TEL}
               className="text-foreground flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#f3f4f6] p-2.5 transition-all duration-200 hover:brightness-[0.97] active:scale-[0.98]"
-              aria-label="Позвонить 079 700 290"
+              aria-label={t.common.callPhone}
             >
               <PhoneIcon className="size-6" />
             </a>
@@ -442,6 +441,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
             addressLabel={addressLabel}
             etaMinutes={etaMinutes}
             onOpenAddress={openDeliveryModal}
+            t={t}
           />
         </div>
         )}
@@ -454,20 +454,21 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
           }
         >
           <div className="flex justify-start">
-            <Logo brandSlug={brandSlug} />
+            <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
           </div>
           <div className="flex min-w-0 justify-start">
             <DeliveryBanner
               addressLabel={addressLabel}
               etaMinutes={etaMinutes}
               onOpenAddress={openDeliveryModal}
+              t={t}
             />
           </div>
           <div className="flex justify-end">
             <a
               href={PHONE_TEL}
               className="text-foreground inline-flex cursor-pointer items-center gap-2 rounded-full bg-[#f3f4f6] px-4 py-2.5 transition-all duration-200 hover:brightness-[0.97] active:scale-[0.98]"
-              aria-label="Позвонить 079 700 290"
+              aria-label={t.common.callPhone}
             >
               <PhoneIcon className="size-5 shrink-0" />
               <PhoneNumberDisplay className="text-lg tracking-tight" />
@@ -485,7 +486,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
           }
           role="dialog"
           aria-modal="true"
-          aria-label="Меню"
+          aria-label={t.common.menu}
         >
           {hasBoutiqueLayout ? (
             <>
@@ -499,12 +500,12 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
               />
               <ClientContainer className="the-spot-menu-content relative z-10 flex items-center justify-between px-4 py-[max(0.75rem,env(safe-area-inset-top))]">
                 <div className="flex h-[63px] min-w-0 flex-1 items-center rounded-full bg-white px-4 shadow-[0_16px_42px_rgba(36,36,36,0.06)]">
-                  <Logo brandSlug={brandSlug} />
+                  <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
                 </div>
                 <button
                   type="button"
                   className="ml-3 flex size-[63px] shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.06)] transition-all duration-200 active:scale-[0.96]"
-                  aria-label="Закрыть меню"
+                  aria-label={t.header.closeMenu}
                   onClick={() => setMenuOpen(false)}
                 >
                   <X className="size-7" strokeWidth={2} />
@@ -512,7 +513,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
               </ClientContainer>
 
               <ClientContainer className="the-spot-menu-content relative z-10 flex flex-1 flex-col overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
-                <nav className="flex flex-col gap-3" aria-label="Навигация The Spot">
+                <nav className="flex flex-col gap-3" aria-label={t.header.navigationLabel}>
                   {menuLinks.map((link, index) => (
                     <a
                       key={link.label}
@@ -542,7 +543,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
                     </span>
                     <span className="min-w-0">
                       <span className="block text-[12px] font-medium text-[var(--color-muted)]">
-                        Адрес доставки
+                        {t.header.deliveryAddress}
                       </span>
                       <span className="mt-1 block truncate text-[16px] font-bold text-[var(--color-text)]">
                         {theSpotAddressLabel}
@@ -553,18 +554,18 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
                   <a
                     href={PHONE_TEL}
                     className="flex cursor-pointer items-center gap-3 rounded-[24px] bg-white p-4 text-[16px] font-bold text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.04)] transition-all duration-200 active:scale-[0.98]"
-                    aria-label="Позвонить 079 700 290"
+                    aria-label={t.common.callPhone}
                   >
                     <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]">
                       <PhoneIcon className="size-5" />
                     </span>
-                    <span>079 700 290</span>
+                    <span>{t.common.phoneNumber}</span>
                   </a>
                 </div>
 
                 <div className="mt-auto flex items-end justify-between gap-4 pt-6">
                   <div className="text-[12px] font-medium leading-relaxed text-[var(--color-muted)]">
-                    <span className="block">График работы</span>
+                    <span className="block">{t.common.schedule}</span>
                     <span className="block font-bold text-[var(--color-text)]">
                       11:00 – 23:00
                     </span>
@@ -602,7 +603,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
                 <button
                   type="button"
                   className="cursor-pointer p-1 transition-all duration-200 active:scale-[0.97]"
-                  aria-label="Закрыть меню"
+                  aria-label={t.header.closeMenu}
                   onClick={() => setMenuOpen(false)}
                 >
                   <svg
@@ -636,7 +637,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
                   className="mt-2 inline-flex w-fit cursor-pointer rounded-full bg-[#ECFFA1] px-4 py-2 font-semibold text-[#5F7600] transition-all duration-200 hover:bg-[#dff090] active:scale-[0.97]"
                   onClick={() => setMenuOpen(false)}
                 >
-                  Акции
+                  {t.common.promotions}
                 </a>
               </ClientContainer>
               <ClientContainer className="py-4">

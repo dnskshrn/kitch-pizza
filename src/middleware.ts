@@ -1,7 +1,14 @@
 import { createServerClient } from "@supabase/ssr"
 import { jwtVerify } from "jose"
 import { NextResponse, type NextRequest } from "next/server"
-import { getBrandByHost } from "@/brands"
+import { getBrandByHost, getBrandBySlug } from "@/brands"
+
+const localBrandPathAliases: Record<string, string> = {
+  "/losos": "losos",
+  "/losos/": "losos",
+  "/thespot": "the-spot",
+  "/thespot/": "the-spot",
+}
 
 function buildRequestHeadersWithBrand(request: NextRequest, brandSlug: string) {
   const requestHeaders = new Headers(request.headers)
@@ -27,10 +34,13 @@ export async function middleware(request: NextRequest) {
     request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ??
     request.headers.get("host") ??
     ""
-  const brand = getBrandByHost(host)
+  const pathname = request.nextUrl.pathname
+  const aliasedBrandSlug = localBrandPathAliases[pathname]
+  const brand = aliasedBrandSlug
+    ? getBrandBySlug(aliasedBrandSlug)
+    : getBrandByHost(host)
 
   const requestHeaders = buildRequestHeadersWithBrand(request, brand.slug)
-  const pathname = request.nextUrl.pathname
 
   const isPosRoute = pathname.startsWith("/pos")
   const isPosLogin = pathname === "/pos/login"
@@ -49,19 +59,30 @@ export async function middleware(request: NextRequest) {
     })
   }
 
-  const isCheckoutRoute = pathname.startsWith("/checkout")
-
-  if (isCheckoutRoute) {
-    const token = request.cookies.get("storefront-session")?.value
-    if (!token) {
-      return NextResponse.redirect(new URL("/", request.url))
-    }
-  }
+  // const isCheckoutRoute = pathname.startsWith("/checkout")
+  //
+  // if (isCheckoutRoute) {
+  //   const token = request.cookies.get("storefront-session")?.value
+  //   if (!token) {
+  //     return NextResponse.redirect(new URL("/", request.url))
+  //   }
+  // }
 
   const isAdminRoute = pathname.startsWith("/admin")
   const isAdminLoginPage = pathname === "/admin/login"
 
   if (!isAdminRoute) {
+    if (aliasedBrandSlug) {
+      const rewriteUrl = request.nextUrl.clone()
+      rewriteUrl.pathname = "/"
+
+      return NextResponse.rewrite(rewriteUrl, {
+        request: {
+          headers: requestHeaders,
+        },
+      })
+    }
+
     return NextResponse.next({
       request: {
         headers: requestHeaders,

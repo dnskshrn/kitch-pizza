@@ -3,6 +3,8 @@
 import { reverseGeocode } from "@/lib/actions/check-delivery-zone"
 import { findZoneForPoint } from "@/lib/geo"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import { useLanguage } from "@/lib/store/language-store"
+import { cn } from "@/lib/utils"
 import type { DeliveryZone } from "@/types/database"
 import dynamic from "next/dynamic"
 import { useCallback, useEffect, useState } from "react"
@@ -20,6 +22,8 @@ const DeliveryMap = dynamic(() => import("./DeliveryMap"), {
   ),
 })
 
+const SHEET_EXIT_MS = 300
+
 type DeliverySheetProps = {
   open: boolean
   onClose: () => void
@@ -27,19 +31,36 @@ type DeliverySheetProps = {
 }
 
 export function DeliverySheet({ open, onClose, zones }: DeliverySheetProps) {
+  const { t } = useLanguage()
+  const [visible, setVisible] = useState(false)
+  const [rendered, setRendered] = useState(false)
   const [locating, setLocating] = useState(false)
   const mode = useDeliveryStore((s) => s.mode)
   const mapLat = useDeliveryStore((s) => s.lat)
   const mapLng = useDeliveryStore((s) => s.lng)
 
   useEffect(() => {
-    if (!open) return
+    if (open) {
+      setRendered(true)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => setVisible(true))
+      })
+      return
+    }
+
+    setVisible(false)
+    const timer = setTimeout(() => setRendered(false), SHEET_EXIT_MS)
+    return () => clearTimeout(timer)
+  }, [open])
+
+  useEffect(() => {
+    if (!rendered) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = "hidden"
     return () => {
       document.body.style.overflow = previousOverflow
     }
-  }, [open])
+  }, [rendered])
 
   const resolvePick = useCallback(
     async (la: number, ln: number) => {
@@ -66,19 +87,28 @@ export function DeliverySheet({ open, onClose, zones }: DeliverySheetProps) {
     )
   }, [resolvePick])
 
-  if (!open) return null
+  if (!rendered) return null
 
   return (
     <>
-      <div className="fixed inset-0 z-[60] bg-black/50" aria-hidden />
+      <div
+        className={cn(
+          "fixed inset-0 z-[60] bg-black/50 transition-opacity duration-300 ease-out",
+          visible ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden
+      />
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="delivery-sheet-title"
-        className="storefront-modal-surface fixed inset-0 z-[70] flex h-dvh max-h-dvh flex-col overflow-hidden p-0 outline-none"
+        className={cn(
+          "storefront-modal-surface fixed inset-0 z-[70] flex h-dvh max-h-dvh flex-col overflow-hidden p-0 outline-none transition-all duration-300 ease-out",
+          visible ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0",
+        )}
       >
         <h2 id="delivery-sheet-title" className="sr-only">
-          Адрес доставки
+          {t.delivery.title}
         </h2>
 
         {/* Верх: карта (~половина высоты), как на десктопе — отдельно от панели формы */}
@@ -103,7 +133,7 @@ export function DeliverySheet({ open, onClose, zones }: DeliverySheetProps) {
               type="button"
               onClick={onClose}
               className="storefront-modal-surface pointer-events-auto absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[26] flex size-11 shrink-0 items-center justify-center rounded-full text-[#242424] shadow-md transition hover:opacity-90 active:scale-[0.96]"
-              aria-label="Закрыть"
+              aria-label={t.common.close}
             >
               <X className="size-[22px]" strokeWidth={2.5} aria-hidden />
             </button>

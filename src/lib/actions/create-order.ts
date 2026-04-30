@@ -2,6 +2,7 @@
 
 import { getCartItemPrice, type CartLang } from "@/lib/cart-helpers"
 import { getBrandId } from "@/lib/get-brand-id"
+import { getMessages } from "@/lib/i18n/storefront"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { CartItem } from "@/types/cart"
 
@@ -58,14 +59,15 @@ export async function executeCreateOrder(
 ): Promise<CreateOrderResult> {
   const phone = payload.userPhone.trim()
   const name = payload.userName.trim()
+  const t = getMessages(payload.lang)
   if (!name) {
-    return { success: false, error: "Укажите имя" }
+    return { success: false, error: t.orderErrors.nameRequired }
   }
   if (!phone) {
-    return { success: false, error: "Укажите телефон" }
+    return { success: false, error: t.orderErrors.phoneRequired }
   }
   if (!payload.items.length) {
-    return { success: false, error: "Корзина пуста" }
+    return { success: false, error: t.orderErrors.emptyCart }
   }
 
   const scheduledTime =
@@ -79,7 +81,7 @@ export async function executeCreateOrder(
     brandId = await resolveBrandId()
     supabase = createServiceRoleClient()
   } catch {
-    return { success: false, error: "Сервер временно недоступен" }
+    return { success: false, error: t.orderErrors.serverUnavailable }
   }
 
   const insertRow = {
@@ -107,7 +109,7 @@ export async function executeCreateOrder(
 
   if (orderError || !orderRow) {
     console.error("[createOrder] orders insert", orderError?.message)
-    return { success: false, error: "Не удалось сохранить заказ" }
+    return { success: false, error: t.orderErrors.saveOrderFailed }
   }
 
   const orderId = orderRow.id as string
@@ -139,7 +141,7 @@ export async function executeCreateOrder(
       .delete()
       .eq("id", orderId)
       .eq("brand_id", brandId)
-    return { success: false, error: "Не удалось сохранить состав заказа" }
+    return { success: false, error: t.orderErrors.saveItemsFailed }
   }
 
   return { success: true, orderNumber }

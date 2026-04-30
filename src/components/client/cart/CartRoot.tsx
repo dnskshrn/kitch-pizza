@@ -5,6 +5,7 @@ import {
   selectCartSubtotal,
   useCartStore,
 } from "@/lib/store/cart-store"
+import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
 import type { CartItem } from "@/types/cart"
 import { useEffect, useState } from "react"
@@ -29,6 +30,7 @@ function useIsMobileViewport() {
 }
 
 export function CartRoot() {
+  const { t } = useLanguage()
   const isMobile = useIsMobileViewport()
   const isOpen = useCartStore((s) => s.isOpen)
   const items = useCartStore((s) => s.items)
@@ -64,7 +66,7 @@ export function CartRoot() {
   }
 
   return isMobile ? (
-    <CartSheet isOpen={isOpen} onClose={closeCart} title="Корзина">
+    <CartSheet isOpen={isOpen} onClose={closeCart} title={t.cart.total}>
       <CartContent {...contentProps} />
     </CartSheet>
   ) : (

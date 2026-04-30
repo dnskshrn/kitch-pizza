@@ -2,6 +2,8 @@
 
 import { getCartItemPrice, getCartItemSummary } from "@/lib/cart-helpers"
 import type { CartLang } from "@/lib/cart-helpers"
+import { formatMoney } from "@/lib/i18n/storefront"
+import { useLanguage } from "@/lib/store/language-store"
 import type { CartItem } from "@/types/cart"
 import { Minus, Plus, X } from "lucide-react"
 import Image from "next/image"
@@ -23,13 +25,10 @@ export function CartItemCard({
   onRemove,
   onQuantityChange,
 }: CartItemCardProps) {
+  const { t } = useLanguage()
   const summary = getCartItemSummary(cartItem, lang)
   const unitBani = getCartItemPrice(cartItem)
-  const lineTotalLei = (unitBani * cartItem.quantity) / 100
-  const formattedLine = lineTotalLei.toLocaleString("ro-MD", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
+  const formattedLine = formatMoney(unitBani * cartItem.quantity, lang)
 
   return (
     <div className="storefront-modal-surface storefront-modal-card-radius flex flex-col rounded-[16px] p-3">
@@ -48,7 +47,7 @@ export function CartItemCard({
               className="flex h-full w-full items-center justify-center text-center text-[10px] leading-tight text-zinc-400"
               aria-hidden
             >
-              {lang === "RO" ? "Fără foto" : "Нет фото"}
+              {t.common.noPhoto}
             </div>
           )}
         </div>
@@ -64,7 +63,7 @@ export function CartItemCard({
           type="button"
           onClick={onRemove}
           className="shrink-0 self-start p-0.5 text-[rgba(36,36,36,0.4)] transition-colors hover:text-[#242424]"
-          aria-label="Удалить"
+          aria-label={t.cart.remove}
         >
           <X className="size-4" strokeWidth={2} />
         </button>
@@ -72,21 +71,21 @@ export function CartItemCard({
 
       <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
         <p className="text-[16px] font-bold tabular-nums text-[#242424]">
-          {formattedLine} лей
+          {formattedLine}
         </p>
         <button
           type="button"
           onClick={onEdit}
           className="storefront-modal-accent text-[15px] font-medium transition-opacity hover:opacity-80"
         >
-          Изменить
+          {t.cart.edit}
         </button>
         <div className="storefront-modal-field inline-flex shrink-0 items-center gap-0 rounded-full p-0.5">
           <button
             type="button"
             onClick={() => onQuantityChange(-1)}
             className="flex size-8 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
-            aria-label="Меньше"
+            aria-label={t.cart.decrease}
           >
             <Minus className="size-4" strokeWidth={2.5} />
           </button>
@@ -97,7 +96,7 @@ export function CartItemCard({
             type="button"
             onClick={() => onQuantityChange(1)}
             className="flex size-8 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
-            aria-label="Больше"
+            aria-label={t.cart.increase}
           >
             <Plus className="size-4" strokeWidth={2.5} />
           </button>

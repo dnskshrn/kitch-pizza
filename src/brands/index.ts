@@ -45,7 +45,7 @@ export const brands: BrandConfig[] = [
     cartKey: 'losos-cart',
     deliveryKey: 'losos-delivery',
     colors: {
-      accent: '#ff6b5f',
+      accent: '#f25130',
       accentBg: '#ffe2dc',
       cartPill: '#ff6b5f',
       activeDot: '#ff6b5f',

@@ -1,6 +1,7 @@
 "use client"
 
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
 import { Bike, UtensilsCrossed } from "lucide-react"
 
@@ -14,6 +15,7 @@ export function DeliveryModeIsland({
   variant = "panel",
   className,
 }: DeliveryModeIslandProps) {
+  const { t } = useLanguage()
   const mode = useDeliveryStore((s) => s.mode)
   const setMode = useDeliveryStore((s) => s.setMode)
 
@@ -22,7 +24,7 @@ export function DeliveryModeIsland({
   return (
     <div
       role="group"
-      aria-label="Способ получения заказа"
+      aria-label={t.delivery.modeGroup}
       className={cn(
         "flex h-[42px] w-full gap-[10px] rounded-full p-[4px]",
         isFloating && "max-w-[min(100%,320px)]",
@@ -51,7 +53,7 @@ export function DeliveryModeIsland({
         )}
       >
         <Bike className="size-[18px] shrink-0" strokeWidth={2} aria-hidden />
-        <span className="truncate">Доставка</span>
+        <span className="truncate">{t.delivery.delivery}</span>
       </button>
       <button
         type="button"
@@ -72,7 +74,7 @@ export function DeliveryModeIsland({
         )}
       >
         <UtensilsCrossed className="size-[18px] shrink-0" strokeWidth={2} aria-hidden />
-        <span className="truncate">Самовывоз</span>
+        <span className="truncate">{t.delivery.pickup}</span>
       </button>
     </div>
   )

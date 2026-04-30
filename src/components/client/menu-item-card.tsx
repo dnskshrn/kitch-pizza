@@ -1,6 +1,13 @@
 "use client"
 
 import { calcCompareAt } from "@/lib/discount"
+import {
+  formatMoney,
+  pickLocalizedDescription,
+  pickLocalizedName,
+  type Lang,
+} from "@/lib/i18n/storefront"
+import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
 import type { MenuItem } from "@/types/database"
 import Image from "next/image"
@@ -9,20 +16,11 @@ import { ItemBadge } from "./item-badge"
 export type MenuItemCardProps = {
   brandSlug?: string
   item: MenuItem
-  lang: "RU" | "RO"
+  lang: Lang
 }
 
 function hasTheSpotCard(brandSlug: string): boolean {
   return brandSlug === "the-spot"
-}
-
-function formatLeiFromBani(bani: number, lang: "RU" | "RO"): string {
-  const lei = bani / 100
-  const formatted = lei.toLocaleString("ro-MD", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
-  return lang === "RO" ? `${formatted} lei` : `${formatted} лей`
 }
 
 function getDisplayPriceBani(item: MenuItem): number | null {
@@ -50,7 +48,7 @@ export type MenuItemPriceLabels = {
 /** Общая логика цен для карточки и мобильной строки (как на десктопе). */
 export function getMenuItemPriceLabels(
   item: MenuItem,
-  lang: "RU" | "RO",
+  lang: Lang,
 ): MenuItemPriceLabels {
   const priceBani = getDisplayPriceBani(item)
   const discount = hasActiveDiscount(item) ? item.discount_percent! : null
@@ -59,9 +57,9 @@ export function getMenuItemPriceLabels(
     priceBani != null
       ? item.has_sizes
         ? lang === "RO"
-          ? `de la ${formatLeiFromBani(priceBani, lang)}`
-          : `от ${formatLeiFromBani(priceBani, lang)}`
-        : formatLeiFromBani(priceBani, lang)
+          ? `de la ${formatMoney(priceBani, lang)}`
+          : `от ${formatMoney(priceBani, lang)}`
+        : formatMoney(priceBani, lang)
       : null
 
   let priceMain: string | null = null
@@ -69,14 +67,14 @@ export function getMenuItemPriceLabels(
 
   if (priceBani != null && discount != null) {
     const compareBani = calcCompareAt(priceBani, discount)
-    priceCompare = formatLeiFromBani(compareBani, lang)
+    priceCompare = formatMoney(compareBani, lang)
     if (item.has_sizes) {
       priceMain =
         lang === "RO"
-          ? `de la ${formatLeiFromBani(priceBani, lang)}`
-          : `от ${formatLeiFromBani(priceBani, lang)}`
+          ? `de la ${formatMoney(priceBani, lang)}`
+          : `от ${formatMoney(priceBani, lang)}`
     } else {
-      priceMain = formatLeiFromBani(priceBani, lang)
+      priceMain = formatMoney(priceBani, lang)
     }
   } else {
     priceMain = priceLabelNoDiscount
@@ -113,9 +111,8 @@ const CHOOSE_BTN_CLASS =
 function cardAriaLabel(
   name: string,
   priceMain: string | null,
-  lang: "RU" | "RO",
+  action: string,
 ): string {
-  const action = lang === "RO" ? "Alege produsul" : "Выбрать товар"
   if (priceMain) return `${name}. ${priceMain}. ${action}`
   return `${name}. ${action}`
 }
@@ -126,22 +123,23 @@ export function MenuItemCard({
   lang,
 }: MenuItemCardProps) {
   const openProductModal = useProductModalStore((s) => s.open)
+  const { t } = useLanguage()
 
-  const name = lang === "RO" ? item.name_ro : item.name_ru
-  const description =
-    lang === "RO" ? item.description_ro : item.description_ru
+  const name = pickLocalizedName(item, lang)
+  const description = pickLocalizedDescription(item, lang)
 
   const { priceMain, priceCompare } = getMenuItemPriceLabels(item, lang)
-  const aria = cardAriaLabel(name, priceMain, lang)
+  const aria = cardAriaLabel(name, priceMain, t.menu.chooseProduct)
 
   const openModal = () => openProductModal(item)
   const isTheSpot = hasTheSpotCard(brandSlug)
   const isLosos = brandSlug === "losos"
+  const hasLososStyleCard = isLosos || isTheSpot
 
   return (
     <div className="h-full md:flex md:flex-col">
       {/* Mobile: вся строка — одна кнопка */}
-      {isLosos ? (
+      {hasLososStyleCard ? (
         <button
           type="button"
           onClick={openModal}
@@ -162,9 +160,9 @@ export function MenuItemCard({
               <span className="absolute left-3 top-3 z-10 max-w-[76px] rounded-[10px] bg-[var(--color-accent)] px-2.5 py-1.5 text-center text-[10px] font-semibold leading-[0.98] text-white">
                 {item.tag.toLowerCase() === "новинка" ? (
                   <>
-                    новый
+                    {t.menu.tags.new}
                     <br />
-                    рецепт
+                    {lang === "RO" ? "rețetă" : "рецепт"}
                   </>
                 ) : (
                   item.tag
@@ -198,44 +196,6 @@ export function MenuItemCard({
             </div>
           </div>
         </button>
-      ) : isTheSpot ? (
-        <button
-          type="button"
-          onClick={openModal}
-          aria-label={aria}
-          className="group flex w-full flex-col gap-3 text-left md:hidden"
-        >
-          <div className="relative aspect-square w-full overflow-hidden rounded-[12px] bg-white">
-            {item.image_url ? (
-              <Image
-                src={item.image_url}
-                alt=""
-                fill
-                className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
-                sizes="50vw"
-              />
-            ) : null}
-          </div>
-          <div className="min-w-0">
-            <h3 className="line-clamp-2 text-[17px] font-bold leading-[1.12] text-[var(--color-text)]">
-              {name}
-            </h3>
-            {description ? (
-              <p className="mt-2 line-clamp-4 text-[13px] font-normal leading-[1.2] text-[var(--color-muted)]">
-                {description}
-              </p>
-            ) : null}
-            {priceMain ? (
-              <div className="mt-3 inline-flex rounded-full bg-[var(--color-accent-soft)] px-3 py-2 text-[14px] font-bold leading-none text-[var(--color-accent-text)]">
-                <MenuItemPriceBlock
-                  priceMain={priceMain.replace("лей", "MDL")}
-                  priceCompare={priceCompare}
-                  className="flex min-w-0 items-baseline gap-x-1 tabular-nums"
-                />
-              </div>
-            ) : null}
-          </div>
-        </button>
       ) : (
         <button
           type="button"
@@ -259,7 +219,7 @@ export function MenuItemCard({
                 className="flex h-full w-full items-center justify-center text-[10px] text-zinc-400"
                 aria-hidden
               >
-                {lang === "RO" ? "Fără foto" : "Нет фото"}
+                {t.common.noPhoto}
               </div>
             )}
           </div>
@@ -291,7 +251,7 @@ export function MenuItemCard({
                 className={`pointer-events-none px-3 py-1.5 text-xs ${CHOOSE_BTN_CLASS}`}
                 aria-hidden
               >
-                {lang === "RO" ? "Alege" : "Выбрать"}
+                {t.menu.choose}
               </span>
             </div>
           </div>
@@ -299,7 +259,7 @@ export function MenuItemCard({
       )}
 
       {/* Desktop: вся карточка — одна кнопка */}
-      {isLosos ? (
+      {hasLososStyleCard ? (
         <button
           type="button"
           onClick={openModal}
@@ -320,16 +280,16 @@ export function MenuItemCard({
                 className="flex h-full w-full items-center justify-center text-xs text-[var(--color-muted)]"
                 aria-hidden
               >
-                {lang === "RO" ? "Fără foto" : "Нет фото"}
+                {t.common.noPhoto}
               </div>
             )}
             {item.tag ? (
               <span className="absolute left-4 top-4 z-10 max-w-[88px] rounded-[12px] bg-[var(--color-accent)] px-3 py-2 text-center text-[12px] font-semibold leading-[0.98] text-white">
                 {item.tag.toLowerCase() === "новинка" ? (
                   <>
-                    новый
+                    {t.menu.tags.new}
                     <br />
-                    рецепт
+                    {lang === "RO" ? "rețetă" : "рецепт"}
                   </>
                 ) : (
                   item.tag
@@ -363,56 +323,6 @@ export function MenuItemCard({
             </div>
           </div>
         </button>
-      ) : isTheSpot ? (
-        <button
-          type="button"
-          onClick={openModal}
-          aria-label={aria}
-          className="group hidden h-full w-full flex-col gap-3 text-left md:flex"
-        >
-          <div className="relative aspect-square w-full overflow-hidden rounded-[var(--radius-card)] bg-white">
-            {item.image_url ? (
-              <Image
-                src={item.image_url}
-                alt=""
-                fill
-                className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
-                sizes="(max-width: 1023px) 31vw, (max-width: 1279px) 30vw, 286px"
-              />
-            ) : (
-              <div
-                className="flex h-full w-full items-center justify-center text-xs text-[var(--color-muted)]"
-                aria-hidden
-              >
-                {lang === "RO" ? "Fără foto" : "Нет фото"}
-              </div>
-            )}
-            {item.tag ? (
-              <div className="pointer-events-none absolute right-3 top-3 z-10">
-                <ItemBadge tag={item.tag} />
-              </div>
-            ) : null}
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col">
-            <h3 className="line-clamp-2 text-[18px] font-bold leading-[1.12] tracking-[-0.01em] text-[var(--color-text)] lg:text-[20px]">
-              {name}
-            </h3>
-            {description ? (
-              <p className="mt-2 line-clamp-3 text-[14px] leading-snug text-[var(--color-muted)]">
-                {description}
-              </p>
-            ) : null}
-            {priceMain ? (
-              <div className="mt-3 inline-flex w-fit rounded-full bg-[var(--color-accent-soft)] px-3.5 py-2 text-[15px] font-bold leading-none text-[var(--color-accent-text)] transition-all duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white">
-                <MenuItemPriceBlock
-                  priceMain={priceMain.replace("лей", "MDL")}
-                  priceCompare={priceCompare}
-                  className="flex min-w-0 items-baseline gap-x-1 tabular-nums"
-                />
-              </div>
-            ) : null}
-          </div>
-        </button>
       ) : (
         <button
           type="button"
@@ -441,7 +351,7 @@ export function MenuItemCard({
                 className="flex h-full w-full items-center justify-center text-xs text-muted-foreground"
                 aria-hidden
               >
-                {lang === "RO" ? "Fără foto" : "Нет фото"}
+                {t.common.noPhoto}
               </div>
             )}
           </div>
@@ -456,7 +366,7 @@ export function MenuItemCard({
                 className={`pointer-events-none px-4 py-2 text-sm ${CHOOSE_BTN_CLASS}`}
                 aria-hidden
               >
-                {lang === "RO" ? "Alege" : "Выбрать"}
+                {t.menu.choose}
               </span>
             </div>
           </div>

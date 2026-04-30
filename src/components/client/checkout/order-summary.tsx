@@ -5,6 +5,8 @@ import {
   getCartItemSummary,
   type CartLang,
 } from "@/lib/cart-helpers"
+import { formatMoney, goodsPhrase, pickLocalizedName } from "@/lib/i18n/storefront"
+import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
 import type { CartItem } from "@/types/cart"
 import type { DeliveryZone } from "@/types/database"
@@ -14,23 +16,6 @@ import { useMemo } from "react"
 
 const btnMotion = "cursor-pointer transition-all duration-200 ease-out"
 const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
-
-/** Склонение «N товар(ов)» для RU. */
-function ruGoodsPhrase(n: number): string {
-  const abs = n % 100
-  const d = n % 10
-  if (abs > 10 && abs < 20) return `${n} товаров`
-  if (d === 1) return `${n} товар`
-  if (d >= 2 && d <= 4) return `${n} товара`
-  return `${n} товаров`
-}
-
-function formatLei(bani: number): string {
-  return (bani / 100).toLocaleString("ro-MD", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
-}
 
 export type OrderSummaryProps = {
   lang: CartLang
@@ -62,13 +47,14 @@ export function OrderSummary({
   checkoutSubmitting = false,
   checkoutError = null,
 }: OrderSummaryProps) {
+  const { t } = useLanguage()
   const deliveryLabel = useMemo(() => {
-    if (mode === "pickup") return "Бесплатно"
+    if (mode === "pickup") return t.common.free
     if (!selectedZone) return "--"
-    if (selectedZone.delivery_price_bani === 0) return "Бесплатно"
-    if (deliveryFeeBani === 0) return "Бесплатно"
-    return `${formatLei(deliveryFeeBani)} лей`
-  }, [mode, selectedZone, deliveryFeeBani])
+    if (selectedZone.delivery_price_bani === 0) return t.common.free
+    if (deliveryFeeBani === 0) return t.common.free
+    return formatMoney(deliveryFeeBani, lang)
+  }, [mode, selectedZone, deliveryFeeBani, lang, t.common.free])
 
   const showCheckoutCta = typeof onCheckout === "function"
 
@@ -76,10 +62,10 @@ export function OrderSummary({
     <div className="storefront-checkout-card storefront-modal-card-radius rounded-[24px] p-6 md:p-7">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-2">
         <h2 className="text-[20px] font-bold text-[#242424]">
-          Содержимое заказа
+          {t.checkout.orderContent}
         </h2>
         <span className="inline-flex items-center gap-1 text-[12px] font-bold text-[#808080]">
-          Акции 2+1 / 3+1
+          {t.cart.promos}
           <Info className="size-4 shrink-0" strokeWidth={2} aria-hidden />
         </span>
       </div>
@@ -87,8 +73,7 @@ export function OrderSummary({
       <ul className="divide-y divide-[#f5f5f5]">
         {items.map((cartItem) => {
           const line = getCartItemSummary(cartItem, lang)
-          const name =
-            lang === "RO" ? cartItem.menuItem.name_ro : cartItem.menuItem.name_ru
+          const name = pickLocalizedName(cartItem.menuItem, lang)
           const unit =
             cartItem.quantity > 1 ? ` × ${cartItem.quantity}` : ""
           const imageUrl = cartItem.menuItem.image_url
@@ -111,7 +96,7 @@ export function OrderSummary({
                     className="flex h-full w-full items-center justify-center rounded-xl border border-dashed border-[#e8e8e8] text-center text-[9px] font-medium leading-tight text-[#c4c4c4]"
                     aria-hidden
                   >
-                    {lang === "RO" ? "Fără foto" : "Нет фото"}
+                    {t.common.noPhoto}
                   </div>
                 )}
               </div>
@@ -125,7 +110,7 @@ export function OrderSummary({
                 ) : null}
               </div>
               <p className="shrink-0 self-start pt-0.5 text-right text-[14px] font-medium tabular-nums text-[#242424]">
-                {formatLei(getCartItemPrice(cartItem) * cartItem.quantity)} лей
+                {formatMoney(getCartItemPrice(cartItem) * cartItem.quantity, lang)}
               </p>
             </li>
           )
@@ -134,30 +119,30 @@ export function OrderSummary({
 
       <div className="mt-6 space-y-2 border-t border-[#f5f5f5] pt-4">
         <div className="flex items-center justify-between text-[14px] font-medium text-[rgba(36,36,36,0.5)]">
-          <span>{ruGoodsPhrase(itemCount)}</span>
-          <span className="tabular-nums">{formatLei(subtotal)} лей</span>
+          <span>{goodsPhrase(itemCount, lang)}</span>
+          <span className="tabular-nums">{formatMoney(subtotal, lang)}</span>
         </div>
         <div className="flex items-center justify-between text-[14px] font-medium text-[rgba(36,36,36,0.5)]">
           <span className="inline-flex items-center gap-1">
-            Стоимость доставки
+            {t.checkout.deliveryCost}
             <Info className="size-[14px] shrink-0 opacity-60" strokeWidth={2} />
           </span>
           <span className="tabular-nums text-[#242424]">{deliveryLabel}</span>
         </div>
         {discount > 0 ? (
           <div className="flex items-center justify-between text-[14px] font-medium">
-            <span className="text-[rgba(36,36,36,0.5)]">Скидка</span>
+            <span className="text-[rgba(36,36,36,0.5)]">{t.cart.discount}</span>
             <span className="storefront-modal-accent tabular-nums">
-              −{formatLei(discount)} лей
+              −{formatMoney(discount, lang)}
             </span>
           </div>
         ) : null}
       </div>
 
       <div className="mt-6 flex items-center justify-between border-t border-[#f0f0f0] pt-4">
-        <span className="text-[16px] font-bold text-[#242424]">Сумма заказа</span>
+        <span className="text-[16px] font-bold text-[#242424]">{t.checkout.orderTotal}</span>
         <span className="text-[14px] font-bold tabular-nums text-[#242424]">
-          {formatLei(grandTotal)} лей
+          {formatMoney(grandTotal, lang)}
         </span>
       </div>
 
@@ -176,7 +161,7 @@ export function OrderSummary({
               <Loader2 className="size-6 animate-spin" aria-hidden />
             ) : (
               <>
-                Оформить заказ
+                {t.checkout.submit}
                 <ChevronRight className="size-5 shrink-0" strokeWidth={2} />
               </>
             )}

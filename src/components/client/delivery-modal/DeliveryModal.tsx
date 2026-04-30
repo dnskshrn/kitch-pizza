@@ -3,6 +3,7 @@
 import { reverseGeocode } from "@/lib/actions/check-delivery-zone"
 import { findZoneForPoint } from "@/lib/geo"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import { useLanguage } from "@/lib/store/language-store"
 import type { DeliveryZone } from "@/types/database"
 import { cn } from "@/lib/utils"
 import { X } from "lucide-react"
@@ -29,6 +30,7 @@ type DeliveryModalProps = {
 }
 
 export function DeliveryModal({ open, onClose, zones }: DeliveryModalProps) {
+  const { t } = useLanguage()
   const [visible, setVisible] = useState(false)
   const [rendered, setRendered] = useState(false)
   const [locating, setLocating] = useState(false)
@@ -100,13 +102,13 @@ export function DeliveryModal({ open, onClose, zones }: DeliveryModalProps) {
           )}
           role="dialog"
           aria-modal="true"
-          aria-label="Адрес доставки"
+          aria-label={t.delivery.title}
         >
           <button
             type="button"
             onClick={onClose}
             className="storefront-modal-surface absolute right-4 top-4 z-[2000] flex size-11 cursor-pointer items-center justify-center rounded-full text-[#242424] shadow-md transition-all duration-200 hover:bg-gray-200 active:scale-[0.93]"
-            aria-label="Закрыть"
+            aria-label={t.common.close}
           >
             <X size={22} strokeWidth={2.5} />
           </button>

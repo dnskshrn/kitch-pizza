@@ -7,6 +7,13 @@ import {
   selectCartSubtotal,
   useCartStore,
 } from "@/lib/store/cart-store"
+import {
+  formatMoney,
+  pickLocalizedName,
+  type Lang,
+  type StorefrontMessages,
+} from "@/lib/i18n/storefront"
+import { useLanguage } from "@/lib/store/language-store"
 import type { Category } from "@/types/database"
 import { cn } from "@/lib/utils"
 import Image from "next/image"
@@ -19,19 +26,6 @@ import {
   useRef,
   useState,
 } from "react"
-
-const LANG_KEY = "lang"
-
-type Lang = "RU" | "RO"
-
-function readLang(): Lang {
-  if (typeof window === "undefined") return "RU"
-  return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
-}
-
-function categoryLabel(c: Category, lang: Lang): string {
-  return lang === "RO" ? c.name_ro : c.name_ru
-}
 
 function menuCategorySectionId(slug: string): string {
   return `menu-category-${slug}`
@@ -70,14 +64,20 @@ const STICKY_LOGO_DURATION_MS = 400
 const STICKY_LOGO_EASING = "cubic-bezier(0.4, 0, 0.2, 1)"
 
 /** Логотип в прилипшей полосе: ширина 0 → max, fade-in + сдвиг слева. */
-function StickyBarLogo({ isStuck }: { isStuck: boolean }) {
-  const t = `${STICKY_LOGO_DURATION_MS}ms ${STICKY_LOGO_EASING}`
+function StickyBarLogo({
+  isStuck,
+  t,
+}: {
+  isStuck: boolean
+  t: StorefrontMessages
+}) {
+  const transition = `${STICKY_LOGO_DURATION_MS}ms ${STICKY_LOGO_EASING}`
   return (
     <div
       className="shrink-0 overflow-hidden"
       style={{
         maxWidth: isStuck ? STICKY_LOGO_MAX_W : 0,
-        transition: `max-width ${t}`,
+        transition: `max-width ${transition}`,
       }}
     >
       <Link
@@ -90,9 +90,9 @@ function StickyBarLogo({ isStuck }: { isStuck: boolean }) {
             : "pointer-events-none -translate-x-2 opacity-0",
         )}
         style={{
-          transition: `opacity ${t}, transform ${t}`,
+          transition: `opacity ${transition}, transform ${transition}`,
         }}
-        aria-label="Kitch Pizza — на главную"
+        aria-label={t.common.brandHome("Kitch Pizza")}
       >
         <Image
           src="/kitch-pizza-logo.svg"
@@ -174,17 +174,13 @@ export function MenuCategoryBar({
   brandSlug = "kitch-pizza",
   categories,
 }: MenuCategoryBarProps) {
-  const [lang, setLang] = useState<Lang>("RU")
+  const { lang, t } = useLanguage()
   const [activeSlug, setActiveSlug] = useState<string | null>(null)
   const categoryButtonRefs = useRef(new Map<string, HTMLButtonElement>())
   const itemCount = useCartStore(selectCartItemCount)
   const subtotal = useCartStore(selectCartSubtotal)
   const openCart = useCartStore((s) => s.openCart)
   const isBoutiqueMenu = hasBoutiqueMenu(brandSlug)
-
-  useEffect(() => {
-    setLang(readLang())
-  }, [])
 
   useEffect(() => {
     if (categories.length === 0) {
@@ -274,7 +270,7 @@ export function MenuCategoryBar({
 
   if (categories.length === 0) {
     if (isBoutiqueMenu) {
-      return <TheSpotFloatingCart subtotal={subtotal} onOpen={openCart} />
+      return <TheSpotFloatingCart lang={lang} t={t} subtotal={subtotal} onOpen={openCart} />
     }
 
     return (
@@ -288,15 +284,15 @@ export function MenuCategoryBar({
                   isStuck ? "gap-3" : "gap-0",
                 )}
               >
-                <StickyBarLogo isStuck={isStuck} />
+                <StickyBarLogo isStuck={isStuck} t={t} />
               </div>
               <div className="hidden md:block">
-                <CartPill count={itemCount} onOpen={openCart} />
+                <CartPill count={itemCount} t={t} onOpen={openCart} />
               </div>
             </ClientContainer>
           )}
         </StickyCategoryChrome>
-        <KitchFloatingCart subtotal={subtotal} onOpen={openCart} />
+        <KitchFloatingCart lang={lang} t={t} subtotal={subtotal} onOpen={openCart} />
       </>
     )
   }
@@ -309,11 +305,12 @@ export function MenuCategoryBar({
           categories={categories}
           itemCount={itemCount}
           lang={lang}
+          t={t}
           onOpenCart={openCart}
           onSelect={handleSelectCategory}
           setButtonRef={setCategoryButtonRef}
         />
-        <TheSpotFloatingCart subtotal={subtotal} onOpen={openCart} />
+        <TheSpotFloatingCart lang={lang} t={t} subtotal={subtotal} onOpen={openCart} />
       </>
     )
   }
@@ -325,11 +322,12 @@ export function MenuCategoryBar({
         categories={categories}
         itemCount={itemCount}
         lang={lang}
+        t={t}
         onOpenCart={openCart}
         onSelect={handleSelectCategory}
         setButtonRef={setCategoryButtonRef}
       />
-      <KitchFloatingCart subtotal={subtotal} onOpen={openCart} />
+      <KitchFloatingCart lang={lang} t={t} subtotal={subtotal} onOpen={openCart} />
     </>
   )
 }
@@ -339,6 +337,7 @@ function TheSpotCategoryBar({
   categories,
   itemCount,
   lang,
+  t,
   onOpenCart,
   onSelect,
   setButtonRef,
@@ -347,6 +346,7 @@ function TheSpotCategoryBar({
   categories: Category[]
   itemCount: number
   lang: Lang
+  t: StorefrontMessages
   onOpenCart: () => void
   onSelect: (slug: string) => void
   setButtonRef: (slug: string) => (node: HTMLButtonElement | null) => void
@@ -371,7 +371,7 @@ function TheSpotCategoryBar({
                 )}
               >
                 <Pizza className="size-4" strokeWidth={2.2} />
-                {categoryLabel(cat, lang)}
+                {pickLocalizedName(cat, lang)}
               </button>
             )
           })}
@@ -388,7 +388,7 @@ function TheSpotCategoryBar({
             <div className="flex items-center justify-between gap-3">
               <nav
                 className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                aria-label="Категории меню"
+                aria-label={t.common.menu}
               >
                 {categories.map((cat) => {
                   const isActive = activeSlug === cat.slug
@@ -405,7 +405,7 @@ function TheSpotCategoryBar({
                       )}
                     >
                       <Pizza className="size-4" strokeWidth={2.2} />
-                      {categoryLabel(cat, lang)}
+                      {pickLocalizedName(cat, lang)}
                     </button>
                   )
                 })}
@@ -414,10 +414,10 @@ function TheSpotCategoryBar({
                 type="button"
                 onClick={onOpenCart}
                 className="flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[var(--color-accent)] px-4 text-[14px] font-bold text-white transition-all duration-200 hover:brightness-[0.98] active:scale-[0.98]"
-                aria-label={`Корзина, товаров: ${itemCount}`}
+                aria-label={`${t.cart.checkout}: ${itemCount}`}
               >
                 <ShoppingBasket className="size-5" strokeWidth={2.2} aria-hidden />
-                <span>Корзина</span>
+                <span>{t.cart.total}</span>
                 <span className="tabular-nums">{itemCount}</span>
               </button>
             </div>
@@ -433,6 +433,7 @@ function DefaultCategoryBar({
   categories,
   itemCount,
   lang,
+  t,
   onOpenCart,
   onSelect,
   setButtonRef,
@@ -441,6 +442,7 @@ function DefaultCategoryBar({
   categories: Category[]
   itemCount: number
   lang: Lang
+  t: StorefrontMessages
   onOpenCart: () => void
   onSelect: (slug: string) => void
   setButtonRef: (slug: string) => (node: HTMLButtonElement | null) => void
@@ -455,10 +457,10 @@ function DefaultCategoryBar({
               isStuck ? "gap-3 md:gap-4" : "gap-0",
             )}
           >
-            <StickyBarLogo isStuck={isStuck} />
+            <StickyBarLogo isStuck={isStuck} t={t} />
             <nav
               className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto text-sm md:gap-4"
-              aria-label="Категории меню"
+              aria-label={t.common.menu}
             >
               {categories.map((cat) => {
                 const isActive = activeSlug === cat.slug
@@ -475,14 +477,14 @@ function DefaultCategoryBar({
                     }
                     style={isActive ? { color: BRAND_ACCENT } : undefined}
                   >
-                    {categoryLabel(cat, lang)}
+                    {pickLocalizedName(cat, lang)}
                   </button>
                 )
               })}
             </nav>
           </div>
           <div className="hidden md:block">
-            <CartPill count={itemCount} onOpen={onOpenCart} />
+            <CartPill count={itemCount} t={t} onOpen={onOpenCart} />
           </div>
         </ClientContainer>
       )}
@@ -490,16 +492,14 @@ function DefaultCategoryBar({
   )
 }
 
-function formatLeiFromBani(bani: number): string {
-  return `${(bani / 100).toLocaleString("ro-MD", {
-    maximumFractionDigits: 0,
-  })} MDL`
-}
-
 function KitchFloatingCart({
+  lang,
+  t,
   subtotal,
   onOpen,
 }: {
+  lang: Lang
+  t: StorefrontMessages
   subtotal: number
   onOpen: () => void
 }) {
@@ -508,7 +508,7 @@ function KitchFloatingCart({
       <div className="mb-2 flex items-center justify-center gap-2 px-3 text-[10px] text-[#242424]">
         <Pizza className="size-4 shrink-0 text-[#5F7600]" strokeWidth={2.2} />
         <span className="truncate">
-          Добавьте любимые позиции в корзину
+          {t.cart.addToOrder}
         </span>
       </div>
       <button
@@ -518,10 +518,10 @@ function KitchFloatingCart({
       >
         <span className="inline-flex items-center gap-2">
           <ShoppingBasket className="size-5" strokeWidth={2.2} />
-          Корзина
+          {t.cart.total}
         </span>
         <span className="tabular-nums">
-          {subtotal > 0 ? formatLeiFromBani(subtotal) : "0 MDL"}
+          {subtotal > 0 ? formatMoney(subtotal, lang) : formatMoney(0, lang)}
         </span>
       </button>
     </div>
@@ -529,9 +529,13 @@ function KitchFloatingCart({
 }
 
 function TheSpotFloatingCart({
+  lang,
+  t,
   subtotal,
   onOpen,
 }: {
+  lang: Lang
+  t: StorefrontMessages
   subtotal: number
   onOpen: () => void
 }) {
@@ -540,7 +544,7 @@ function TheSpotFloatingCart({
       <div className="mb-2 flex items-center justify-center gap-2 px-3 text-[10px] text-[var(--color-text)]">
         <Pizza className="size-4 shrink-0" strokeWidth={2.2} />
         <span className="truncate">
-          Добавьте любимые позиции в корзину
+          {t.cart.addToOrder}
         </span>
       </div>
       <button
@@ -550,26 +554,34 @@ function TheSpotFloatingCart({
       >
         <span className="inline-flex items-center gap-2">
           <ShoppingBasket className="size-5" strokeWidth={2.2} />
-          Корзина
+          {t.cart.total}
         </span>
         <span className="tabular-nums">
-          {subtotal > 0 ? formatLeiFromBani(subtotal) : "0 MDL"}
+          {subtotal > 0 ? formatMoney(subtotal, lang) : formatMoney(0, lang)}
         </span>
       </button>
     </div>
   )
 }
 
-function CartPill({ count, onOpen }: { count: number; onOpen: () => void }) {
+function CartPill({
+  count,
+  t,
+  onOpen,
+}: {
+  count: number
+  t: StorefrontMessages
+  onOpen: () => void
+}) {
   return (
     <button
       type="button"
       onClick={onOpen}
       className="text-foreground inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[#ccff00] px-4 py-2.5 text-sm font-bold transition-all duration-200 hover:bg-[#b8f000] active:scale-[0.97]"
-      aria-label={`Корзина, товаров: ${count}`}
+      aria-label={`${t.cart.total}: ${count}`}
     >
       <ShoppingBasket className="size-5 shrink-0" strokeWidth={2} aria-hidden />
-      <span>Корзина</span>
+      <span>{t.cart.total}</span>
       <span className="text-foreground/40 font-normal" aria-hidden>
         |
       </span>

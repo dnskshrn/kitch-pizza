@@ -1,6 +1,8 @@
 "use client"
 
 import { useWindowWidth } from "@/hooks/use-window-width"
+import { useLanguage } from "@/lib/store/language-store"
+import type { Lang } from "@/lib/i18n/storefront"
 import type { StorefrontPromotion } from "@/types/database"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import Image from "next/image"
@@ -15,15 +17,6 @@ import {
 const GAP_PX = 12
 const SWIPE_THRESHOLD_PX = 50
 const AUTOSLIDE_INTERVAL_MS = 5000
-
-const LANG_KEY = "lang"
-
-type Lang = "RU" | "RO"
-
-function readLang(): Lang {
-  if (typeof window === "undefined") return "RU"
-  return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
-}
 
 function promotionImageUrl(p: StorefrontPromotion, lang: Lang): string | null {
   return lang === "RO" ? p.image_url_ro : p.image_url_ru
@@ -61,7 +54,7 @@ export function PromotionsSlider({
   const activeIndexRef = useRef(0)
   const autoslideTimeoutRef = useRef<number | null>(null)
 
-  const [lang, setLang] = useState<Lang>("RU")
+  const { lang, t } = useLanguage()
   const [activeIndex, setActiveIndex] = useState(0)
 
   const isMobile = windowWidth < 760
@@ -76,10 +69,6 @@ export function PromotionsSlider({
     () => (hasBoutiqueLayout ? theSpotCardWidthExpr(windowWidth) : cardWidthExpr(windowWidth)),
     [hasBoutiqueLayout, windowWidth],
   )
-
-  useEffect(() => {
-    setLang(readLang())
-  }, [])
 
   useEffect(() => {
     activeIndexRef.current = activeIndex
@@ -185,7 +174,7 @@ export function PromotionsSlider({
 
   if (hasBoutiqueLayout && promotions.length === 0) {
     return (
-      <section id="promotions" className={sectionClassName} aria-label="Акции">
+      <section id="promotions" className={sectionClassName} aria-label={t.common.promotions}>
         <div className="flex gap-4 overflow-x-auto py-2 md:gap-5 md:overflow-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div
             className="aspect-[16/9] w-full shrink-0 rounded-[var(--radius-card)] bg-white md:flex-1"
@@ -206,13 +195,13 @@ export function PromotionsSlider({
   }
 
   return (
-    <section id="promotions" className={sectionClassName} aria-label="Акции">
+    <section id="promotions" className={sectionClassName} aria-label={t.common.promotions}>
       <div className="relative isolate w-full overflow-hidden">
         {showArrows && (
           <>
             <button
               type="button"
-              aria-label="Предыдущая акция"
+              aria-label={t.menu.previousPromotion}
               className="absolute top-1/2 left-3 z-10 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white transition-all duration-200 hover:opacity-90 active:scale-[0.96] md:left-4 md:h-11 md:w-11"
               onClick={scrollPrev}
             >
@@ -220,7 +209,7 @@ export function PromotionsSlider({
             </button>
             <button
               type="button"
-              aria-label="Следующая акция"
+              aria-label={t.menu.nextPromotion}
               className="absolute top-1/2 right-3 z-10 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white transition-all duration-200 hover:opacity-90 active:scale-[0.96] md:right-4 md:h-11 md:w-11"
               onClick={scrollNext}
             >
@@ -240,7 +229,7 @@ export function PromotionsSlider({
         >
           {promotions.map((p) => {
             const src = promotionImageUrl(p, lang)
-            const alt = lang === "RO" ? "Promoție" : "Акция"
+            const alt = t.menu.promotion
             return (
               <article
                 key={p.id}
@@ -269,7 +258,7 @@ export function PromotionsSlider({
                     className="absolute inset-0 flex items-center justify-center rounded-2xl border border-dashed border-zinc-300 text-xs text-zinc-400"
                     aria-hidden
                   >
-                    {lang === "RO" ? "Fără imagine" : "Нет изображения"}
+                    {t.common.noImage}
                   </div>
                 )}
               </article>

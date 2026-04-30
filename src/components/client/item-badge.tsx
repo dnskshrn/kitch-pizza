@@ -1,6 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { useLanguage } from "@/lib/store/language-store"
 import {
   Flame,
   Leaf,
@@ -64,10 +65,26 @@ export type ItemBadgeProps = {
 }
 
 export function ItemBadge({ tag, size = "default" }: ItemBadgeProps) {
+  const { lang, t } = useLanguage()
   if (!tag) return null
   const cfg = TAG_MAP[tag.toLowerCase()]
   if (!cfg) return null
   const { Icon, bg, fg, label } = cfg
+  const key = tag.toLowerCase()
+  const translatedLabel =
+    key === "выгодно"
+      ? t.menu.tags.deal
+      : key === "новинка"
+        ? t.menu.tags.new
+        : key === "хит"
+          ? t.menu.tags.hit
+          : key === "острое"
+            ? t.menu.tags.spicy
+            : key === "веган"
+              ? t.menu.tags.vegan
+              : key === "постное"
+                ? t.menu.tags.lean
+                : label
   const compact = size === "compact"
   return (
     <span
@@ -85,7 +102,7 @@ export function ItemBadge({ tag, size = "default" }: ItemBadgeProps) {
         strokeWidth={2}
         aria-hidden
       />
-      {label}
+      {lang === "RU" ? label : translatedLabel}
     </span>
   )
 }

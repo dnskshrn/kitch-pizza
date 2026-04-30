@@ -11,6 +11,16 @@ export const CART_STORAGE_KEY = "kitch-cart"
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
+export type PromoErrorState =
+  | { code: "not_found" }
+  | { code: "inactive" }
+  | { code: "expired" }
+  | { code: "not_started" }
+  | { code: "limit_reached" }
+  | { code: "min_order_not_met"; minOrderBani: number }
+  | { code: "unknown" }
+  | { code: "check_failed" }
+
 /** Минимальная проверка структуры после JSON; битые строки отбрасываются при гидратации. */
 function isValidCartItem(raw: unknown): raw is CartItem {
   if (!raw || typeof raw !== "object") return false
@@ -52,7 +62,7 @@ type CartState = {
   savedAt: number
   isOpen: boolean
   appliedPromo: PromoCode | null
-  promoError: string | null
+  promoError: PromoErrorState | null
   promoLoading: boolean
   addItem: (
     menuItem: MenuItem,
@@ -68,38 +78,27 @@ type CartState = {
   closeCart: () => void
 }
 
-function formatLei(bani: number): string {
-  return (bani / 100).toLocaleString("ro-MD", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
-}
-
-function promoErrorMessage(
+function promoErrorState(
   result: Extract<Awaited<ReturnType<typeof validatePromoCode>>, { valid: false }>,
-): string {
+): PromoErrorState {
   switch (result.error) {
     case "not_found":
-      return "Промокод не найден"
+      return { code: "not_found" }
     case "inactive":
-      return "Промокод недействителен"
+      return { code: "inactive" }
     case "expired":
-      return "Срок действия промокода истёк"
+      return { code: "expired" }
     case "not_started":
-      return "Промокод ещё не активен"
+      return { code: "not_started" }
     case "limit_reached":
-      return "Промокод больше не действует"
+      return { code: "limit_reached" }
     case "min_order_not_met": {
       const min = result.min_order_bani ?? 0
-      return `Минимальная сумма заказа: ${formatLei(min)} лей`
+      return { code: "min_order_not_met", minOrderBani: min }
     }
     default:
-      return "Не удалось применить промокод"
+      return { code: "unknown" }
   }
-}
-
-function promoMinOrderMessage(minBani: number): string {
-  return `Минимальная сумма заказа: ${formatLei(minBani)} лей`
 }
 
 function computeCartSubtotal(items: CartItem[]): number {
@@ -117,7 +116,7 @@ function ensurePromoMinOrder(
   if (subtotal < p.min_order_bani) {
     return {
       appliedPromo: null,
-      promoError: promoMinOrderMessage(p.min_order_bani),
+      promoError: { code: "min_order_not_met", minOrderBani: p.min_order_bani },
     }
   }
   return null
@@ -152,14 +151,14 @@ export const useCartStore = create<CartState>()(
           }
           set({
             appliedPromo: null,
-            promoError: promoErrorMessage(result),
+            promoError: promoErrorState(result),
             promoLoading: false,
           })
         } catch (e) {
           console.error(e)
           set({
             promoLoading: false,
-            promoError: "Не удалось проверить промокод",
+            promoError: { code: "check_failed" },
           })
         }
       },

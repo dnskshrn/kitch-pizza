@@ -3,6 +3,7 @@
 import { reverseGeocode } from "@/lib/actions/check-delivery-zone"
 import { findZoneForPoint } from "@/lib/geo"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import { useLanguage } from "@/lib/store/language-store"
 import type { DeliveryZone } from "@/types/database"
 import {
   STOREFRONT_MAP_ATTRIBUTION,
@@ -56,6 +57,7 @@ export default function DeliveryMap({
   locateMeButtonClassName,
   zoomControlPosition = "topleft",
 }: DeliveryMapProps) {
+  const { t } = useLanguage()
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const zoomControlPositionRef = useRef(zoomControlPosition)
@@ -233,7 +235,7 @@ export default function DeliveryMap({
             aria-hidden
           />
           <span className="text-[16px] font-bold leading-none text-[#242424]">
-            Найти меня
+            {t.delivery.locateMe}
           </span>
         </button>
       ) : null}

@@ -3,7 +3,6 @@
 import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
 import { OrderSummary } from "@/components/client/checkout/order-summary"
-import type { CartLang } from "@/lib/cart-helpers"
 import {
   getCartGrandTotalBani,
   selectCartDiscount,
@@ -12,6 +11,7 @@ import {
   useCartStore,
 } from "@/lib/store/cart-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
 import { ChevronLeft, Phone } from "lucide-react"
 import dynamic from "next/dynamic"
@@ -35,13 +35,6 @@ const CheckoutSuccessMap = dynamic(
     ),
   },
 )
-
-const LANG_KEY = "lang"
-
-function readLang(): CartLang {
-  if (typeof window === "undefined") return "RU"
-  return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
-}
 
 function hasBoutiqueCheckout(brandSlug: string): boolean {
   return brandSlug === "the-spot" || brandSlug === "losos"
@@ -75,6 +68,7 @@ export function CheckoutSuccessView({
   brandLogo,
   brandSlug,
 }: CheckoutSuccessViewProps) {
+  const { lang, t } = useLanguage()
   const router = useRouter()
   const searchParams = useSearchParams()
   const hasBoutiqueLayout = hasBoutiqueCheckout(brandSlug)
@@ -93,18 +87,8 @@ export function CheckoutSuccessView({
   const selectedZone = useDeliveryStore((s) => s.selectedZone)
   const getDeliveryFeeBani = useDeliveryStore((s) => s.getDeliveryFeeBani)
 
-  const [lang, setLang] = useState<CartLang>("RU")
   const [hydrated, setHydrated] = useState(false)
   const [deliveryHydrated, setDeliveryHydrated] = useState(false)
-
-  useEffect(() => {
-    setLang(readLang())
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === LANG_KEY) setLang(readLang())
-    }
-    window.addEventListener("storage", onStorage)
-    return () => window.removeEventListener("storage", onStorage)
-  }, [])
 
   useEffect(() => {
     if (useCartStore.persist.hasHydrated()) setHydrated(true)
@@ -132,7 +116,7 @@ export function CheckoutSuccessView({
   if (!hydrated || !deliveryHydrated) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center text-[#808080]">
-        Загрузка…
+        {t.checkout.loading}
       </div>
     )
   }
@@ -161,7 +145,7 @@ export function CheckoutSuccessView({
                   "storefront-modal-surface flex size-11 shrink-0 items-center justify-center rounded-full text-[#242424]",
                   checkoutIconCircle,
                 )}
-                aria-label="На главную"
+                aria-label={t.common.home}
               >
                 <ChevronLeft className="size-6" strokeWidth={2} />
               </button>
@@ -169,7 +153,7 @@ export function CheckoutSuccessView({
               <Link
                 href="/"
                 className="flex shrink-0 items-center md:hidden"
-                aria-label={`${brandName} — на главную`}
+                aria-label={t.common.brandHome(brandName)}
               >
                 <Image
                   src={brandLogo}
@@ -187,7 +171,7 @@ export function CheckoutSuccessView({
               <Link
                 href="/"
                 className="hidden shrink-0 md:block"
-                aria-label={`${brandName} — на главную`}
+                aria-label={t.common.brandHome(brandName)}
               >
                 <Image
                   src={brandLogo}
@@ -217,12 +201,12 @@ export function CheckoutSuccessView({
               <div className="max-w-[min(100%,420px)] pr-[100px] sm:pr-[120px] md:pr-44 lg:pr-52">
                 <h1 className="text-[22px] font-bold leading-tight text-[#242424] md:text-[24px]">
                   {customerName
-                    ? `Заказ отправлен, ${customerName}!`
-                    : "Заказ отправлен!"}
+                    ? t.success.titleWithName(customerName)
+                    : t.success.title}
                 </h1>
                 {/* TODO: при появлении постоянного хранения имени заказа — подставлять из стора, search — fallback */}
                 <p className="mt-2 text-[14px] font-normal text-[#242424]">
-                  Скоро наберем
+                  {t.success.willCall}
                 </p>
                 <a
                   href="tel:+37379700290"
@@ -232,7 +216,7 @@ export function CheckoutSuccessView({
                   079 700 290
                 </a>
                 <p className="mt-3 max-w-sm text-[13px] leading-snug text-[#5c5c5c]">
-                  Вот наш номер телефона, если вдруг возникнут вопросы!
+                  {t.success.phoneHelp}
                 </p>
               </div>
               <div
@@ -285,7 +269,7 @@ export function CheckoutSuccessView({
               checkoutCtaMotion,
             )}
           >
-            Вернуться в меню
+            {t.success.backToMenu}
           </Link>
         </div>
       </div>

@@ -1,11 +1,17 @@
 "use client"
 
-import type { CartLang } from "@/lib/cart-helpers"
+import {
+  formatMoney,
+  goodsPhrase,
+  pickLocalizedName,
+  promoErrorMessage,
+} from "@/lib/i18n/storefront"
 import {
   selectCartDiscount,
   useCartStore,
 } from "@/lib/store/cart-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import { useLanguage } from "@/lib/store/language-store"
 import type { CartItem } from "@/types/cart"
 import {
   Check,
@@ -16,25 +22,8 @@ import {
   X,
 } from "lucide-react"
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { CartItemCard } from "./CartItemCard"
-
-const LANG_KEY = "lang"
-
-function readLang(): CartLang {
-  if (typeof window === "undefined") return "RU"
-  return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
-}
-
-/** Склонение «N товар(ов)» для RU. */
-function ruGoodsPhrase(n: number): string {
-  const abs = n % 100
-  const d = n % 10
-  if (abs > 10 && abs < 20) return `${n} товаров`
-  if (d === 1) return `${n} товар`
-  if (d >= 2 && d <= 4) return `${n} товара`
-  return `${n} товаров`
-}
 
 type CartContentProps = {
   items: CartItem[]
@@ -55,7 +44,7 @@ export function CartContent({
   onRemoveItem,
   onQuantityChange,
 }: CartContentProps) {
-  const [lang, setLang] = useState<CartLang>("RU")
+  const { lang, t } = useLanguage()
   const [codeInput, setCodeInput] = useState("")
 
   const appliedPromo = useCartStore((s) => s.appliedPromo)
@@ -68,26 +57,11 @@ export function CartContent({
     s.getDeliveryFeeBani(subtotal),
   )
 
-  useEffect(() => {
-    setLang(readLang())
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === LANG_KEY) setLang(readLang())
-    }
-    window.addEventListener("storage", onStorage)
-    return () => window.removeEventListener("storage", onStorage)
-  }, [])
-
-  const formatLei = (bani: number) =>
-    (bani / 100).toLocaleString("ro-MD", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    })
-
-  const subtotalLei = formatLei(subtotal)
-  const discountLei = formatLei(discount)
+  const subtotalLei = formatMoney(subtotal, lang)
+  const discountLei = formatMoney(discount, lang)
   const goodsBani = Math.max(0, subtotal - discount)
   const grandTotalBani = goodsBani + deliveryFeeBani
-  const totalLei = formatLei(grandTotalBani)
+  const totalLei = formatMoney(grandTotalBani, lang)
   const isCartEmpty = items.length === 0
 
   async function handleApplyPromo() {
@@ -109,10 +83,10 @@ export function CartContent({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <h2 className="text-[20px] font-bold leading-tight text-[#242424]">
-                {ruGoodsPhrase(itemCount)}
+                {goodsPhrase(itemCount, lang)}
               </h2>
               <span className="inline-flex items-center gap-1 text-sm text-[rgba(36,36,36,0.45)]">
-                Акции 2+1 / 3+1
+                {t.cart.promos}
                 <Info className="size-4 shrink-0" strokeWidth={2} aria-hidden />
                 {/* TODO: акции 2+1 / 3+1 — логика */}
               </span>
@@ -123,7 +97,7 @@ export function CartContent({
           type="button"
           onClick={onClose}
           className="storefront-modal-surface absolute right-4 top-4 flex size-10 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
-          aria-label="Закрыть корзину"
+          aria-label={t.cart.closeCart}
         >
           <X className="size-5" strokeWidth={2.5} />
         </button>
@@ -133,7 +107,7 @@ export function CartContent({
         <div className="space-y-3">
           {items.length === 0 ? (
             <div className="flex min-h-[120px] items-center justify-center rounded-[16px] py-8 text-center text-[rgba(36,36,36,0.5)]">
-              Корзина пуста
+              {t.cart.empty}
             </div>
           ) : (
             items.map((cartItem) => (
@@ -142,7 +116,7 @@ export function CartContent({
                 cartItem={cartItem}
                 lang={lang}
                 name={
-                  lang === "RO" ? cartItem.menuItem.name_ro : cartItem.menuItem.name_ru
+                  pickLocalizedName(cartItem.menuItem, lang)
                 }
                 onEdit={() => onEditItem(cartItem)}
                 onRemove={() => onRemoveItem(cartItem.id)}
@@ -153,7 +127,7 @@ export function CartContent({
         </div>
 
         <section className="mt-4 shrink-0 pb-4 pt-1">
-          <p className="mb-2 text-xs text-[rgba(36,36,36,0.45)]">Добавить к заказу?</p>
+          <p className="mb-2 text-xs text-[rgba(36,36,36,0.45)]">{t.cart.addToOrder}</p>
           <div className="-mx-1 flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
             {/* TODO: апселл — реальные категории «Соусы» / «Напитки» */}
             <div className="storefront-modal-surface storefront-modal-card-radius w-[120px] shrink-0 rounded-[16px] p-3">
@@ -161,19 +135,19 @@ export function CartContent({
                 className="mb-2 aspect-square w-full rounded-lg border border-dashed border-[#ddd]"
                 aria-hidden
               />
-              <p className="text-center text-sm font-medium text-[#242424]">Соусы</p>
+              <p className="text-center text-sm font-medium text-[#242424]">{t.cart.sauces}</p>
             </div>
             <div className="storefront-modal-surface storefront-modal-card-radius w-[120px] shrink-0 rounded-[16px] p-3">
               <div
                 className="mb-2 aspect-square w-full rounded-lg border border-dashed border-[#ddd]"
                 aria-hidden
               />
-              <p className="text-center text-sm font-medium text-[#242424]">Напитки</p>
+              <p className="text-center text-sm font-medium text-[#242424]">{t.cart.drinks}</p>
             </div>
           </div>
         </section>
 
-        <section className="shrink-0 pb-4 pt-1" aria-label="Промокод и детали заказа">
+        <section className="shrink-0 pb-4 pt-1" aria-label={t.cart.promoAndDetails}>
           <div className="storefront-modal-surface storefront-modal-card-radius rounded-[20px] p-4">
             {appliedPromo ? (
               <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
@@ -183,9 +157,7 @@ export function CartContent({
                   aria-hidden
                 />
                 <p className="min-w-0 flex-1 text-sm font-medium text-[#242424]">
-                  Промокод{" "}
-                  <span className="font-mono uppercase">{appliedPromo.code}</span>{" "}
-                  применён
+                  {t.cart.promoApplied(appliedPromo.code)}
                 </p>
                 <button
                   type="button"
@@ -194,7 +166,7 @@ export function CartContent({
                     setCodeInput("")
                   }}
                   className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/10"
-                  aria-label="Убрать промокод"
+                  aria-label={t.cart.removePromo}
                 >
                   <X className="size-4" strokeWidth={2.5} />
                 </button>
@@ -205,13 +177,13 @@ export function CartContent({
                   <input
                     type="text"
                     name="promo"
-                    placeholder="Промокод"
+                    placeholder={t.cart.promoPlaceholder}
                     value={codeInput}
                     disabled={promoLoading}
                     onChange={(e) => setCodeInput(e.target.value)}
                     onKeyDown={handlePromoKeyDown}
                     className="storefront-modal-field min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
-                    aria-label="Промокод"
+                    aria-label={t.cart.promoAria}
                     autoComplete="off"
                   />
                   <button
@@ -223,13 +195,13 @@ export function CartContent({
                     {promoLoading ? (
                       <Loader2 className="size-5 animate-spin" aria-hidden />
                     ) : (
-                      "Применить"
+                      t.cart.applyPromo
                     )}
                   </button>
                 </div>
                 {promoError ? (
                   <p className="text-sm text-red-600" role="alert">
-                    {promoError}
+                    {promoErrorMessage(promoError, lang)}
                   </p>
                 ) : null}
               </div>
@@ -237,24 +209,26 @@ export function CartContent({
 
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-[rgba(36,36,36,0.55)]">{ruGoodsPhrase(itemCount)}</span>
-                <span className="font-medium tabular-nums text-[#242424]">{subtotalLei} лей</span>
+                <span className="text-[rgba(36,36,36,0.55)]">{goodsPhrase(itemCount, lang)}</span>
+                <span className="font-medium tabular-nums text-[#242424]">{subtotalLei}</span>
               </div>
               {discount > 0 ? (
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-[rgba(36,36,36,0.55)]">Скидка</span>
+                  <span className="text-[rgba(36,36,36,0.55)]">{t.cart.discount}</span>
                   <span className="storefront-modal-accent font-medium tabular-nums">
-                    −{discountLei} лей
+                    −{discountLei}
                   </span>
                 </div>
               ) : null}
               <div className="flex items-center justify-between text-sm">
                 <span className="inline-flex items-center gap-1 text-[rgba(36,36,36,0.55)]">
-                  Доставка
+                  {t.cart.delivery}
                   <Info className="size-[14px] shrink-0" strokeWidth={2} aria-hidden />
                   {/* TODO: расчёт доставки */}
                 </span>
-                <span className="tabular-nums text-[rgba(36,36,36,0.45)]">-- лей</span>
+                <span className="tabular-nums text-[rgba(36,36,36,0.45)]">
+                  -- {lang === "RO" ? "lei" : "лей"}
+                </span>
               </div>
             </div>
           </div>
@@ -264,12 +238,12 @@ export function CartContent({
       {/* Статичный нижний островок: только сумма + кнопка, чтобы товары получали больше места для скролла. */}
       <section
         className="pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
-        aria-label="Итог и оформление"
+        aria-label={t.cart.total}
       >
         <div className="storefront-modal-surface pointer-events-auto rounded-full p-2">
           <div className="flex items-center gap-3">
             <p className="pl-3 text-[20px] font-bold tabular-nums text-[#242424]">
-              {totalLei} лей
+              {totalLei}
             </p>
             {isCartEmpty ? (
               <button
@@ -277,7 +251,7 @@ export function CartContent({
                 disabled
                 className="storefront-modal-cta flex flex-1 cursor-not-allowed items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold opacity-45"
               >
-                К оформлению
+                {t.cart.checkout}
                 <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
               </button>
             ) : (
@@ -286,7 +260,7 @@ export function CartContent({
                 onClick={onClose}
                 className="storefront-modal-cta flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold transition-all hover:brightness-95 active:scale-[0.98]"
               >
-                К оформлению
+                {t.cart.checkout}
                 <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
               </Link>
             )}

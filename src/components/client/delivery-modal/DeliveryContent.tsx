@@ -2,22 +2,14 @@
 
 import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import { findZoneForPoint } from "@/lib/geo"
+import { formatMoneyValue } from "@/lib/i18n/storefront"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import { useLanguage } from "@/lib/store/language-store"
 import type { DeliveryZone } from "@/types/database"
 import { cn } from "@/lib/utils"
 import { Clock, Gift, Loader2, MapPin, Navigation, ShoppingBag, Truck } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { DeliveryModeIsland } from "./delivery-mode-island"
-
-const OUT_OF_ZONE_SUB =
-  "Мы разделили город на сектора и благодаря этому оптимизировали нашу доставку..."
-
-function formatLei(bani: number): string {
-  return (bani / 100).toLocaleString("ro-MD", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
-}
 
 type DeliveryContentProps = {
   zones: DeliveryZone[]
@@ -39,6 +31,7 @@ export function DeliveryContent({
   layout = "sheet",
   hideModeToggle = false,
 }: DeliveryContentProps) {
+  const { lang, t } = useLanguage()
   const [addrFocused, setAddrFocused] = useState(false)
 
   const mode = useDeliveryStore((s) => s.mode)
@@ -112,7 +105,7 @@ export function DeliveryContent({
     >
       {layout === "desktop" ? (
         <h2 className="text-[20px] font-bold leading-tight text-[#242424]">
-          Адрес доставки
+          {t.delivery.title}
         </h2>
       ) : null}
 
@@ -122,7 +115,7 @@ export function DeliveryContent({
         <div className="storefront-modal-field flex items-start gap-3 rounded-[16px] p-4">
           <MapPin className="storefront-modal-accent mt-0.5 size-5 shrink-0" strokeWidth={2} />
           <div>
-            <p className="text-sm font-semibold text-[#242424]">Самовывоз</p>
+            <p className="text-sm font-semibold text-[#242424]">{t.delivery.pickupTitle}</p>
             <p className="text-muted-foreground mt-1 text-sm">
               bd. Dacia 27, Chișinău
             </p>
@@ -146,7 +139,7 @@ export function DeliveryContent({
                     : "top-1/2 -translate-y-1/2 text-[14px] font-medium text-[rgba(0,0,0,0.5)]",
                 )}
               >
-                Введите адрес
+                {t.delivery.enterAddress}
               </label>
               <input
                 id="delivery-address-input"
@@ -175,7 +168,7 @@ export function DeliveryContent({
               onClick={onLocateMe}
               disabled={locating}
               className="storefront-modal-cta flex w-[54px] shrink-0 items-center justify-center self-stretch rounded-[12px] transition-opacity disabled:pointer-events-none disabled:opacity-50"
-              aria-label="Моё местоположение"
+              aria-label={t.delivery.locateMe}
             >
               {locating ? (
                 <Loader2 className="size-6 animate-spin" />
@@ -196,10 +189,10 @@ export function DeliveryContent({
               />
               <div className="min-w-0">
                 <p className="text-[16px] font-bold leading-snug text-[#242424]">
-                  Мы еще не открылись в вашем районе!
+                  {t.delivery.outOfZoneTitle}
                 </p>
                 <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
-                  {OUT_OF_ZONE_SUB}
+                  {t.delivery.outOfZoneText}
                 </p>
               </div>
             </div>
@@ -211,7 +204,7 @@ export function DeliveryContent({
                 <input
                   type="text"
                   inputMode="numeric"
-                  placeholder="Подъезд"
+                  placeholder={t.delivery.entrance}
                   value={entrance}
                   onChange={(e) => setSecondary({ entrance: e.target.value })}
                   className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
@@ -219,7 +212,7 @@ export function DeliveryContent({
                 <input
                   type="text"
                   inputMode="numeric"
-                  placeholder="Этаж"
+                  placeholder={t.delivery.floor}
                   value={floor}
                   onChange={(e) => setSecondary({ floor: e.target.value })}
                   className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
@@ -227,14 +220,14 @@ export function DeliveryContent({
                 <input
                   type="text"
                   inputMode="numeric"
-                  placeholder="Квартира"
+                  placeholder={t.delivery.apartment}
                   value={apartment}
                   onChange={(e) => setSecondary({ apartment: e.target.value })}
                   className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
                 <input
                   type="text"
-                  placeholder="Домофон"
+                  placeholder={t.delivery.intercom}
                   value={intercom}
                   onChange={(e) => setSecondary({ intercom: e.target.value })}
                   className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
@@ -243,7 +236,7 @@ export function DeliveryContent({
 
               <input
                 type="text"
-                placeholder="Комментарий"
+                placeholder={t.delivery.comment}
                 value={comment}
                 onChange={(e) => setSecondary({ comment: e.target.value })}
                 className="storefront-modal-field w-full rounded-[12px] px-[16px] py-[14px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
@@ -267,10 +260,10 @@ export function DeliveryContent({
                   aria-hidden
                 />
                 <p className="text-[10px] leading-tight text-[rgba(36,36,36,0.55)]">
-                  Время
+                  {t.delivery.deliveryTime}
                 </p>
                 <p className="text-[13px] font-semibold leading-tight text-[#242424] sm:text-sm">
-                  ~{selectedZone.delivery_time_min} мин
+                  ~{selectedZone.delivery_time_min} {t.header.etaSuffix}
                 </p>
               </div>
               <div className="flex min-w-0 flex-col items-center gap-1 text-center">
@@ -280,12 +273,14 @@ export function DeliveryContent({
                   aria-hidden
                 />
                 <p className="text-[10px] leading-tight text-[rgba(36,36,36,0.55)]">
-                  Доставка
+                  {t.delivery.deliveryCost}
                 </p>
                 <p className="text-[13px] font-semibold leading-tight text-[#242424] sm:text-sm">
                   {selectedZone.delivery_price_bani === 0
-                    ? "Бесплатно"
-                    : `${formatLei(selectedZone.delivery_price_bani)} лей`}
+                    ? t.common.free
+                    : `${formatMoneyValue(selectedZone.delivery_price_bani)} ${
+                        lang === "RO" ? "lei" : "лей"
+                      }`}
                 </p>
               </div>
               <div className="flex min-w-0 flex-col items-center gap-1 text-center">
@@ -295,10 +290,11 @@ export function DeliveryContent({
                   aria-hidden
                 />
                 <p className="text-[10px] leading-tight text-[rgba(36,36,36,0.55)]">
-                  Мин. заказ
+                  {t.delivery.minOrder}
                 </p>
                 <p className="text-[13px] font-semibold leading-tight text-[#242424] sm:text-sm">
-                  от {formatLei(selectedZone.min_order_bani)} лей
+                  {t.menu.from} {formatMoneyValue(selectedZone.min_order_bani)}{" "}
+                  {lang === "RO" ? "lei" : "лей"}
                 </p>
               </div>
               {selectedZone.free_delivery_from_bani != null ? (
@@ -309,10 +305,11 @@ export function DeliveryContent({
                     aria-hidden
                   />
                   <p className="text-[10px] leading-tight text-[rgba(36,36,36,0.55)]">
-                    Бесплатно от
+                    {t.delivery.freeFrom}
                   </p>
                   <p className="text-[13px] font-semibold leading-tight text-[#242424] sm:text-sm">
-                    {formatLei(selectedZone.free_delivery_from_bani)} лей
+                    {formatMoneyValue(selectedZone.free_delivery_from_bani)}{" "}
+                    {lang === "RO" ? "lei" : "лей"}
                   </p>
                 </div>
               ) : null}
@@ -343,7 +340,7 @@ export function DeliveryContent({
             aria-hidden
           />
         ) : null}
-        <span className="relative z-10">Выбрать</span>
+        <span className="relative z-10">{t.delivery.choose}</span>
       </button>
     </div>
   )

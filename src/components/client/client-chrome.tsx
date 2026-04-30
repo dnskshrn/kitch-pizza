@@ -1,5 +1,6 @@
 "use client"
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { AuthModal } from "@/components/client/auth/auth-modal"
 import { CartRoot } from "@/components/client/cart/CartRoot"
 import { DeliveryRoot } from "@/components/client/delivery-modal"
@@ -51,7 +52,7 @@ export function ClientChrome({
         <ProductModalRoot />
         <DeliveryRoot />
         <CartRoot />
-        <AuthModal />
+        {/* <AuthModal /> */}
         <main className="flex-1">{children}</main>
       </>
     )
@@ -68,7 +69,7 @@ export function ClientChrome({
       <ProductModalRoot />
       <DeliveryRoot />
       <CartRoot />
-      <AuthModal />
+      {/* <AuthModal /> */}
       <main className="flex-1">{children}</main>
     </>
   )

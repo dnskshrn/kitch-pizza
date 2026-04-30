@@ -4,7 +4,7 @@ import { createOrder } from "@/lib/actions/create-order"
 import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
 import { OrderSummary } from "@/components/client/checkout/order-summary"
-import { type CartLang } from "@/lib/cart-helpers"
+import { promoErrorMessage, type StorefrontMessages } from "@/lib/i18n/storefront"
 import {
   getCartGrandTotalBani,
   selectCartDiscount,
@@ -14,6 +14,7 @@ import {
 } from "@/lib/store/cart-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
+import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
 import {
   Select,
@@ -44,13 +45,6 @@ import {
   useRef,
   useState,
 } from "react"
-
-const LANG_KEY = "lang"
-
-function readLang(): CartLang {
-  if (typeof window === "undefined") return "RU"
-  return window.localStorage.getItem(LANG_KEY) === "RO" ? "RO" : "RU"
-}
 
 function hasBoutiqueCheckout(brandSlug: string): boolean {
   return brandSlug === "the-spot" || brandSlug === "losos"
@@ -89,12 +83,14 @@ function buildCheckoutDeliveryAddress(
   floor: string,
   apartment: string,
   intercom: string,
+  t: StorefrontMessages,
 ): string {
   if (mode === "pickup") {
-    return "Самовывоз — bd. Dacia 27"
+    return t.checkout.deliveryAddress.pickup
   }
   const base = resolvedAddress?.trim() ?? ""
-  const details = `Подъезд ${deliveryDetailOrDash(entrance)}, Этаж ${deliveryDetailOrDash(floor)}, Квартира ${deliveryDetailOrDash(apartment)}, Домофон ${deliveryDetailOrDash(intercom)}`
+  const labels = t.checkout.deliveryAddress
+  const details = `${labels.entrance} ${deliveryDetailOrDash(entrance)}, ${labels.floor} ${deliveryDetailOrDash(floor)}, ${labels.apartment} ${deliveryDetailOrDash(apartment)}, ${labels.intercom} ${deliveryDetailOrDash(intercom)}`
   if (!base) return details
   return `${base}. ${details}`
 }
@@ -182,11 +178,11 @@ const checkoutWhiteMini = `${btnMotion} hover:bg-[#f5f5f5] active:scale-[0.98]`
 const checkoutDarkSolid = `${btnMotion} hover:opacity-90 active:scale-[0.98]`
 
 type FieldErrors = {
-  name?: string
-  phone?: string
-  phoneRepeat?: string
-  address?: string
-  zone?: string
+  name?: keyof StorefrontMessages["checkout"]["validation"]
+  phone?: keyof StorefrontMessages["checkout"]["validation"]
+  phoneRepeat?: keyof StorefrontMessages["checkout"]["validation"]
+  address?: keyof StorefrontMessages["checkout"]["validation"]
+  zone?: keyof StorefrontMessages["checkout"]["validation"]
 }
 
 type CheckoutViewProps = {
@@ -200,6 +196,7 @@ export function CheckoutView({
   brandLogo,
   brandSlug,
 }: CheckoutViewProps) {
+  const { lang, t } = useLanguage()
   const router = useRouter()
   const hasBoutiqueLayout = hasBoutiqueCheckout(brandSlug)
   const checkoutLogoSize = getCheckoutLogoSize(brandSlug)
@@ -227,7 +224,6 @@ export function CheckoutView({
   const intercom = useDeliveryStore((s) => s.intercom)
   const getDeliveryFeeBani = useDeliveryStore((s) => s.getDeliveryFeeBani)
 
-  const [lang, setLang] = useState<CartLang>("RU")
   const [hydrated, setHydrated] = useState(false)
 
   const [name, setName] = useState("")
@@ -255,15 +251,6 @@ export function CheckoutView({
 
   const quickTimeSlots = useMemo(() => buildQuickDeliveryTimeSlots(), [])
   const timeSlots = useMemo(() => buildDeliveryTimeSlots(), [])
-
-  useEffect(() => {
-    setLang(readLang())
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === LANG_KEY) setLang(readLang())
-    }
-    window.addEventListener("storage", onStorage)
-    return () => window.removeEventListener("storage", onStorage)
-  }, [])
 
   useEffect(() => {
     if (useCartStore.persist.hasHydrated()) setHydrated(true)
@@ -304,15 +291,15 @@ export function CheckoutView({
 
   const validate = useCallback((): FieldErrors => {
     const next: FieldErrors = {}
-    if (!name.trim()) next.name = "Укажите имя"
-    if (!phone.trim()) next.phone = "Укажите телефон"
-    if (!phoneRepeat.trim()) next.phoneRepeat = "Повторите номер"
+    if (!name.trim()) next.name = "nameRequired"
+    if (!phone.trim()) next.phone = "phoneRequired"
+    if (!phoneRepeat.trim()) next.phoneRepeat = "phoneRepeatRequired"
     else if (phone.trim() !== phoneRepeat.trim()) {
-      next.phoneRepeat = "Номера не совпадают"
+      next.phoneRepeat = "phoneMismatch"
     }
     if (mode === "delivery") {
-      if (!resolvedAddress?.trim()) next.address = "Укажите адрес доставки"
-      if (!selectedZone) next.zone = "Выберите адрес в зоне доставки"
+      if (!resolvedAddress?.trim()) next.address = "addressRequired"
+      if (!selectedZone) next.zone = "zoneRequired"
     }
     return next
   }, [name, phone, phoneRepeat, mode, resolvedAddress, selectedZone])
@@ -363,6 +350,7 @@ export function CheckoutView({
           floor,
           apartment,
           intercom,
+          t,
         ),
         paymentMethod: payment,
         changeFromBani,
@@ -385,7 +373,7 @@ export function CheckoutView({
         setOrderSubmitError(result.error)
       }
     } catch {
-      setOrderSubmitError("Не удалось отправить заказ")
+      setOrderSubmitError(t.checkout.submitFailed)
     } finally {
       setOrderSubmitting(false)
     }
@@ -410,7 +398,7 @@ export function CheckoutView({
   if (!hydrated || items.length === 0) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center text-[#808080]">
-        Загрузка…
+        {t.checkout.loading}
       </div>
     )
   }
@@ -440,7 +428,7 @@ export function CheckoutView({
                   "storefront-modal-surface flex size-11 shrink-0 items-center justify-center rounded-full text-[#242424]",
                   checkoutIconCircle,
                 )}
-                aria-label="Назад в корзину"
+                aria-label={t.checkout.backToCart}
               >
                 <ChevronLeft className="size-6" strokeWidth={2} />
               </button>
@@ -449,7 +437,7 @@ export function CheckoutView({
               <Link
                 href="/"
                 className="flex shrink-0 items-center md:hidden"
-                aria-label={`${brandName} — на главную`}
+                aria-label={t.common.brandHome(brandName)}
               >
                 <Image
                   src={brandLogo}
@@ -468,7 +456,7 @@ export function CheckoutView({
               <Link
                 href="/"
                 className="hidden shrink-0 md:block"
-                aria-label={`${brandName} — на главную`}
+                aria-label={t.common.brandHome(brandName)}
               >
                 <Image
                   src={brandLogo}
@@ -507,7 +495,7 @@ export function CheckoutView({
           {/* Left column */}
           <div className="storefront-checkout-form-panel flex w-full max-w-full flex-col md:w-[680px] md:max-w-[680px]">
             <h1 className="hidden text-[32px] font-bold leading-tight text-[#242424] md:block">
-              Заказ на доставку
+              {t.checkout.addressTitle}
             </h1>
 
             <h2
@@ -516,7 +504,7 @@ export function CheckoutView({
                 hasBoutiqueLayout && "max-md:mt-3",
               )}
             >
-              Контактные данные
+              {t.checkout.contactTitle}
             </h2>
 
             <div
@@ -528,7 +516,7 @@ export function CheckoutView({
             {/* Contact */}
             <section className="flex flex-col gap-5">
               <h2 className="hidden text-[24px] font-bold text-[#242424] md:block lg:hidden">
-                Контактные данные
+                {t.checkout.contactTitle}
               </h2>
 
               <div className="flex flex-col gap-5">
@@ -537,7 +525,7 @@ export function CheckoutView({
                     htmlFor="checkout-name"
                     className={checkoutLabel}
                   >
-                    Ваше имя
+                    {t.checkout.nameLabel}
                   </label>
                   <div className="min-w-0 flex-1">
                     <input
@@ -546,14 +534,14 @@ export function CheckoutView({
                       name="name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="Имя"
+                      placeholder={t.checkout.namePlaceholder}
                       autoComplete="name"
                       className={inputClassName}
                       aria-invalid={!!errors.name}
                     />
                     {errors.name ? (
                       <p className="mt-1 text-[12px] font-normal text-red-500">
-                        {errors.name}
+                        {t.checkout.validation[errors.name]}
                       </p>
                     ) : null}
                   </div>
@@ -564,7 +552,7 @@ export function CheckoutView({
                     htmlFor="checkout-phone"
                     className={checkoutLabel}
                   >
-                    Номер телефона
+                    {t.checkout.phoneLabel}
                   </label>
                   <div className="min-w-0 flex-1">
                     <input
@@ -574,14 +562,14 @@ export function CheckoutView({
                       inputMode="tel"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      placeholder="Номер телефона"
+                      placeholder={t.checkout.phonePlaceholder}
                       autoComplete="tel"
                       className={inputClassName}
                       aria-invalid={!!errors.phone}
                     />
                     {errors.phone ? (
                       <p className="mt-1 text-[12px] font-normal text-red-500">
-                        {errors.phone}
+                        {t.checkout.validation[errors.phone]}
                       </p>
                     ) : null}
                   </div>
@@ -592,7 +580,7 @@ export function CheckoutView({
                     htmlFor="checkout-phone-repeat"
                     className={checkoutLabel}
                   >
-                    Еще раз номер телефона
+                    {t.checkout.phoneRepeatLabel}
                   </label>
                   <div className="min-w-0 flex-1">
                     <input
@@ -602,14 +590,14 @@ export function CheckoutView({
                       inputMode="tel"
                       value={phoneRepeat}
                       onChange={(e) => setPhoneRepeat(e.target.value)}
-                      placeholder="Еще раз номер телефона"
+                      placeholder={t.checkout.phoneRepeatPlaceholder}
                       autoComplete="tel"
                       className={inputClassName}
                       aria-invalid={!!errors.phoneRepeat}
                     />
                     {errors.phoneRepeat ? (
                       <p className="mt-1 text-[12px] font-normal text-red-500">
-                        {errors.phoneRepeat}
+                        {t.checkout.validation[errors.phoneRepeat]}
                       </p>
                     ) : null}
                   </div>
@@ -620,7 +608,7 @@ export function CheckoutView({
             {/* Address */}
             <section ref={addressRef} className={checkoutRowStart}>
               <span className={checkoutLabelTop}>
-                {mode === "delivery" ? "Адрес доставки" : "Самовывоз"}
+                {mode === "delivery" ? t.checkout.addressTitle : t.checkout.pickupTitle}
               </span>
               <div className="min-w-0 flex-1">
                 {mode === "delivery" ? (
@@ -636,9 +624,13 @@ export function CheckoutView({
                           {resolvedAddress}
                         </p>
                         <p className="mt-1 text-[13px] font-normal leading-snug text-[#242424]">
-                          Подъезд {deliveryDetailOrDash(entrance)}, Этаж{" "}
-                          {deliveryDetailOrDash(floor)}, Квартира{" "}
-                          {deliveryDetailOrDash(apartment)}, Домофон{" "}
+                          {t.checkout.deliveryAddress.entrance}{" "}
+                          {deliveryDetailOrDash(entrance)},{" "}
+                          {t.checkout.deliveryAddress.floor}{" "}
+                          {deliveryDetailOrDash(floor)},{" "}
+                          {t.checkout.deliveryAddress.apartment}{" "}
+                          {deliveryDetailOrDash(apartment)},{" "}
+                          {t.checkout.deliveryAddress.intercom}{" "}
                           {deliveryDetailOrDash(intercom)}
                         </p>
                       </div>
@@ -651,13 +643,13 @@ export function CheckoutView({
                         )}
                       >
                         <MapPin className="size-4 shrink-0" strokeWidth={2} />
-                        Изменить
+                        {t.checkout.changeAddress}
                       </button>
                     </div>
                   ) : (
                     <div className="storefront-checkout-address-empty flex items-center justify-between gap-3 rounded-[12px] p-[16px]">
                       <p className="min-w-0 flex-1 text-[16px] text-[#808080]">
-                        Адрес не указан
+                        {t.checkout.validation.addressRequired}
                       </p>
                       <button
                         type="button"
@@ -668,7 +660,7 @@ export function CheckoutView({
                         )}
                       >
                         <MapPin className="size-4 shrink-0" strokeWidth={2} />
-                        Изменить
+                        {t.checkout.changeAddress}
                       </button>
                     </div>
                   )
@@ -678,18 +670,18 @@ export function CheckoutView({
                       bd. Dacia 27
                     </p>
                     <p className="mt-1 text-[12px] text-[#808080]">
-                      Оформление без адреса доставки
+                      {t.checkout.pickupTitle}
                     </p>
                   </div>
                 )}
                 {submitAttempted && errors.address ? (
                   <p className="mt-2 text-[12px] font-normal text-red-500">
-                    {errors.address}
+                    {t.checkout.validation[errors.address]}
                   </p>
                 ) : null}
                 {submitAttempted && errors.zone ? (
                   <p className="mt-2 text-[12px] font-normal text-red-500">
-                    {errors.zone}
+                    {t.checkout.validation[errors.zone]}
                   </p>
                 ) : null}
               </div>
@@ -697,7 +689,7 @@ export function CheckoutView({
 
             {/* Delivery time */}
             <section className={checkoutRowStart}>
-              <span className={checkoutLabelTop}>Когда доставить?</span>
+              <span className={checkoutLabelTop}>{t.checkout.deliveryTimeTitle}</span>
               <div className="min-w-0 flex-1">
                 <div className="flex w-full gap-3">
                   <button
@@ -715,7 +707,7 @@ export function CheckoutView({
                   >
                     <Zap className="size-[14px] shrink-0" strokeWidth={2} />
                     <span className="text-center leading-tight">
-                      Как можно скорее
+                      {t.checkout.asap}
                     </span>
                   </button>
                   <button
@@ -736,7 +728,7 @@ export function CheckoutView({
                   >
                     <Clock className="size-[14px] shrink-0" strokeWidth={2} />
                     <span className="text-center leading-tight">
-                      Указать время
+                      {t.checkout.scheduled}
                     </span>
                   </button>
                 </div>
@@ -795,7 +787,7 @@ export function CheckoutView({
                                 ),
                           )}
                         >
-                          Указать время
+                          {t.checkout.chooseTime}
                         </button>
                       </div>
                     ) : null}
@@ -806,7 +798,7 @@ export function CheckoutView({
                         onValueChange={setScheduledTime}
                       >
                         <SelectTrigger className="storefront-modal-field h-[50px] w-full rounded-[12px] border-0 px-[16px] font-medium text-[16px] text-[#242424] transition-all duration-200 hover:bg-[#e8e8e8] focus:ring-2 focus:ring-[var(--color-accent)]">
-                          <SelectValue placeholder="Время доставки" />
+                          <SelectValue placeholder={t.checkout.deliveryTimeTitle} />
                         </SelectTrigger>
                         <SelectContent>
                           {timeSlots.map((slot) => (
@@ -824,7 +816,7 @@ export function CheckoutView({
 
             {/* Promo — как в корзине */}
             <section className={checkoutRowStart}>
-              <span className={checkoutLabelTop}>Промокод</span>
+              <span className={checkoutLabelTop}>{t.checkout.promoTitle}</span>
               <div className="min-w-0 flex-1">
                 {appliedPromo ? (
                   <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
@@ -834,9 +826,7 @@ export function CheckoutView({
                       aria-hidden
                     />
                     <p className="min-w-0 flex-1 text-sm font-medium text-[#242424]">
-                      Промокод{" "}
-                      <span className="font-mono uppercase">{appliedPromo.code}</span>{" "}
-                      применён
+                      {t.cart.promoApplied(appliedPromo.code)}
                     </p>
                     <button
                       type="button"
@@ -849,7 +839,7 @@ export function CheckoutView({
                         btnMotion,
                         "active:scale-95",
                       )}
-                      aria-label="Убрать промокод"
+                      aria-label={t.cart.removePromo}
                     >
                       <X className="size-4" strokeWidth={2.5} />
                     </button>
@@ -860,13 +850,13 @@ export function CheckoutView({
                       <input
                         type="text"
                         name="promo"
-                        placeholder="Промокод"
+                        placeholder={t.cart.promoPlaceholder}
                         value={promoInput}
                         disabled={promoLoading}
                         onChange={(e) => setPromoInput(e.target.value)}
                         onKeyDown={handlePromoKeyDown}
                         className="storefront-modal-field min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
-                        aria-label="Промокод"
+                        aria-label={t.cart.promoAria}
                         autoComplete="off"
                       />
                       <button
@@ -881,13 +871,13 @@ export function CheckoutView({
                         {promoLoading ? (
                           <Loader2 className="size-5 animate-spin" aria-hidden />
                         ) : (
-                          "Применить"
+                          t.cart.applyPromo
                         )}
                       </button>
                     </div>
                     {promoError ? (
                       <p className="text-sm text-red-600" role="alert">
-                        {promoError}
+                        {promoErrorMessage(promoError, lang)}
                       </p>
                     ) : null}
                   </div>
@@ -901,7 +891,7 @@ export function CheckoutView({
                 htmlFor="checkout-comment"
                 className={checkoutLabelTop}
               >
-                Комментарий к заказу
+                {t.checkout.commentTitle}
               </label>
               <div className="min-w-0 flex-1">
                 <textarea
@@ -909,7 +899,7 @@ export function CheckoutView({
                   name="comment"
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  placeholder="Комментарий к заказу"
+                  placeholder={t.checkout.commentPlaceholder}
                   rows={4}
                   className={cn(
                     inputClassName,
@@ -929,11 +919,11 @@ export function CheckoutView({
               )}
             >
               <h3 className="mb-6 text-[24px] font-bold leading-tight text-[#242424] lg:hidden">
-                Метод оплаты
+                {t.checkout.paymentTitle}
               </h3>
               <div className={checkoutRowStart}>
                 <span className={cn(checkoutLabelTop, "hidden lg:block")}>
-                  Метод оплаты
+                  {t.checkout.paymentTitle}
                 </span>
                 <div className="min-w-0 flex-1 space-y-6">
                   <div className="flex w-full gap-3">
@@ -948,7 +938,7 @@ export function CheckoutView({
                       )}
                     >
                       <Banknote className="size-[14px] shrink-0" strokeWidth={2} />
-                      <span className="text-center leading-tight">Наличными</span>
+                      <span className="text-center leading-tight">{t.checkout.cash}</span>
                     </button>
                     <button
                       type="button"
@@ -962,14 +952,14 @@ export function CheckoutView({
                     >
                       <CreditCard className="size-[14px] shrink-0" strokeWidth={2} />
                       <span className="text-center leading-tight">
-                        Картой курьеру
+                        {t.checkout.card}
                       </span>
                     </button>
                   </div>
                   {payment === "cash" ? (
                     <div>
                       <p className="text-[16px] font-bold text-[#242424]">
-                        С какой купюры потребуется сдача?
+                        {t.checkout.changeQuestion}
                       </p>
                       <div className="mt-2 flex items-center gap-2">
                         <input
@@ -978,14 +968,16 @@ export function CheckoutView({
                           value={changeFrom}
                           onChange={(e) => setChangeFrom(e.target.value)}
                           className="storefront-modal-field w-[120px] rounded-[12px] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
-                          placeholder="0"
+                          placeholder={t.checkout.changePlaceholder}
                         />
                         <span className="text-[16px] font-medium text-[#242424]">
-                          лей
+                          {lang === "RO" ? "lei" : "лей"}
                         </span>
                       </div>
                       <p className="mt-2 text-[12px] font-normal text-[#808080]">
-                        Например: 50, 100, 200, 400, 600 и т.д.
+                        {lang === "RO"
+                          ? "De exemplu: 50, 100, 200, 400, 600 etc."
+                          : "Например: 50, 100, 200, 400, 600 и т.д."}
                       </p>
                     </div>
                   ) : null}
@@ -1035,7 +1027,7 @@ export function CheckoutView({
               <Loader2 className="size-6 animate-spin" aria-hidden />
             ) : (
               <>
-                Оформить заказ
+                {t.checkout.submit}
                 <ChevronRight className="size-5" strokeWidth={2} />
               </>
             )}

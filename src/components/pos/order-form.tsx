@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
 import type { DeliveryZoneCheckResultPos } from "@/lib/actions/pos/check-delivery-zone-pos"
 import { createOrderPos } from "@/lib/actions/pos/create-order-pos"
+import { updateOrderDetailsPos } from "@/lib/actions/pos/update-order-details-pos"
 import { addOrderItemsPos } from "@/lib/actions/pos/update-order-items"
 import { validatePromoCode } from "@/lib/actions/validate-promo-code"
 import { calcPromoDiscount } from "@/lib/discount"
@@ -419,6 +420,63 @@ type OrderFormProps = {
   extendOrderId?: string
   /** После успешного addOrderItemsPos или отмены «назад» со шага меню. */
   onExtendDone?: () => void
+  /** Редактирование шага «Оформление» для существующего заказа (клиент, доставка, оплата). */
+  editOrderDetailsId?: string
+  /** После сохранения или «Назад» с шага оформления в режиме редактирования. */
+  onEditDetailsDone?: () => void
+}
+
+function phoneInputFromStored(phone: string): string {
+  const t = phone.replace(/\s+/g, "")
+  if (t.startsWith("+373")) return t.slice(4)
+  if (t.startsWith("373")) return t.slice(3)
+  return t
+}
+
+function posCartFromOrderLine(line: {
+  id: string
+  item_name: string
+  menu_item_id: string | null
+  size: string | null
+  quantity: number
+  price: number
+  toppings: unknown
+  menu_items:
+    | { image_url: string | null }
+    | { image_url: string | null }[]
+    | null
+}): PosCartItem {
+  const rawName = line.item_name?.trim() || "—"
+  const plus = rawName.indexOf(" + ")
+  const baseName = plus >= 0 ? rawName.slice(0, plus).trim() : rawName
+  const sz = line.size?.toLowerCase() ?? ""
+  const size: "s" | "l" | null =
+    sz === "s" ? "s" : sz === "l" ? "l" : null
+  const qty = Math.max(1, line.quantity)
+  const unit = qty > 0 ? Math.round(line.price / qty) : 0
+  const rawTops = Array.isArray(line.toppings) ? line.toppings : []
+  const toppings = rawTops
+    .map((t: unknown, i: number) => {
+      const o = t as { name?: string; price?: number }
+      return {
+        id: `${line.id}-t-${i}`,
+        name: typeof o.name === "string" ? o.name : "",
+        price: Math.round(typeof o.price === "number" ? o.price : 0),
+      }
+    })
+    .filter((t) => t.name)
+  const embed = Array.isArray(line.menu_items)
+    ? line.menu_items[0]
+    : line.menu_items
+  return {
+    menuItemId: line.menu_item_id ?? "",
+    name: baseName,
+    size,
+    price: unit,
+    qty,
+    imageUrl: embed?.image_url ?? undefined,
+    toppings,
+  }
 }
 
 export function OrderForm({
@@ -426,10 +484,14 @@ export function OrderForm({
   onOrderCreated,
   extendOrderId,
   onExtendDone,
+  editOrderDetailsId,
+  onEditDetailsDone,
 }: OrderFormProps) {
-  const [step, setStep] = useState<1 | 2 | 3>(() =>
-    extendOrderId ? 2 : 1,
-  )
+  const [step, setStep] = useState<1 | 2 | 3>(() => {
+    if (editOrderDetailsId) return 3
+    if (extendOrderId) return 2
+    return 1
+  })
   const [selectedBrand, setSelectedBrand] = useState<BrandConfig | null>(null)
   const [brandId, setBrandId] = useState<string | null>(null)
   const [categories, setCategories] = useState<MenuCategoryRow[]>([])
@@ -464,6 +526,15 @@ export function OrderForm({
   const [extendOrderNumber, setExtendOrderNumber] = useState<number | null>(null)
   const [extendSubmitting, setExtendSubmitting] = useState(false)
   const [extendError, setExtendError] = useState<string | null>(null)
+  const [editDetailsPrep, setEditDetailsPrep] = useState<{
+    loading: boolean
+    error: string | null
+  }>(() => ({
+    loading: Boolean(editOrderDetailsId),
+    error: null,
+  }))
+  const [editBaselineDeliveryFeeBani, setEditBaselineDeliveryFeeBani] =
+    useState<number | null>(null)
 
   const form = useForm<CheckoutFormValues>({
     resolver: zodResolver(checkoutSchema),
@@ -495,11 +566,28 @@ export function OrderForm({
 
   const deliveryFeeBani = useMemo(() => {
     if (deliveryMode !== "delivery") return 0
-    if (zoneResult?.status !== "in_zone") return 0
-    const zone = zoneResult.zone
-    if (zone.free_delivery_from_bani != null && subtotalBani >= zone.free_delivery_from_bani) return 0
-    return zone.delivery_price_bani
-  }, [deliveryMode, zoneResult, subtotalBani])
+    if (zoneResult?.status === "in_zone") {
+      const zone = zoneResult.zone
+      if (zone.free_delivery_from_bani != null && subtotalBani >= zone.free_delivery_from_bani) return 0
+      return zone.delivery_price_bani
+    }
+    if (
+      zoneResult?.status === "out_of_zone" ||
+      zoneResult?.status === "not_found"
+    ) {
+      return 0
+    }
+    if (editOrderDetailsId && editBaselineDeliveryFeeBani != null) {
+      return editBaselineDeliveryFeeBani
+    }
+    return 0
+  }, [
+    deliveryMode,
+    zoneResult,
+    subtotalBani,
+    editOrderDetailsId,
+    editBaselineDeliveryFeeBani,
+  ])
 
   const totalBani = subtotalBani - discountBani + deliveryFeeBani
 
@@ -554,8 +642,10 @@ export function OrderForm({
   useEffect(() => {
     if (!extendOrderId) {
       setExtendPrep({ loading: false, error: null })
-      setExtendOrderNumber(null)
       setExtendError(null)
+      if (!editOrderDetailsId) {
+        setExtendOrderNumber(null)
+      }
       return
     }
 
@@ -603,7 +693,133 @@ export function OrderForm({
     return () => {
       cancelled = true
     }
-  }, [extendOrderId])
+  }, [extendOrderId, editOrderDetailsId])
+
+  useEffect(() => {
+    if (!editOrderDetailsId) {
+      setEditDetailsPrep({ loading: false, error: null })
+      setEditBaselineDeliveryFeeBani(null)
+      return
+    }
+
+    let cancelled = false
+    setEditDetailsPrep({ loading: true, error: null })
+
+    void (async () => {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from("orders")
+        .select(
+          "*, brands(slug), order_items(id, item_name, menu_item_id, size, quantity, price, toppings, menu_items(image_url))",
+        )
+        .eq("id", editOrderDetailsId)
+        .maybeSingle()
+
+      if (cancelled) return
+
+      if (error || !data) {
+        setEditDetailsPrep({
+          loading: false,
+          error: "Не удалось загрузить заказ",
+        })
+        return
+      }
+
+      const bEmbed = data.brands as { slug: string } | { slug: string }[] | null
+      const slug = Array.isArray(bEmbed) ? bEmbed[0]?.slug : bEmbed?.slug
+      if (!slug) {
+        setEditDetailsPrep({
+          loading: false,
+          error: "Бренд заказа не найден",
+        })
+        return
+      }
+
+      const cfg = brands.find((x) => x.slug === slug)
+      if (!cfg) {
+        setEditDetailsPrep({ loading: false, error: "Неизвестный бренд" })
+        return
+      }
+
+      const row = data as {
+        order_number: number
+        user_name: string | null
+        user_phone: string
+        user_birthday: string | null
+        delivery_mode: "delivery" | "pickup"
+        delivery_address: string | null
+        payment_method: "cash" | "card"
+        change_from: number | null
+        comment: string | null
+        promo_code: string | null
+        order_items: Array<{
+          id: string
+          item_name: string
+          menu_item_id: string | null
+          size: string | null
+          quantity: number
+          price: number
+          toppings: unknown
+          menu_items:
+            | { image_url: string | null }
+            | { image_url: string | null }[]
+            | null
+        }> | null
+      }
+
+      const lines = row.order_items ?? []
+      const cartLines = lines.map(posCartFromOrderLine)
+      const sub = cartLines.reduce((s, c) => s + c.price * c.qty, 0)
+
+      setSelectedBrand(cfg)
+      setExtendOrderNumber(row.order_number)
+      setEditBaselineDeliveryFeeBani(
+        Math.max(0, Math.round((data as { delivery_fee: number }).delivery_fee ?? 0)),
+      )
+      setCart(cartLines)
+      setModalItem(null)
+      setCartEditIndex(null)
+
+      setPromoInput(row.promo_code?.trim() ?? "")
+      setPromoError(null)
+      if (row.promo_code?.trim() && sub > 0) {
+        const res = await validatePromoCode(row.promo_code.trim(), sub)
+        if (cancelled) return
+        if (res.valid) {
+          setPromoResult(res.promo)
+        } else {
+          setPromoResult(null)
+        }
+      } else {
+        setPromoResult(null)
+      }
+
+      form.reset({
+        userName: row.user_name?.trim() ?? "",
+        userPhone: phoneInputFromStored(row.user_phone),
+        userBirthday: row.user_birthday?.slice(0, 10) ?? "",
+        deliveryMode: row.delivery_mode,
+        deliveryAddress:
+          row.delivery_mode === "delivery"
+            ? (row.delivery_address?.trim() ?? "")
+            : "",
+        paymentMethod: row.payment_method,
+        changeFromLei:
+          row.change_from != null && row.change_from > 0
+            ? String(row.change_from / 100)
+            : "",
+        comment: row.comment ?? "",
+      })
+
+      if (!cancelled) {
+        setEditDetailsPrep({ loading: false, error: null })
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [editOrderDetailsId, form])
 
   const loadCategories = useCallback(async (bid: string) => {
     const supabase = createClient()
@@ -786,6 +1002,42 @@ export function OrderForm({
   }
 
   const submitCheckout = async (values: CheckoutFormValues) => {
+    if (editOrderDetailsId) {
+      if (!selectedBrand) return
+      setSubmitError(null)
+      setSubmitting(true)
+      const changeBani =
+        values.paymentMethod === "cash"
+          ? parseLeiToBani(values.changeFromLei ?? "")
+          : null
+
+      const res = await updateOrderDetailsPos({
+        orderId: editOrderDetailsId,
+        userName: values.userName,
+        userPhone: values.userPhone,
+        userBirthday: values.userBirthday?.trim() || undefined,
+        deliveryMode: values.deliveryMode,
+        deliveryAddress:
+          values.deliveryMode === "delivery"
+            ? values.deliveryAddress
+            : undefined,
+        paymentMethod: values.paymentMethod,
+        changeFrom: changeBani ?? undefined,
+        comment: values.comment?.trim() || undefined,
+        promoCode: promoResult ? promoInput.trim().toUpperCase() : undefined,
+        discount: discountBani > 0 ? discountBani : 0,
+        deliveryFee: deliveryFeeBani,
+      })
+
+      setSubmitting(false)
+      if (!res.success) {
+        setSubmitError(res.error)
+        return
+      }
+      onEditDetailsDone?.()
+      return
+    }
+
     if (!selectedBrand) return
     setSubmitError(null)
     setSubmitting(true)
@@ -901,7 +1153,10 @@ export function OrderForm({
     </nav>
   )
 
-  if (extendOrderId && extendPrep.loading) {
+  if (
+    (extendOrderId && extendPrep.loading) ||
+    (editOrderDetailsId && editDetailsPrep.loading)
+  ) {
     return (
       <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 p-6 text-sm">
         <Loader2
@@ -913,10 +1168,16 @@ export function OrderForm({
     )
   }
 
-  if (extendOrderId && extendPrep.error) {
+  const prefetchError = extendOrderId
+    ? extendPrep.error
+    : editOrderDetailsId
+      ? editDetailsPrep.error
+      : null
+
+  if (prefetchError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-6">
-        <p className="text-destructive text-center text-sm">{extendPrep.error}</p>
+        <p className="text-destructive text-center text-sm">{prefetchError}</p>
         <Button type="button" variant="outline" onClick={onClose}>
           Закрыть
         </Button>
@@ -925,7 +1186,7 @@ export function OrderForm({
   }
 
   /* ── Шаг 1: выбор бренда ── */
-  if (step === 1 && !extendOrderId) {
+  if (step === 1 && !extendOrderId && !editOrderDetailsId) {
     return (
       <div className="flex h-full min-h-0 flex-col">
         <FormHeader
@@ -979,7 +1240,7 @@ export function OrderForm({
   }
 
   /* ── Шаг 2: выбор меню ── */
-  if (step === 2 && selectedBrand) {
+  if (step === 2 && selectedBrand && !editOrderDetailsId) {
     return (
       <div className="flex h-full min-h-0 flex-col">
         {/* Навигационная шапка */}
@@ -1152,12 +1413,18 @@ export function OrderForm({
           <>
             <PosHeaderIconButton
               aria-label="Назад"
-              onClick={() => setStep(2)}
+              onClick={() =>
+                editOrderDetailsId
+                  ? onEditDetailsDone?.()
+                  : setStep(2)
+              }
             >
               <ArrowLeft className="size-4" />
             </PosHeaderIconButton>
             <span className="min-w-0 truncate text-sm font-bold text-foreground">
-              Оформление
+              {editOrderDetailsId && extendOrderNumber != null
+                ? `Редактировать · #${extendOrderNumber}`
+                : "Оформление"}
             </span>
           </>
         }
@@ -1394,8 +1661,10 @@ export function OrderForm({
                   {submitting ? (
                     <span className="flex items-center gap-2">
                       <Loader2 className="size-4 shrink-0 animate-spin" />
-                      Создание…
+                      {editOrderDetailsId ? "Сохранение…" : "Создание…"}
                     </span>
+                  ) : editOrderDetailsId ? (
+                    "Сохранить изменения"
                   ) : (
                     "Создать заказ"
                   )}

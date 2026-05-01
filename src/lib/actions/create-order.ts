@@ -52,6 +52,68 @@ function sizeForOrderItem(cartItem: CartItem): "s" | "l" | null {
   return null
 }
 
+async function sendTelegramNotification(order: {
+  orderNumber: number
+  brandName: string
+  userPhone: string
+  userName: string | null
+  deliveryAddress: string
+  deliveryMode: string
+  paymentMethod: string
+  total: number
+  discount: number
+  deliveryFee: number
+  comment: string | null
+  items: Array<{
+    item_name: string
+    quantity: number
+    price: number
+    size?: string
+  }>
+}) {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = process.env.TELEGRAM_CHAT_ID
+  if (!token || !chatId) return
+
+  const modeLabel =
+    order.deliveryMode === "pickup" ? "🏃 Самовывоз" : "🚗 Доставка"
+  const payLabel =
+    order.paymentMethod === "card" ? "💳 Карта" : "💵 Наличные"
+  const itemLines = order.items
+    .map(
+      (i) =>
+        `• ${i.item_name}${i.size ? ` (${i.size})` : ""} × ${i.quantity} — ${((i.price * i.quantity) / 100).toFixed(0)} MDL`,
+    )
+    .join("\n")
+
+  const text = [
+    `🆕 Заказ #${order.orderNumber} — ${order.brandName}`,
+    ``,
+    `👤 ${order.userName || "Без имени"} | 📞 ${order.userPhone}`,
+    `${modeLabel} | ${payLabel}`,
+    order.deliveryMode !== "pickup" ? `📍 ${order.deliveryAddress}` : null,
+    order.comment ? `💬 ${order.comment}` : null,
+    ``,
+    itemLines,
+    ``,
+    order.discount > 0
+      ? `🏷 Скидка: -${(order.discount / 100).toFixed(0)} MDL`
+      : null,
+    order.deliveryFee > 0
+      ? `🚚 Доставка: ${(order.deliveryFee / 100).toFixed(0)} MDL`
+      : null,
+    `💰 Итого: ${(order.total / 100).toFixed(0)} MDL`,
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+  }).catch(() => {}) // не блокируем заказ если телеграм недоступен
+}
+
 /** Витрина: `resolveBrandId` = getBrandId; админ/POS: getAdminBrandId. */
 export async function executeCreateOrder(
   payload: CreateOrderPayload,
@@ -143,6 +205,45 @@ export async function executeCreateOrder(
       .eq("brand_id", brandId)
     return { success: false, error: t.orderErrors.saveItemsFailed }
   }
+
+  const { data: brandRow } = await supabase
+    .from("brands")
+    .select("name")
+    .eq("id", brandId)
+    .maybeSingle()
+  const brandName =
+    (brandRow as { name: string } | null)?.name ?? "Заказ"
+
+  void sendTelegramNotification({
+    orderNumber,
+    brandName,
+    userPhone: phone,
+    userName: name || null,
+    deliveryAddress: payload.deliveryAddress.trim(),
+    deliveryMode: payload.deliveryMode,
+    paymentMethod: payload.paymentMethod,
+    total: payload.grandTotalBani,
+    discount: payload.discountBani,
+    deliveryFee: payload.deliveryFeeBani,
+    comment: payload.comment?.trim() ?? null,
+    items: payload.items.map((ci) => {
+      const unitBani = getCartItemPrice(ci)
+      const sz = sizeForOrderItem(ci)
+      const sizeLabel =
+        sz === "s"
+          ? ci.menuItem.size_s_label?.trim() || "S"
+          : sz === "l"
+            ? ci.menuItem.size_l_label?.trim() || "L"
+            : undefined
+      return {
+        item_name:
+          lang === "RO" ? ci.menuItem.name_ro : ci.menuItem.name_ru,
+        quantity: ci.quantity,
+        price: unitBani,
+        ...(sizeLabel ? { size: sizeLabel } : {}),
+      }
+    }),
+  }).catch(() => {})
 
   return { success: true, orderNumber }
 }

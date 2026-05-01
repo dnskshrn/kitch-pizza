@@ -293,9 +293,16 @@ type OrderDetailProps = {
   onClose: () => void
   /** Открывает шаг с меню (добавить позиции к существующему заказу). */
   onAddItemsToOrder: (orderId: string) => void
+  /** Шаг 3 мастера — данные клиента, доставка, оплата. */
+  onEditOrderDetails: (orderId: string) => void
 }
 
-export function OrderDetail({ orderId, onClose, onAddItemsToOrder }: OrderDetailProps) {
+export function OrderDetail({
+  orderId,
+  onClose,
+  onAddItemsToOrder,
+  onEditOrderDetails,
+}: OrderDetailProps) {
   const [order, setOrder] = useState<OrderDetailRow | null>(null)
   const [operatorName, setOperatorName] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -644,7 +651,7 @@ export function OrderDetail({ orderId, onClose, onAddItemsToOrder }: OrderDetail
 
           <div className="col-span-7 flex min-h-[min(420px,calc(100vh-340px))] min-w-0 flex-col lg:min-h-[480px]">
             <section className="flex min-h-full min-w-0 flex-1 flex-col rounded-xl bg-white p-4">
-              <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
+                <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#f2f2f2] text-[#242424]">
                     <ReceiptText className="size-4" aria-hidden />
@@ -653,14 +660,24 @@ export function OrderDetail({ orderId, onClose, onAddItemsToOrder }: OrderDetail
                     Данные о заказе
                   </h3>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-8 shrink-0 rounded-lg border border-[#f2f2f2] bg-white px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[#242424] shadow-none hover:bg-[#f2f2f2]"
-                  onClick={() => onAddItemsToOrder(order.id)}
-                >
-                  Добавить к заказу
-                </Button>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 shrink-0 rounded-lg border border-[#f2f2f2] bg-white px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-[#242424] shadow-none hover:bg-[#f2f2f2]"
+                    onClick={() => onEditOrderDetails(order.id)}
+                  >
+                    Редактировать данные
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 shrink-0 rounded-lg border border-[#f2f2f2] bg-white px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[#242424] shadow-none hover:bg-[#f2f2f2]"
+                    onClick={() => onAddItemsToOrder(order.id)}
+                  >
+                    Добавить к заказу
+                  </Button>
+                </div>
               </div>
 
               <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-0">

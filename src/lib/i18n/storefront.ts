@@ -1,6 +1,6 @@
 export type Lang = "RU" | "RO"
 
-export const DEFAULT_LANG: Lang = "RU"
+export const DEFAULT_LANG: Lang = "RO"
 export const LANG_STORAGE_KEY = "lang"
 
 export type LocalizedText = {
@@ -153,7 +153,6 @@ export const messages = {
     },
     cart: {
       empty: "Корзина пуста",
-      promos: "Акции 2+1 / 3+1",
       addToOrder: "Добавить к заказу?",
       sauces: "Соусы",
       drinks: "Напитки",
@@ -351,7 +350,6 @@ export const messages = {
     },
     cart: {
       empty: "Coșul este gol",
-      promos: "Promoții 2+1 / 3+1",
       addToOrder: "Adaugi la comandă?",
       sauces: "Sosuri",
       drinks: "Băuturi",

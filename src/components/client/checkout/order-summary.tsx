@@ -60,14 +60,10 @@ export function OrderSummary({
 
   return (
     <div className="storefront-checkout-card storefront-modal-card-radius rounded-[24px] p-6 md:p-7">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-2">
+      <div className="mb-6">
         <h2 className="text-[20px] font-bold text-[#242424]">
           {t.checkout.orderContent}
         </h2>
-        <span className="inline-flex items-center gap-1 text-[12px] font-bold text-[#808080]">
-          {t.cart.promos}
-          <Info className="size-4 shrink-0" strokeWidth={2} aria-hidden />
-        </span>
       </div>
 
       <ul className="divide-y divide-[#f5f5f5]">

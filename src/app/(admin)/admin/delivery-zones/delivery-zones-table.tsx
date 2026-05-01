@@ -16,6 +16,8 @@ import { Pencil, Plus, Trash2 } from "lucide-react"
 import { DeleteZoneDialog } from "./delete-zone-dialog"
 import { ZoneDialog } from "./zone-dialog"
 
+const FALLBACK_ZONE_COLOR = "#5F7600"
+
 function formatLei(bani: number): string {
   return (bani / 100).toLocaleString("ro-MD", {
     minimumFractionDigits: 0,
@@ -43,6 +45,7 @@ export function DeliveryZonesTable({ zones }: { zones: DeliveryZone[] }) {
           <TableHeader>
             <TableRow>
               <TableHead>Название</TableHead>
+              <TableHead className="w-28">Цвет</TableHead>
               <TableHead>Цена доставки</TableHead>
               <TableHead>Мин. заказ</TableHead>
               <TableHead>Бесплатно от</TableHead>
@@ -55,6 +58,18 @@ export function DeliveryZonesTable({ zones }: { zones: DeliveryZone[] }) {
             {zones.map((z) => (
               <TableRow key={z.id}>
                 <TableCell className="font-medium">{z.name}</TableCell>
+                <TableCell>
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className="size-4 rounded-full border border-border"
+                      style={{ backgroundColor: z.color || FALLBACK_ZONE_COLOR }}
+                      aria-hidden
+                    />
+                    <span className="font-mono text-xs uppercase text-muted-foreground">
+                      {z.color || FALLBACK_ZONE_COLOR}
+                    </span>
+                  </span>
+                </TableCell>
                 <TableCell>{formatLei(z.delivery_price_bani)} лей</TableCell>
                 <TableCell>{formatLei(z.min_order_bani)} лей</TableCell>
                 <TableCell>

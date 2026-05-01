@@ -10,6 +10,8 @@ import { ProductModalRoot } from "@/components/client/product-modal/ProductModal
 import { StorefrontHaptics } from "@/components/client/storefront-haptics"
 import { TopNav } from "@/components/client/top-nav"
 import type { Category } from "@/types/database"
+import { htmlLang } from "@/lib/i18n/storefront"
+import { useLanguageStore } from "@/lib/store/language-store"
 import { usePathname } from "next/navigation"
 import { useEffect } from "react"
 
@@ -31,6 +33,13 @@ export function ClientChrome({
   const pathname = usePathname()
   const isCheckoutFlow = pathname.startsWith("/checkout")
   const isBoutiqueStorefront = hasBoutiqueStorefront(brandSlug)
+
+  useEffect(() => {
+    document.documentElement.lang = htmlLang(useLanguageStore.getState().lang)
+    return useLanguageStore.subscribe((s) => {
+      document.documentElement.lang = htmlLang(s.lang)
+    })
+  }, [])
 
   useEffect(() => {
     const previousBrand = document.body.dataset.brand

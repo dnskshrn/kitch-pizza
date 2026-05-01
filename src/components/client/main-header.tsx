@@ -2,7 +2,6 @@
 
 import { ClientContainer } from "@/components/client/client-container"
 import { BRAND_ACCENT } from "@/lib/client-brand"
-import { NAV_LINKS } from "@/components/client/top-nav"
 import {
   getBrandCallLabel,
   getBrandPhone,
@@ -14,7 +13,7 @@ import type { Lang, StorefrontMessages } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
 import Image from "next/image"
 import Link from "next/link"
-import { Bike, MapPin, Menu, X } from "lucide-react"
+import { Bike, ChevronDown, MapPin, Menu, X } from "lucide-react"
 import { useEffect, useState } from "react"
 const ADDRESS_BG = "#f3f4f6"
 /** Фиксированная ширина полосы доставки на десктопе (не растягивается на всю колонку). */
@@ -288,6 +287,122 @@ function TheSpotDesktopHeader({
   )
 }
 
+function MobileFullMenuOverlay({
+  brandSlug,
+  onClose,
+  onAddressClick,
+  brandPhone,
+  brandPhoneHref,
+  brandCallLabel,
+  addressLabel,
+  lang,
+  setLang,
+  t,
+}: {
+  brandSlug: string
+  onClose: () => void
+  onAddressClick: () => void
+  brandPhone: string
+  brandPhoneHref: string
+  brandCallLabel: string
+  addressLabel: string
+  lang: Lang
+  setLang: (next: Lang) => void
+  t: StorefrontMessages
+}) {
+  const langBtnBase =
+    "rounded-full px-3 py-2 text-[14px] font-bold transition-all duration-200"
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex flex-col bg-[#F5F2F0] px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] md:hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t.common.menu}
+    >
+      <div className="flex shrink-0 items-center justify-between gap-2 rounded-full bg-white p-2 pl-3 shadow-[0_16px_42px_rgba(36,36,36,0.06)]">
+        <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
+        <div className="flex shrink-0 items-center gap-2">
+          <div
+            className="flex items-center rounded-full bg-[var(--color-bg)] p-1"
+            role="group"
+            aria-label={
+              lang === "RO" ? "Selectați limba (RU / RO)" : "Выберите язык (RU / RO)"
+            }
+          >
+            <button
+              type="button"
+              onClick={() => setLang("RO")}
+              className={
+                lang === "RO"
+                  ? `${langBtnBase} bg-[var(--color-accent)] text-[var(--primary-foreground)]`
+                  : `${langBtnBase} text-[var(--color-muted)]`
+              }
+            >
+              RO
+            </button>
+            <button
+              type="button"
+              onClick={() => setLang("RU")}
+              className={
+                lang === "RU"
+                  ? `${langBtnBase} bg-[var(--color-accent)] text-[var(--primary-foreground)]`
+                  : `${langBtnBase} text-[var(--color-muted)]`
+              }
+            >
+              RU
+            </button>
+          </div>
+          <button
+            type="button"
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[var(--color-bg)] text-[var(--color-text)] transition-all duration-200 active:scale-[0.96]"
+            aria-label={t.header.closeMenu}
+            onClick={onClose}
+          >
+            <X className="size-6" strokeWidth={2} />
+          </button>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onAddressClick}
+        className="mt-5 flex w-full shrink-0 items-center gap-3 rounded-full bg-white px-4 py-3 text-left shadow-[0_16px_42px_rgba(36,36,36,0.06)] transition-all duration-200 active:scale-[0.99]"
+        aria-label={t.header.deliveryAddress}
+      >
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--primary-foreground)]">
+          <Bike className="size-5" strokeWidth={2.2} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[10px] font-normal leading-tight text-[var(--color-muted)]">
+            {t.header.deliveryAddress}
+          </span>
+          <span className="mt-0.5 block truncate text-[14px] font-bold leading-tight text-[var(--color-text)]">
+            {addressLabel}
+          </span>
+        </span>
+        <ChevronDown
+          className="size-4 shrink-0 text-[var(--color-text)] opacity-70"
+          strokeWidth={2.25}
+          aria-hidden
+        />
+      </button>
+
+      <div className="min-h-0 flex-1" aria-hidden />
+
+      <a
+        href={brandPhoneHref}
+        onClick={onClose}
+        className="mt-4 flex w-full shrink-0 items-center justify-center gap-2 rounded-full bg-[var(--color-accent)] px-4 py-3.5 text-[16px] font-bold text-[var(--primary-foreground)] shadow-[0_8px_24px_rgba(36,36,36,0.12)] transition-all duration-200 hover:brightness-105 active:scale-[0.99]"
+        aria-label={brandCallLabel}
+      >
+        <PhoneIcon className="size-5 shrink-0 text-[var(--primary-foreground)]" />
+        <PhoneNumberDisplay phone={brandPhone} className="tabular-nums" />
+      </a>
+    </div>
+  )
+}
+
 export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const { lang: overlayLang, setLang: setOverlayLang, t } = useLanguage()
@@ -315,16 +430,6 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
 
   const etaMinutes = selectedZone?.delivery_time_min ?? 42
   const hasBoutiqueLayout = hasBoutiqueHeader(brandSlug)
-  const menuLinks = hasBoutiqueLayout
-    ? ([
-        { href: "#menu", label: t.common.menu },
-        { href: "#promotions", label: t.common.promotions },
-        { href: "#contacts", label: t.common.contacts },
-      ] as const)
-    : NAV_LINKS.map((link) => ({
-        href: link.href,
-        label: t.nav[link.labelKey],
-      }))
 
   useEffect(() => {
     if (!menuOpen) return
@@ -335,40 +440,10 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
     }
   }, [menuOpen])
 
-  const scheduleBlock = (
-    <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 text-[12px]">
-      <span>{t.common.schedule}</span>
-      <span className="whitespace-nowrap">11:00 – 23:00</span>
-    </div>
-  )
-
-  const overlayLangBlock = (
-    <div className="flex items-center gap-1 text-[12px]">
-      <button
-        type="button"
-        onClick={() => setOverlayLang("RU")}
-        className={
-          overlayLang === "RU"
-            ? "cursor-pointer font-semibold underline transition-all duration-200"
-            : "text-muted-foreground hover:text-foreground cursor-pointer transition-all duration-200"
-        }
-      >
-        RU
-      </button>
-      <span className="text-muted-foreground">/</span>
-      <button
-        type="button"
-        onClick={() => setOverlayLang("RO")}
-        className={
-          overlayLang === "RO"
-            ? "cursor-pointer font-semibold underline transition-all duration-200"
-            : "text-muted-foreground hover:text-foreground cursor-pointer transition-all duration-200"
-        }
-      >
-        RO
-      </button>
-    </div>
-  )
+  const openAddressFromMenu = () => {
+    setMenuOpen(false)
+    openDeliveryModal()
+  }
 
   return (
     <header
@@ -384,15 +459,18 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
         {hasBoutiqueLayout ? (
           <>
             <div className="md:hidden">
-              <div className="flex h-[63px] w-full items-center gap-3 rounded-full bg-white p-2">
+              <div className="flex h-[63px] w-full items-center gap-3 rounded-full bg-white p-2 shadow-[0_14px_42px_rgba(36,36,36,0.04)]">
                 <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
                 <button
                   type="button"
                   onClick={openDeliveryModal}
-                  className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--color-bg)] px-4 py-2 text-center"
+                  className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--color-bg)] px-4 py-2 text-center transition-all duration-200 active:scale-[0.99]"
                   aria-label={t.header.deliveryAddress}
                 >
-                  <Bike className="size-5 shrink-0 text-[var(--color-text)]" strokeWidth={2.2} />
+                  <Bike
+                    className="size-5 shrink-0 text-[var(--color-text)]"
+                    strokeWidth={2.2}
+                  />
                   <span className="min-w-0 leading-none">
                     <span className="block truncate text-[10px] font-normal text-[var(--color-muted)]">
                       {t.header.deliveryAddress}
@@ -504,177 +582,20 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
       </ClientContainer>
 
       {menuOpen ? (
-        <div
-          className={
-            hasBoutiqueLayout
-              ? "the-spot-menu-overlay fixed inset-0 z-[120] flex flex-col overflow-hidden bg-[var(--color-bg)] lg:hidden"
-              : "fixed inset-0 z-[120] flex flex-col bg-white md:hidden"
+        <MobileFullMenuOverlay
+          brandSlug={brandSlug}
+          onClose={() => setMenuOpen(false)}
+          onAddressClick={openAddressFromMenu}
+          brandPhone={brandPhone}
+          brandPhoneHref={brandPhoneHref}
+          brandCallLabel={brandCallLabel}
+          addressLabel={
+            hasBoutiqueLayout ? theSpotAddressLabel : addressLabel
           }
-          role="dialog"
-          aria-modal="true"
-          aria-label={t.common.menu}
-        >
-          {hasBoutiqueLayout ? (
-            <>
-              <div
-                className="pointer-events-none absolute -right-20 top-20 size-56 rounded-full bg-[var(--color-accent-soft)] opacity-80"
-                aria-hidden
-              />
-              <div
-                className="pointer-events-none absolute -left-24 bottom-28 size-64 rounded-full bg-white/70"
-                aria-hidden
-              />
-              <ClientContainer className="the-spot-menu-content relative z-10 flex items-center justify-between px-4 py-[max(0.75rem,env(safe-area-inset-top))]">
-                <div className="flex h-[63px] min-w-0 flex-1 items-center rounded-full bg-white px-4 shadow-[0_16px_42px_rgba(36,36,36,0.06)]">
-                  <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
-                </div>
-                <button
-                  type="button"
-                  className="ml-3 flex size-[63px] shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.06)] transition-all duration-200 active:scale-[0.96]"
-                  aria-label={t.header.closeMenu}
-                  onClick={() => setMenuOpen(false)}
-                >
-                  <X className="size-7" strokeWidth={2} />
-                </button>
-              </ClientContainer>
-
-              <ClientContainer className="the-spot-menu-content relative z-10 flex flex-1 flex-col overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
-                <nav className="flex flex-col gap-3" aria-label={t.header.navigationLabel}>
-                  {menuLinks.map((link, index) => (
-                    <a
-                      key={link.label}
-                      href={link.href}
-                      className="group flex min-h-[72px] cursor-pointer items-center justify-between rounded-[24px] bg-white px-5 text-[28px] font-black leading-none tracking-[-0.04em] text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.04)] transition-all duration-200 active:scale-[0.98]"
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <span>{link.label}</span>
-                      <span className="flex size-9 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[15px] font-bold tracking-normal text-[var(--color-accent-text)] transition-colors group-active:bg-[var(--color-accent)] group-active:text-white">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                    </a>
-                  ))}
-                </nav>
-
-                <div className="mt-5 grid gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      openDeliveryModal()
-                    }}
-                    className="flex cursor-pointer items-center gap-3 rounded-[24px] bg-white p-4 text-left shadow-[0_16px_42px_rgba(36,36,36,0.04)] transition-all duration-200 active:scale-[0.98]"
-                  >
-                    <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-white">
-                      <Bike className="size-5" strokeWidth={2.2} />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[12px] font-medium text-[var(--color-muted)]">
-                        {t.header.deliveryAddress}
-                      </span>
-                      <span className="mt-1 block truncate text-[16px] font-bold text-[var(--color-text)]">
-                        {theSpotAddressLabel}
-                      </span>
-                    </span>
-                  </button>
-
-                  <a
-                    href={brandPhoneHref}
-                    className="flex cursor-pointer items-center gap-3 rounded-[24px] bg-white p-4 text-[16px] font-bold text-[var(--color-text)] shadow-[0_16px_42px_rgba(36,36,36,0.04)] transition-all duration-200 active:scale-[0.98]"
-                    aria-label={brandCallLabel}
-                  >
-                    <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]">
-                      <PhoneIcon className="size-5" />
-                    </span>
-                    <span>{brandPhone}</span>
-                  </a>
-                </div>
-
-                <div className="mt-auto flex items-end justify-between gap-4 pt-6">
-                  <div className="text-[12px] font-medium leading-relaxed text-[var(--color-muted)]">
-                    <span className="block">{t.common.schedule}</span>
-                    <span className="block font-bold text-[var(--color-text)]">
-                      11:00 – 23:00
-                    </span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1 rounded-full bg-white p-1 text-[13px] font-bold shadow-[0_16px_42px_rgba(36,36,36,0.04)]">
-                    <button
-                      type="button"
-                      onClick={() => setOverlayLang("RU")}
-                      className={
-                        overlayLang === "RU"
-                          ? "rounded-full bg-[var(--color-accent)] px-4 py-2 text-white"
-                          : "rounded-full px-4 py-2 text-[var(--color-muted)] transition-all duration-200"
-                      }
-                    >
-                      RU
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOverlayLang("RO")}
-                      className={
-                        overlayLang === "RO"
-                          ? "rounded-full bg-[var(--color-accent)] px-4 py-2 text-white"
-                          : "rounded-full px-4 py-2 text-[var(--color-muted)] transition-all duration-200"
-                      }
-                    >
-                      RO
-                    </button>
-                  </div>
-                </div>
-              </ClientContainer>
-            </>
-          ) : (
-            <>
-              <ClientContainer className="flex h-11 items-center justify-end">
-                <button
-                  type="button"
-                  className="cursor-pointer p-1 transition-all duration-200 active:scale-[0.97]"
-                  aria-label={t.header.closeMenu}
-                  onClick={() => setMenuOpen(false)}
-                >
-                  <svg
-                    className="size-6"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </ClientContainer>
-              <ClientContainer className="flex flex-1 flex-col gap-1 overflow-y-auto py-4">
-                {menuLinks.map((link) => (
-                  <a
-                    key={link.label}
-                    href={link.href}
-                    className="cursor-pointer py-3 text-base transition-all duration-200 hover:text-foreground/80"
-                    onClick={() => setMenuOpen(false)}
-                  >
-                    {link.label}
-                  </a>
-                ))}
-                <a
-                  href="#"
-                  className="mt-2 inline-flex w-fit cursor-pointer rounded-full bg-[#ECFFA1] px-4 py-2 font-semibold text-[#5F7600] transition-all duration-200 hover:bg-[#dff090] active:scale-[0.97]"
-                  onClick={() => setMenuOpen(false)}
-                >
-                  {t.common.promotions}
-                </a>
-              </ClientContainer>
-              <ClientContainer className="py-4">
-                <div className="flex flex-col gap-4">
-                  {scheduleBlock}
-                  {overlayLangBlock}
-                </div>
-              </ClientContainer>
-            </>
-          )}
-        </div>
+          lang={overlayLang}
+          setLang={setOverlayLang}
+          t={t}
+        />
       ) : null}
     </header>
   )

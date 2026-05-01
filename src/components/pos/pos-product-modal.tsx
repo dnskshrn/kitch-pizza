@@ -15,6 +15,7 @@ import type { PosCartItem } from "@/types/pos"
 import { createBrowserClient } from "@supabase/ssr"
 import { Loader2, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { nextSelectedByGroupWithCap } from "@/lib/topping-max-selection"
 import Image from "next/image"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
@@ -43,6 +44,8 @@ type UiTopping = {
 type UiGroup = {
   id: string
   name_ru: string
+  sort_order: number
+  max_selections: number | null
   toppings: UiTopping[]
 }
 
@@ -188,7 +191,7 @@ export function PosProductModal({
       const { data, error } = await supabase
         .from("menu_item_topping_groups")
         .select(
-          "topping_groups(id, name_ru, toppings(id, name_ru, price, image_url, is_active, sort_order))",
+          "topping_groups(id, name_ru, sort_order, max_selections, toppings(id, name_ru, price, image_url, is_active, sort_order))",
         )
         .eq("menu_item_id", item.id)
 
@@ -206,6 +209,8 @@ export function PosProductModal({
           | {
               id: string
               name_ru: string
+              sort_order: number | null
+              max_selections: number | null
               toppings: Array<{
                 id: string
                 name_ru: string
@@ -218,6 +223,8 @@ export function PosProductModal({
           | Array<{
               id: string
               name_ru: string
+              sort_order: number | null
+              max_selections: number | null
               toppings: Array<{
                 id: string
                 name_ru: string
@@ -249,9 +256,19 @@ export function PosProductModal({
             image_url: t.image_url ?? null,
           }))
         if (toppings.length) {
-          nextGroups.push({ id: g.id, name_ru: g.name_ru, toppings })
+          nextGroups.push({
+            id: g.id,
+            name_ru: g.name_ru,
+            sort_order: g.sort_order ?? 0,
+            max_selections: g.max_selections ?? null,
+            toppings,
+          })
         }
       }
+      nextGroups.sort(
+        (a, b) =>
+          a.sort_order - b.sort_order || a.name_ru.localeCompare(b.name_ru),
+      )
       setGroups(nextGroups)
     })()
 
@@ -301,12 +318,11 @@ export function PosProductModal({
   }, [selectedByGroup, toppingMetaById])
 
   const toggleTopping = (groupId: string, toppingId: string) => {
-    setSelectedByGroup((prev) => {
-      const cur = prev[groupId] ?? []
-      const has = cur.includes(toppingId)
-      const nextIds = has ? cur.filter((x) => x !== toppingId) : [...cur, toppingId]
-      return { ...prev, [groupId]: nextIds }
-    })
+    const g = groups.find((x) => x.id === groupId)
+    if (!g) return
+    setSelectedByGroup((prev) =>
+      nextSelectedByGroupWithCap(prev, groupId, toppingId, g.max_selections),
+    )
   }
 
   const canAdd =

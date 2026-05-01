@@ -1,5 +1,6 @@
 import type { CartItem, CartSelectedSize } from "@/types/cart"
 import type { MenuItem } from "@/types/database"
+import { DEFAULT_LANG } from "@/lib/i18n/storefront"
 
 export type CartLang = "RU" | "RO"
 
@@ -19,7 +20,7 @@ export function isSameCartConfiguration(
   return sortedToppingIdsKey(a.selectedToppingIds) === sortedToppingIdsKey(toppingIds)
 }
 
-export function getCartItemSummary(cartItem: CartItem, lang: CartLang = "RU"): string {
+export function getCartItemSummary(cartItem: CartItem, lang: CartLang = DEFAULT_LANG): string {
   const { menuItem, selectedSize, selectedToppingIds, toppingsList } = cartItem
 
   let sizeLabel = ""

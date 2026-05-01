@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css"
 import "leaflet-draw/dist/leaflet.draw.css"
 
 const CHISINAU: [number, number] = [47.0245, 28.8322]
+const FALLBACK_ZONE_COLOR = "#5F7600"
 
 type LeafletModule = typeof import("leaflet")
 type LMap = import("leaflet").Map
@@ -23,6 +24,7 @@ type Props = {
   zones: DeliveryZone[]
   editingId: string | null
   polygon: [number, number][]
+  currentColor: string
   onPolygonChange: (coords: [number, number][]) => void
 }
 
@@ -30,6 +32,7 @@ export default function AdminDeliveryMap({
   zones,
   editingId,
   polygon,
+  currentColor,
   onPolygonChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -73,13 +76,15 @@ export default function AdminDeliveryMap({
       zones.forEach((z) => {
         if (editingId && z.id === editingId) return
         if (!Array.isArray(z.polygon) || z.polygon.length < 2) return
+        const zoneColor = z.color || FALLBACK_ZONE_COLOR
         const poly = L.polygon(
           z.polygon.map(([a, b]) => [a, b] as [number, number]),
           {
-            color: "#64748b",
+            color: zoneColor,
             weight: 2,
             dashArray: "6 4",
-            fillOpacity: 0.05,
+            fillColor: zoneColor,
+            fillOpacity: 0.08,
           },
         ).addTo(activeMap)
         otherLayers.push(poly)
@@ -91,7 +96,12 @@ export default function AdminDeliveryMap({
       if (polygon.length >= 3) {
         const pl = L.polygon(
           polygon.map(([a, b]) => [a, b] as [number, number]),
-          { color: "#5F7600", weight: 3, fillOpacity: 0.12 },
+          {
+            color: currentColor || FALLBACK_ZONE_COLOR,
+            weight: 3,
+            fillColor: currentColor || FALLBACK_ZONE_COLOR,
+            fillOpacity: 0.14,
+          },
         )
         drawnItems.addLayer(pl)
         try {
@@ -129,6 +139,11 @@ export default function AdminDeliveryMap({
         "draw:created",
         (e: { layer: LPolygon }) => {
           drawnItems.clearLayers()
+          e.layer.setStyle({
+            color: currentColor || FALLBACK_ZONE_COLOR,
+            fillColor: currentColor || FALLBACK_ZONE_COLOR,
+            fillOpacity: 0.14,
+          })
           drawnItems.addLayer(e.layer)
           extract(e.layer)
         },
@@ -161,7 +176,7 @@ export default function AdminDeliveryMap({
     }
     // polygon — только начальное состояние при монтировании; сброс — через `key` у родителя
     // eslint-disable-next-line react-hooks/exhaustive-deps -- см. выше
-  }, [editingId, zones])
+  }, [currentColor, editingId, zones])
 
   return (
     <div

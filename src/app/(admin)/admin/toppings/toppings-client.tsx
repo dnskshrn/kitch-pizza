@@ -122,6 +122,11 @@ export function ToppingsClient({ groups, toppings }: Props) {
                         onClick={() => setSelectedId(g.id)}
                       >
                         <span className="font-medium leading-tight">{g.name_ru}</span>
+                        <span className="text-muted-foreground mt-0.5 block text-xs font-normal">
+                          {(g.max_selections ?? null) == null
+                            ? "Без лимита выбора"
+                            : `Макс. ${g.max_selections} шт.`}
+                        </span>
                       </button>
                       <div className="mt-1.5 flex items-center gap-1.5">
                         {g.is_active ? (

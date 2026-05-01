@@ -48,6 +48,8 @@ export type ToppingGroup = {
   sort_order: number
   is_active: boolean
   created_at: string
+  /** Максимум выбранных топпингов из группы; null — без лимита. */
+  max_selections: number | null
 }
 
 export type Topping = {
@@ -144,6 +146,7 @@ export type PromoCodeValidationResult =
 export type DeliveryZone = {
   id: string
   name: string
+  color: string
   polygon: [number, number][]
   delivery_price_bani: number
   min_order_bani: number

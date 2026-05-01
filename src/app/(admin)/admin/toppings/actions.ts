@@ -11,6 +11,8 @@ export async function createToppingGroup(data: {
   name_ro: string
   sort_order: number
   is_active: boolean
+  /** null — без ограничения; иначе максимум выбранных топпингов из группы. */
+  max_selections: number | null
 }) {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
@@ -20,6 +22,7 @@ export async function createToppingGroup(data: {
     name_ro: data.name_ro.trim(),
     sort_order: data.sort_order,
     is_active: data.is_active,
+    max_selections: data.max_selections,
   })
   if (error) throw new Error(error.message)
   revalidateToppings()
@@ -32,6 +35,7 @@ export async function updateToppingGroup(
     name_ro: string
     sort_order: number
     is_active: boolean
+    max_selections: number | null
   }
 ) {
   const brandId = await getAdminBrandId()
@@ -43,6 +47,7 @@ export async function updateToppingGroup(
       name_ro: data.name_ro.trim(),
       sort_order: data.sort_order,
       is_active: data.is_active,
+      max_selections: data.max_selections,
     })
     .eq("id", id)
     .eq("brand_id", brandId)

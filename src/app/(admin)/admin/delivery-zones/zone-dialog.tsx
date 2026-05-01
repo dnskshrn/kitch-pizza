@@ -27,6 +27,9 @@ const AdminDeliveryMap = dynamic(() => import("./admin-delivery-map"), {
   ),
 })
 
+const DEFAULT_ZONE_COLOR = "#5F7600"
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
+
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -37,6 +40,7 @@ type Props = {
 
 export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) {
   const [name, setName] = useState("")
+  const [color, setColor] = useState(DEFAULT_ZONE_COLOR)
   const [polygon, setPolygon] = useState<[number, number][]>([])
   const [priceLei, setPriceLei] = useState("")
   const [minOrderLei, setMinOrderLei] = useState("")
@@ -51,6 +55,7 @@ export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) 
     if (!open) return
     if (mode === "edit" && zone) {
       setName(zone.name)
+      setColor(zone.color || DEFAULT_ZONE_COLOR)
       setPolygon(
         Array.isArray(zone.polygon) ? (zone.polygon as [number, number][]) : [],
       )
@@ -66,6 +71,7 @@ export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) 
       setSortOrder(String(zone.sort_order))
     } else {
       setName("")
+      setColor(DEFAULT_ZONE_COLOR)
       setPolygon([])
       setPriceLei("")
       setMinOrderLei("")
@@ -88,6 +94,10 @@ export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) 
       alert("Укажите название")
       return
     }
+    if (!HEX_COLOR_RE.test(color)) {
+      alert("Укажите цвет зоны в формате HEX, например #5F7600")
+      return
+    }
     if (!Number.isFinite(pLei) || pLei < 0) {
       alert("Укажите цену доставки")
       return
@@ -107,11 +117,14 @@ export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) 
 
     const payload: DeliveryZoneInput = {
       name: name.trim(),
+      color,
       polygon,
       delivery_price_bani: Math.round(pLei * 100),
       min_order_bani: Math.round(mLei * 100),
       free_delivery_from_bani:
-        fRaw === "" ? null : Math.max(0, Math.round(Number(fRaw.replace(",", ".")) * 100)),
+        fRaw === ""
+          ? null
+          : Math.max(0, Math.round(Number(fRaw.replace(",", ".")) * 100)),
       delivery_time_min: Math.round(t),
       is_active: isActive,
       sort_order: Number.isFinite(so) ? Math.round(so) : 0,
@@ -154,6 +167,25 @@ export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) 
           </div>
 
           <div className="grid gap-2">
+            <Label htmlFor="dz-color">Цвет зоны *</Label>
+            <div className="flex items-center gap-3">
+              <Input
+                id="dz-color"
+                type="color"
+                value={HEX_COLOR_RE.test(color) ? color : DEFAULT_ZONE_COLOR}
+                onChange={(e) => setColor(e.target.value)}
+                className="h-10 w-14 shrink-0 cursor-pointer p-1"
+              />
+              <Input
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                placeholder="#5F7600"
+                className="font-mono uppercase"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-2">
             <div className="flex items-center justify-between gap-2">
               <Label>Зона на карте *</Label>
               <Button
@@ -173,6 +205,7 @@ export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) 
               zones={allZones}
               editingId={editingId}
               polygon={polygon}
+              currentColor={color}
               onPolygonChange={setPolygon}
             />
             <p className="text-muted-foreground text-xs">

@@ -2,12 +2,7 @@
 
 import { OrderCard } from "@/components/pos/order-card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  fetchPosOrderById,
-  fetchPosOrders,
-  mapOrder,
-  type OrderRow,
-} from "@/lib/pos/fetch-orders"
+import { fetchPosOrderById, fetchPosOrders } from "@/lib/pos/fetch-orders"
 import { createClient } from "@/lib/supabase/client"
 import type { PosOrder, PosOrderStatus } from "@/types/pos"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -17,20 +12,17 @@ function isWithinLast24h(iso: string): boolean {
   return new Date(iso).getTime() >= minTs
 }
 
-function playBeep() {
+const POS_NEW_ORDER_CHIME_URL = "/pos-new-order-chime.wav"
+
+function playNewOrderChime() {
   try {
-    const ctx = new AudioContext()
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.frequency.value = 880
-    gain.gain.setValueAtTime(0.3, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
-    osc.start(ctx.currentTime)
-    osc.stop(ctx.currentTime + 0.4)
+    const audio = new Audio(POS_NEW_ORDER_CHIME_URL)
+    audio.volume = 0.85
+    void audio.play().catch(() => {
+      // автовоспроизведение может быть заблокировано до жеста пользователя
+    })
   } catch {
-    // Web Audio может быть недоступен до жеста пользователя
+    // Audio API недоступен
   }
 }
 
@@ -90,6 +82,32 @@ export function OrdersPanel({
     setOrders(data)
   }, [])
 
+  const upsertRealtimeOrder = useCallback(
+    async (orderId: string, options?: { shouldBeep?: boolean }) => {
+      const fresh = await fetchPosOrderById(orderId)
+      if (!fresh) return
+
+      let shouldPlayBeep = false
+      setOrders((prev) => {
+        const idx = prev.findIndex((o) => o.id === fresh.id)
+        if (idx === -1) {
+          if (!isWithinLast24h(fresh.created_at)) return prev
+          shouldPlayBeep = Boolean(options?.shouldBeep)
+          return [fresh, ...prev]
+        }
+
+        const next = [...prev]
+        next[idx] = fresh
+        return next
+      })
+
+      if (shouldPlayBeep) {
+        playNewOrderChime()
+      }
+    },
+    [],
+  )
+
   useEffect(() => {
     void reloadOrders()
   }, [reloadOrders])
@@ -125,6 +143,15 @@ export function OrdersPanel({
 
   useEffect(() => {
     const supabase = createClient()
+    const retryTimers = new Set<ReturnType<typeof setTimeout>>()
+
+    const scheduleRetry = (orderId: string) => {
+      const timer = setTimeout(() => {
+        retryTimers.delete(timer)
+        void upsertRealtimeOrder(orderId)
+      }, 800)
+      retryTimers.add(timer)
+    }
 
     const channel = supabase
       .channel("pos-orders-realtime")
@@ -134,30 +161,9 @@ export function OrdersPanel({
         (payload) => {
           const id = (payload.new as { id?: string })?.id
           if (!id) return
-          void (async () => {
-            const supabase = createClient()
-            const { data: newOrder, error } = await supabase
-              .from("orders")
-              .select("*, brands(slug), order_items(count)")
-              .eq("id", id)
-              .maybeSingle()
-
-            if (error) {
-              console.error("[orders-panel] realtime insert fetch", error.message)
-              return
-            }
-            if (!newOrder) return
-            const row = newOrder as OrderRow
-            if (!isWithinLast24h(row.created_at)) return
-
-            const mapped = mapOrder(row)
-            setOrders((prev) => {
-              if (prev.some((o) => o.id === mapped.id)) return prev
-              return [mapped, ...prev]
-            })
-            playBeep()
-          })()
-        }
+          void upsertRealtimeOrder(id, { shouldBeep: true })
+          scheduleRetry(id)
+        },
       )
       .on(
         "postgres_changes",
@@ -165,41 +171,20 @@ export function OrdersPanel({
         (payload) => {
           const id = (payload.new as { id?: string })?.id
           if (!id) return
-          void (async () => {
-            const supabase = createClient()
-            const { data: updated, error } = await supabase
-              .from("orders")
-              .select("*, brands(slug), order_items(count)")
-              .eq("id", id)
-              .maybeSingle()
-
-            if (error) {
-              console.error("[orders-panel] realtime update fetch", error.message)
-              return
-            }
-            if (!updated) return
-            const row = mapOrder(updated as OrderRow)
-            setOrders((prev) => {
-              const idx = prev.findIndex((o) => o.id === row.id)
-              if (idx === -1) {
-                if (isWithinLast24h(row.created_at)) {
-                  return [row, ...prev]
-                }
-                return prev
-              }
-              const next = [...prev]
-              next[idx] = row
-              return next
-            })
-          })()
-        }
+          void upsertRealtimeOrder(id)
+        },
       )
-      .subscribe()
+      .subscribe((status, error) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[orders-panel] realtime subscription", status, error)
+        }
+      })
 
     return () => {
+      retryTimers.forEach((timer) => clearTimeout(timer))
       void supabase.removeChannel(channel)
     }
-  }, [])
+  }, [upsertRealtimeOrder])
 
   const onTabChange = (v: string) => {
     if (isOrderFilterTab(v)) setTab(v)

@@ -8,7 +8,7 @@
 - **Админка:** `/admin/*`, Supabase Auth, CRUD контента и заказов.
 - **POS:** `/pos/*`, отдельный вход по PIN, смены, создание и редактирование заказов.
 - **Валюта:** MDL; все суммы в БД хранятся integer bani, в UI показываются как lei.
-- **Языки витрины:** RU / RO через Zustand store и поля `*_ru` / `*_ro`.
+- **Языки витрины:** RU / RO через Zustand store и поля `*_ru` / `*_ro`; **язык по умолчанию — RO** (`DEFAULT_LANG` в `src/lib/i18n/storefront.ts`, persist key `lang` в localStorage).
 
 ## Стек
 
@@ -21,7 +21,7 @@
 | Forms / validation | React Hook Form, Zod |
 | Maps | Leaflet, Leaflet Draw, Nominatim |
 | POS auth | `jose` JWT + `bcryptjs` PIN |
-| UI extras | Sonner, Swiper, Vaul, Lucide, web-haptics |
+| UI extras | Sonner, Swiper, Vaul, Lucide, Motion, web-haptics |
 
 ## Архитектура
 
@@ -45,6 +45,7 @@ src/
 │   ├── brand-phone.ts   # номер для витрины + tel:, из BrandConfig
 │   ├── data/            # storefront fetchers
 │   ├── i18n/
+│   ├── topping-max-selection.ts  # лимит выбора топпингов по группе (витрина + POS)
 │   ├── pos/
 │   ├── store/
 │   └── supabase/
@@ -70,11 +71,14 @@ src/
 
 ## Витрина
 
-- Главная: промо, featured items для boutique брендов, категории и меню.
+- Главная: промо, featured items для boutique брендов, категории и меню. Полоса категорий: `src/components/client/menu-category-bar.tsx` (sticky, скролл к секциям по `slug`); у **losos** и **the-spot** кнопки категорий без декоративных иконок.
+- **Шапка (мобилка):** `src/components/client/main-header.tsx`. У **the-spot / losos** в закрытом состоянии одна капсула: логотип, кнопка адреса (открывает модалку доставки), бургер. **Открытое меню** (`MobileFullMenuOverlay`, `<md`): полноэкранный слой на фоне `#F5F2F0` — верхняя белая полоса (логотип, переключатель RO/RU, закрытие), ниже кнопка адреса, внизу закреплённая **`tel:`**-кнопка звонка; пункты навигации «Меню / Акции / …» в оверлее не показываются. У **kitch-pizza** закрытая шапка прежняя (бургер, лого, телефон + баннер доставки); оверлей — тот же компонент.
+- **Модалка товара:** `src/components/client/product-modal/ProductModalRoot.tsx` — топпинги группируются по `topping_groups` с заголовком группы (данные `fetchStorefrontMenuItemToppingGroups` в `src/lib/data/storefront-item-toppings.ts`). Учитывается лимит выбора на группу (`topping_groups.max_selections`, см. админку). На мобилке фото блюда визуально меньше (~`w-[70%]` относительно контейнера, `max-w-[315px]`).
 - Корзина: `cart-store`, localStorage key `kitch-cart`, TTL 7 дней, промокоды через `validatePromoCode`.
 - Доставка: `delivery-store`, localStorage key `kitch-delivery`, зоны по полигонам, геокодинг через Nominatim.
-- Checkout: `createOrder`, `OrderSummary`, `CheckoutProgressSteps`, success page с картой.
-- i18n: `src/lib/store/language-store.ts` и `src/lib/i18n/storefront.ts`.
+- Checkout: `createOrder`, `OrderSummary`, `CheckoutProgressSteps`, success page с картой (`checkout-success-view`, `checkout-success-map`).
+- **Успешный заказ:** `src/components/client/checkout/checkout-success-view.tsx` — блок героя со стилизацией `storefront-checkout-success-hero` в `globals.css`; декоративная иллюстрация `/Vector.svg` только у **kitch-pizza**. У брендов **losos** и **the-spot** декор не показывается, текст без правых отступов под графику.
+- i18n: `src/lib/store/language-store.ts` и `src/lib/i18n/storefront.ts`; на маршрутах витрины `ClientChrome` синхронизирует `document.documentElement.lang` с выбранным языком.
 - Haptics: `StorefrontHaptics` подключается только на витрине и checkout; отключение через `data-haptics="off"`.
 - Телефон в шапке и блоке успеха checkout: из `getBrandPhone(brandSlug)` (`src/lib/brand-phone.ts`), не общий текст из словаря.
 - Скелетоны переходов: `src/components/client/storefront-skeletons.tsx` — **StorefrontHomeSkeleton** по `brandSlug` (boutique vs Kitch разная верстка), **CheckoutSkeleton** для checkout/hydrate; **`src/app/(client)/loading.tsx`** и **`src/app/(client)/checkout/loading.tsx`** читают заголовок `x-brand-slug` и пробрасывают бренд.
@@ -96,12 +100,18 @@ src/
 |---|---|
 | `/admin/orders` | список, фильтры, детали и статусы заказов |
 | `/admin/categories` | категории меню |
-| `/admin/menu` | позиции меню, размеры, скидки, теги, топпинги |
+| `/admin/menu` | позиции меню, размеры, скидки, теги, топпинги; **фильтр по категории и поиск** (название, описание RU/RO, категория) на клиенте в `menu-table.tsx` |
 | `/admin/featured-menu` | блок «Новое и популярное» |
-| `/admin/toppings` | группы топпингов и топпинги |
+| `/admin/toppings` | группы топпингов и топпинги; можно создать новый топпинг или скопировать уже существующий в выбранную группу; у группы — **«Безлимит»** (по умолчанию) или число «сколько можно выбрать» → колонка `topping_groups.max_selections` |
 | `/admin/promotions` | промо-баннеры RU/RO |
 | `/admin/promo-codes` | промокоды |
-| `/admin/delivery-zones` | зоны доставки и полигоны |
+| `/admin/delivery-zones` | несколько зон доставки, полигоны Leaflet Draw, цвет зоны, цена/минималка/время |
+
+Примечания:
+
+- Топпинг физически принадлежит одной группе через `toppings.group_id`. Действие «Существующий» в `/admin/toppings` создаёт **копию** топпинга в текущей группе, не переносит оригинал; дубликаты с тем же `name_ru` / `name_ro` / `price` в группе блокируются.
+- У группы топпингов поле **`max_selections`**: `NULL` — без лимита (можно выбрать несколько), число ≥ 1 — максимум позиций из этой группы в одной позиции заказа; логика в `src/lib/topping-max-selection.ts` на витрине (`ProductModalRoot`) и в POS (`pos-product-modal.tsx`). Миграция: `supabase/migrations/*_topping_group_max_selections.sql`.
+- Зоны доставки хранят HEX-цвет в `delivery_zones.color` (колонка в БД; миграция `supabase/migrations/*_add_delivery_zone_color.sql`). Форма валидирует `#RRGGBB`, карты админки и витрины рисуют полигоны в цвете зоны.
 
 ## POS
 
@@ -109,11 +119,14 @@ src/
 - Auth: `src/lib/actions/pos/auth.ts`, cookie `pos-session`, JWT HS256, секрет `POS_SESSION_SECRET`.
 - Смены: `src/lib/actions/pos/shifts.ts`, таблица `shift_logs`; открытая смена закрывается при logout.
 - Корневая зона `src/app/pos/page.tsx`: левая панель заказов, справа — состояние **idle / detail / create / add-items** (режим добавления строк к уже оформленному заказу).
-- Клиентские данные POS: `src/lib/pos/fetch-orders.ts`, типы `src/types/pos.ts`, Realtime для списка и карточки заказа.
+- Клиентские данные POS: `src/lib/pos/fetch-orders.ts`, типы `src/types/pos.ts`.
+- **Supabase Realtime (POS):** в публикацию `supabase_realtime` должны входить `public.orders` и `public.order_items` (DDL в `supabase/migrations`, например `*_enable_pos_orders_realtime`). Иначе события `postgres_changes` в браузере не придут и список обновится только после перезагрузки.
+- **Список заказов:** `src/components/pos/orders-panel.tsx` — подписка на `INSERT`/`UPDATE` таблицы `orders`, повторная выборка строки и короткая повторная догрузка после вставки (чтобы подтянулся `item_count` после `order_items`).
+- **Карточка заказа:** `src/components/pos/order-detail.tsx` — Realtime: `UPDATE` по строке `orders` и изменения в `order_items` с фильтром `order_id`; верстка: данные клиента / доставка / служебное слева, справа блок «Данные о заказе» со списком строк (количество ±, свайп влево открывает красную кнопку удаления; не ниже одной строки), сводка подытог / доставка / скидка / итог, кресток закрытия с белым фоном (`posHeaderCloseButtonClassName`).
 - **Новый заказ:** мастер `src/components/pos/order-form.tsx` — шаг 1 (бренды из `brands`), шаг 2 (меню + корзина), шаг 3 (оформление). Создание: `createOrderPos`, `source = 'pos'`, `operator_id` из текущей сессии; в `order_items` сохраняются топпинги JSON вместе с позицией.
 - **Добавление к сохранённому заказу:** из `OrderDetail` кнопка «Добавить к заказу» переводит панель в `add-items` и открывает тот же `OrderForm` сразу на шаге 2 (`extendOrderId`, `addOrderItemsPos`) — только новые позиции из корзины пишутся в существующий `orders.id`, пересчитывается `total`.
-- **Карточка заказа:** `src/components/pos/order-detail.tsx` — данные клиента / доставка / служебное слева, справа блок «Данные о заказе» со списком строк (количество ±, удаление с ограничением «не ниже одной строки»), сводка подытог / доставка / скидка / итог внизу белой карточки, кресток закрытия с белым фоном (`posHeaderCloseButtonClassName`).
-- **Правка позиции:** кнопка «Изменить» (если у строки есть `menu_item_id`) открывает `PosProductModal` в режиме правки сохранённой строки и вызывает `updateOrderItemCompositionPos` (размер, топпинги, количество, пересчёт цены строки и заказа).
+- **Правка позиции:** кнопка «Изменить» (если у строки есть `menu_item_id`) или клик по строке в POS-корзине открывает `PosProductModal`; для сохранённых строк вызывается `updateOrderItemCompositionPos` (размер, топпинги, количество, пересчёт цены строки и заказа), для черновика корзины строка заменяется локально. Выбор топпингов в модалке учитывает **`topping_groups.max_selections`** (как на витрине).
+- **POS-корзина:** строки в `OrderForm` имеют компактную двухрядную верстку; удаление — через `src/components/pos/swipe-to-delete.tsx` (свайп только раскрывает кнопку, само удаление по нажатию на неё).
 - Server Actions для строк заказа: `src/lib/actions/pos/update-order-items.ts` — `updateOrderItemQuantityPos`, `removeOrderItemPos`, `addOrderItemsPos`, `updateOrderItemCompositionPos`.
 
 ## Данные и БД
@@ -121,10 +134,10 @@ src/
 Основные таблицы:
 
 - `brands` — slug, name и UUID бренда.
-- `menu_categories`, `menu_items`, `topping_groups`, `toppings`, `menu_item_topping_groups`.
+- `menu_categories`, `menu_items`, `topping_groups` (**`max_selections`** — лимит выбора из группы, `NULL` = без лимита), `toppings`, `menu_item_topping_groups`.
 - `promotions`, `featured_menu_items`.
 - `promo_codes`.
-- `delivery_zones` — polygon JSONB как массив `[lat, lng]`.
+- `delivery_zones` — `polygon` JSONB как массив `[lat, lng]`, `color` (TEXT, HEX `#RRGGBB`, default) для отрисовки полигона, цена/минималка/время доставки.
 - `orders`, `order_items`.
 - `profiles`, `otp_codes` — storefront phone auth.
 - `staff`, `shift_logs` — POS.
@@ -135,6 +148,12 @@ src/
 - Дочерние таблицы без `brand_id` фильтруются через родительские сущности.
 - Денежные поля (`total`, `price`, `discount`, `delivery_fee`, `*_bani`) хранятся в банях.
 - Записи, которые обходят RLS, выполняются через service role client в `src/lib/supabase/service-role.ts`.
+- **Realtime Postgres Changes:** для подписки из клиента нужны включённые таблицы в публикации `supabase_realtime` и возможность клиента читать строки (или RLS будет скрывать события). Для локальной истории см. файлы в `supabase/migrations/`; продакшен применять через Supabase MCP/CLI/dashboard согласно процессу команды.
+
+## Миграции Supabase
+
+- SQL для схемы хранится в `supabase/migrations/` и должен синхронизироваться с подключённым проектом.
+- Типичные добавления: колонка `delivery_zones.color`; `topping_groups.max_selections`; публикация Realtime для `orders` и `order_items`.
 
 ## Server Actions и API
 
@@ -162,7 +181,8 @@ API routes:
 ## i18n
 
 - Язык витрины: `src/lib/store/language-store.ts`, persist key `lang`.
-- Словари и helpers: `src/lib/i18n/storefront.ts`.
+- Стартовый язык до гидрации и для новых гостей: **RO** (`DEFAULT_LANG`).
+- Словари и helpers: `src/lib/i18n/storefront.ts`; дефолт языка в `getCartItemSummary` и т.п. согласован с `DEFAULT_LANG`.
 - Динамические названия берутся через `pickLocalizedName` / `pickLocalizedDescription`.
 - Server action `createOrder` принимает язык, чтобы сохранить snapshot заказа и вернуть ошибки на выбранном языке.
 

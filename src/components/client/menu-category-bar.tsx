@@ -364,13 +364,12 @@ function TheSpotCategoryBar({
                 type="button"
                 onClick={() => onSelect(cat.slug)}
                 className={cn(
-                  "flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full px-4 py-3 text-[14px] font-bold transition-all duration-200 active:scale-[0.97]",
+                  "flex shrink-0 cursor-pointer items-center justify-center rounded-full px-4 py-3 text-[14px] font-bold transition-all duration-200 active:scale-[0.97]",
                   isActive
                     ? "bg-[var(--color-accent)] text-white"
                     : "bg-white text-[var(--color-text)]",
                 )}
               >
-                <Pizza className="size-4" strokeWidth={2.2} />
                 {pickLocalizedName(cat, lang)}
               </button>
             )
@@ -398,13 +397,12 @@ function TheSpotCategoryBar({
                       type="button"
                       onClick={() => onSelect(cat.slug)}
                       className={cn(
-                        "flex h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-[14px] font-bold transition-all duration-200 active:scale-[0.98]",
+                        "flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full px-4 text-[14px] font-bold transition-all duration-200 active:scale-[0.98]",
                         isActive
                           ? "bg-[var(--color-accent)] text-white"
                           : "bg-white text-[var(--color-text)] hover:bg-[var(--color-accent-soft)]",
                       )}
                     >
-                      <Pizza className="size-4" strokeWidth={2.2} />
                       {pickLocalizedName(cat, lang)}
                     </button>
                   )

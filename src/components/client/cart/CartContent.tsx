@@ -77,30 +77,27 @@ export function CartContent({
 
   return (
     <div className="storefront-modal-bg relative flex h-full min-h-0 flex-col overflow-hidden">
-      <header className="relative shrink-0 px-4 pb-6 pt-4 md:pb-7 md:pt-5">
-        <div className="flex items-start gap-2 pr-10 md:pr-12">
-          <ShoppingBasket className="mt-0.5 size-6 shrink-0 text-[#242424]" strokeWidth={2} />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <h2 className="text-[20px] font-bold leading-tight text-[#242424]">
-                {goodsPhrase(itemCount, lang)}
-              </h2>
-              <span className="inline-flex items-center gap-1 text-sm text-[rgba(36,36,36,0.45)]">
-                {t.cart.promos}
-                <Info className="size-4 shrink-0" strokeWidth={2} aria-hidden />
-                {/* TODO: акции 2+1 / 3+1 — логика */}
-              </span>
-            </div>
+      <header className="shrink-0 px-4 pb-6 pt-4 md:pb-7 md:pt-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <ShoppingBasket
+              className="size-6 shrink-0 text-[#242424]"
+              strokeWidth={2}
+              aria-hidden
+            />
+            <h2 className="text-[20px] font-bold leading-tight text-[#242424]">
+              {goodsPhrase(itemCount, lang)}
+            </h2>
           </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="storefront-modal-surface flex size-10 shrink-0 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
+            aria-label={t.cart.closeCart}
+          >
+            <X className="size-5" strokeWidth={2.5} />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="storefront-modal-surface absolute right-4 top-4 flex size-10 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
-          aria-label={t.cart.closeCart}
-        >
-          <X className="size-5" strokeWidth={2.5} />
-        </button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[112px] [-webkit-overflow-scrolling:touch]">

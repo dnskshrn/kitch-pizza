@@ -27,6 +27,9 @@ export function ToppingGroupDialog({ open, onOpenChange, mode, group }: Props) {
   const [nameRo, setNameRo] = useState("")
   const [sortOrder, setSortOrder] = useState(0)
   const [isActive, setIsActive] = useState(true)
+  /** Включено = без лимита выбора (max_selections = null). */
+  const [unlimited, setUnlimited] = useState(true)
+  const [maxPick, setMaxPick] = useState(1)
   const [pending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -36,11 +39,16 @@ export function ToppingGroupDialog({ open, onOpenChange, mode, group }: Props) {
       setNameRo(group.name_ro ?? "")
       setSortOrder(group.sort_order)
       setIsActive(group.is_active)
+      const cap = group.max_selections ?? null
+      setUnlimited(cap == null)
+      setMaxPick(cap != null && cap >= 1 ? cap : 1)
     } else {
       setNameRu("")
       setNameRo("")
       setSortOrder(0)
       setIsActive(true)
+      setUnlimited(true)
+      setMaxPick(1)
     }
   }, [open, mode, group])
 
@@ -48,11 +56,14 @@ export function ToppingGroupDialog({ open, onOpenChange, mode, group }: Props) {
     const ru = (nameRu ?? "").trim()
     const ro = (nameRo ?? "").trim()
     if (!ru || !ro) return
+    const cap =
+      unlimited || maxPick < 1 ? null : Math.min(500, Math.floor(maxPick))
     const payload = {
       name_ru: ru,
       name_ro: ro,
       sort_order: sortOrder,
       is_active: isActive,
+      max_selections: cap,
     }
     startTransition(async () => {
       try {
@@ -69,9 +80,11 @@ export function ToppingGroupDialog({ open, onOpenChange, mode, group }: Props) {
     })
   }
 
+  const maxPickValid = unlimited || (Number.isFinite(maxPick) && maxPick >= 1)
   const canSave =
     !!(nameRu ?? "").trim() &&
     !!(nameRo ?? "").trim() &&
+    maxPickValid &&
     !pending
 
   return (
@@ -108,6 +121,29 @@ export function ToppingGroupDialog({ open, onOpenChange, mode, group }: Props) {
               onChange={(e) => setSortOrder(Number(e.target.value) || 0)}
             />
           </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="tg-unlimited"
+              checked={unlimited}
+              onCheckedChange={setUnlimited}
+            />
+            <Label htmlFor="tg-unlimited">Безлимит</Label>
+          </div>
+          {!unlimited ? (
+            <div className="grid gap-2">
+              <Label htmlFor="tg-max-pick">Сколько можно выбрать</Label>
+              <Input
+                id="tg-max-pick"
+                type="number"
+                min={1}
+                max={500}
+                value={maxPick}
+                onChange={(e) =>
+                  setMaxPick(Number.parseInt(e.target.value, 10) || 0)
+                }
+              />
+            </div>
+          ) : null}
           <div className="flex items-center gap-2">
             <Switch
               id="tg-active"

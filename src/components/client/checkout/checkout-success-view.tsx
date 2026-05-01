@@ -203,7 +203,13 @@ export function CheckoutSuccessView({
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:gap-8 lg:gap-12">
           <div className="flex w-full max-w-full flex-col gap-3 md:w-[680px] md:max-w-[680px]">
             <div className="storefront-checkout-success-hero storefront-modal-card-radius relative z-0 mb-3 overflow-visible rounded-[24px] p-6 pb-8 md:mb-4 md:p-8 md:pb-10">
-              <div className="max-w-[min(100%,420px)] pr-[100px] sm:pr-[120px] md:pr-44 lg:pr-52">
+              <div
+                className={cn(
+                  hasBoutiqueLayout
+                    ? "max-w-2xl"
+                    : "max-w-[min(100%,420px)] pr-[100px] sm:pr-[120px] md:pr-44 lg:pr-52",
+                )}
+              >
                 <h1 className="text-[22px] font-bold leading-tight text-[#242424] md:text-[24px]">
                   {customerName
                     ? t.success.titleWithName(customerName)
@@ -225,19 +231,21 @@ export function CheckoutSuccessView({
                   {t.success.phoneHelp}
                 </p>
               </div>
-              <div
-                className="pointer-events-none absolute -bottom-3 -right-2 z-10 flex h-[200px] w-[170px] items-end justify-end sm:h-[240px] sm:w-[200px] md:-bottom-8 md:-right-5 md:h-[min(320px,42vh)] md:w-[min(300px,46%)] lg:h-[340px] lg:w-[320px]"
-                aria-hidden
-              >
-                <Image
-                  src="/Vector.svg"
-                  alt=""
-                  width={324}
-                  height={340}
-                  className="h-full w-full max-w-none object-contain object-right object-bottom drop-shadow-sm"
-                  unoptimized
-                />
-              </div>
+              {!hasBoutiqueLayout ? (
+                <div
+                  className="pointer-events-none absolute -bottom-3 -right-2 z-10 flex h-[200px] w-[170px] items-end justify-end sm:h-[240px] sm:w-[200px] md:-bottom-8 md:-right-5 md:h-[min(320px,42vh)] md:w-[min(300px,46%)] lg:h-[340px] lg:w-[320px]"
+                  aria-hidden
+                >
+                  <Image
+                    src="/Vector.svg"
+                    alt=""
+                    width={324}
+                    height={340}
+                    className="h-full w-full max-w-none object-contain object-right object-bottom drop-shadow-sm"
+                    unoptimized
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="overflow-hidden rounded-[24px] [&_.leaflet-control-attribution]:text-[11px]">

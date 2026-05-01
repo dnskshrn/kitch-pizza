@@ -1,6 +1,9 @@
 "use client"
 
-import { fetchToppingsForMenuItem } from "@/lib/data/storefront-item-toppings"
+import {
+  fetchStorefrontMenuItemToppingGroups,
+  type StorefrontMenuItemToppingGroup,
+} from "@/lib/data/storefront-item-toppings"
 import {
   formatMoney,
   formatWeightGrams,
@@ -11,6 +14,7 @@ import {
 import { useCartStore } from "@/lib/store/cart-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
+import { nextSelectedToppingIdsWithGroupCap } from "@/lib/topping-max-selection"
 import type { MenuItem, Topping } from "@/types/database"
 import { cn } from "@/lib/utils"
 import { X } from "lucide-react"
@@ -142,7 +146,13 @@ export function ProductModalRoot() {
   const [rendered, setRendered] = useState(false)
 
   const { lang, t } = useLanguage()
-  const [toppings, setToppings] = useState<Topping[]>([])
+  const [toppingSections, setToppingSections] = useState<
+    StorefrontMenuItemToppingGroup[]
+  >([])
+  const toppings = useMemo(
+    () => toppingSections.flatMap((s) => s.toppings),
+    [toppingSections],
+  )
   const [selectedSize, setSelectedSize] = useState<PizzaSize>("l")
   const [selectedToppingIds, setSelectedToppingIds] = useState<string[]>([])
 
@@ -172,9 +182,9 @@ export function ProductModalRoot() {
     if (!isOpen || !storeItem) return
     let cancelled = false
     ;(async () => {
-      const list = await fetchToppingsForMenuItem(storeItem.id)
+      const groups = await fetchStorefrontMenuItemToppingGroups(storeItem.id)
       if (cancelled) return
-      setToppings(list)
+      setToppingSections(groups)
       const pm = useProductModalStore.getState()
       if (pm.editingCartItemId) {
         if (storeItem.has_sizes) {
@@ -192,11 +202,24 @@ export function ProductModalRoot() {
     }
   }, [isOpen, storeItem, editingCartItemId])
 
-  const toggleTopping = useCallback((id: string) => {
-    setSelectedToppingIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    )
-  }, [])
+  const toggleTopping = useCallback(
+    (
+      toppingId: string,
+      groupId: string,
+      groupToppingIds: string[],
+      maxSelections: number | null,
+    ) => {
+      setSelectedToppingIds((prev) =>
+        nextSelectedToppingIdsWithGroupCap(
+          prev,
+          toppingId,
+          groupToppingIds,
+          maxSelections,
+        ),
+      )
+    },
+    [],
+  )
 
   const panelItem = modalItem ?? (isOpen ? storeItem : null)
 
@@ -247,14 +270,14 @@ export function ProductModalRoot() {
 
   const imageBlock =
     panelItem && (
-      <div className="relative mx-auto aspect-square w-full max-w-[450px] shrink-0 md:absolute md:bottom-[20px] md:left-[20px] md:top-[20px] md:mx-0 md:w-auto md:max-w-none">
+      <div className="relative mx-auto aspect-square w-[70%] max-w-[315px] shrink-0 md:absolute md:bottom-[20px] md:left-[20px] md:top-[20px] md:mx-0 md:w-auto md:max-w-none">
         {panelItem.image_url ? (
           <Image
             src={panelItem.image_url}
             alt=""
             fill
             className="object-contain"
-            sizes="(max-width: 768px) 100vw, 580px"
+            sizes="(max-width: 768px) 70vw, 580px"
             priority
           />
         ) : (
@@ -306,17 +329,33 @@ export function ProductModalRoot() {
             item={panelItem}
           />
         ) : null}
-        {toppings.length > 0 ? (
-          <div className="grid grid-cols-3 gap-1.5">
-            {toppings.map((t) => (
-              <ToppingCard
-                key={t.id}
-                topping={t}
-                selected={selectedToppingIds.includes(t.id)}
-                onToggle={() => toggleTopping(t.id)}
-                name={pickLocalizedName(t, lang)}
-                priceLabel={formatMoney(t.price, lang)}
-              />
+        {toppingSections.length > 0 ? (
+          <div className="flex flex-col gap-4">
+            {toppingSections.map((section) => (
+              <div key={section.id} className="flex flex-col gap-2">
+                <h3 className="text-[15px] font-semibold leading-snug text-[#242424]">
+                  {pickLocalizedName(section, lang)}
+                </h3>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {section.toppings.map((t) => (
+                    <ToppingCard
+                      key={t.id}
+                      topping={t}
+                      selected={selectedToppingIds.includes(t.id)}
+                      onToggle={() =>
+                        toggleTopping(
+                          t.id,
+                          section.id,
+                          section.toppings.map((x) => x.id),
+                          section.max_selections,
+                        )
+                      }
+                      name={pickLocalizedName(t, lang)}
+                      priceLabel={formatMoney(t.price, lang)}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         ) : null}

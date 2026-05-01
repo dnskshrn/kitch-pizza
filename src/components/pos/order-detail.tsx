@@ -362,7 +362,23 @@ export function OrderDetail({ orderId, onClose, onAddItemsToOrder }: OrderDetail
           void loadOrder()
         },
       )
-      .subscribe()
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "order_items",
+          filter: `order_id=eq.${orderId}`,
+        },
+        () => {
+          void loadOrder()
+        },
+      )
+      .subscribe((status, error) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[order-detail] realtime subscription", status, error)
+        }
+      })
 
     return () => {
       void supabase.removeChannel(channel)

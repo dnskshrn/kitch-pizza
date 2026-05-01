@@ -18,6 +18,7 @@ import "leaflet/dist/leaflet.css"
 
 const CHISINAU: [number, number] = [47.0245, 28.8322]
 const RESTAURANT: [number, number] = [47.0167, 28.8414]
+const FALLBACK_ZONE_COLOR = "#5F7600"
 
 function closeCoord(a: number, b: number, eps = 1e-5) {
   return Math.abs(a - b) < eps
@@ -152,16 +153,18 @@ export default function DeliveryMap({
 
     polygonLayersRef.current.forEach((p) => p.remove())
     polygonLayersRef.current = []
-    const brandAccent = readBrandAccentColor(containerRef.current)
     ;(zones ?? []).forEach((z, idx) => {
       const isPrimary = idx === 0
+      const zoneColor =
+        z.color ||
+        (isPrimary ? readBrandAccentColor(containerRef.current) : FALLBACK_ZONE_COLOR)
       const poly = L.polygon(
         z.polygon.map((pair) => [pair[0], pair[1]] as [number, number]),
         {
-          color: isPrimary ? brandAccent : "#2563eb",
+          color: zoneColor,
           weight: 2,
           opacity: isPrimary ? 0.6 : 0.5,
-          fillColor: isPrimary ? brandAccent : "#2563eb",
+          fillColor: zoneColor,
           fillOpacity: isPrimary ? 0.2 : 0.15,
         },
       ).addTo(map)

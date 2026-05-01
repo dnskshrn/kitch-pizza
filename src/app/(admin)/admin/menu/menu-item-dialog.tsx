@@ -428,7 +428,7 @@ function parseGrams(s: string): number | null | "invalid" {
               <SelectContent>
                 {categories.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.name_ru}
+                    {c.name_ru} · {c.name_ro}
                   </SelectItem>
                 ))}
               </SelectContent>

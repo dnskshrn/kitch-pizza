@@ -34,7 +34,8 @@ export function CategoriesTable({ categories }: { categories: Category[] }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Название</TableHead>
+            <TableHead>Название (RU)</TableHead>
+            <TableHead>Название (RO)</TableHead>
             <TableHead>Slug</TableHead>
             <TableHead className="w-24">Порядок</TableHead>
             <TableHead>Статус</TableHead>
@@ -45,6 +46,7 @@ export function CategoriesTable({ categories }: { categories: Category[] }) {
           {categories.map((c) => (
             <TableRow key={c.id}>
               <TableCell className="font-medium">{c.name_ru}</TableCell>
+              <TableCell className="text-muted-foreground">{c.name_ro}</TableCell>
               <TableCell className="text-muted-foreground">{c.slug}</TableCell>
               <TableCell>{c.sort_order}</TableCell>
               <TableCell>

@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchPosOrderById, fetchPosOrders } from "@/lib/pos/fetch-orders"
 import { createClient } from "@/lib/supabase/client"
 import type { PosOrder, PosOrderStatus } from "@/types/pos"
+import { Phone } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 function isWithinLast24h(iso: string): boolean {
@@ -51,6 +52,24 @@ function isOrderFilterTab(v: string): v is OrderFilterTab {
   return v === "all" || v === "new" || v === "active" || v === "done"
 }
 
+function incomingCallBrandLabel(brandSlug: string | null): string {
+  switch (brandSlug) {
+    case "kitch-pizza":
+      return "🍕 Kitch Pizza"
+    case "losos":
+      return "🐟 Losos"
+    case "the-spot":
+      return "🎯 The Spot"
+    default:
+      return "Неизвестный номер"
+  }
+}
+
+type IncomingCallBannerState = {
+  callerPhone: string
+  brandLabel: string
+}
+
 type OrdersPanelProps = {
   selectedOrderId: string | null
   onSelectOrder: (id: string) => void
@@ -64,6 +83,8 @@ export function OrdersPanel({
 }: OrdersPanelProps) {
   const [orders, setOrders] = useState<PosOrder[]>([])
   const [tab, setTab] = useState<OrderFilterTab>("all")
+  const [incomingCallBanner, setIncomingCallBanner] =
+    useState<IncomingCallBannerState | null>(null)
   const onNewOrderRef = useRef(onNewOrder)
   onNewOrderRef.current = onNewOrder
 
@@ -186,6 +207,83 @@ export function OrdersPanel({
     }
   }, [upsertRealtimeOrder])
 
+  useEffect(() => {
+    const supabase = createClient()
+    let hideBannerAfterMs: ReturnType<typeof setTimeout> | null = null
+
+    const clearHideBannerTimer = () => {
+      if (hideBannerAfterMs) {
+        clearTimeout(hideBannerAfterMs)
+        hideBannerAfterMs = null
+      }
+    }
+
+    const handleIncomingCallRow = (row: Record<string, unknown>) => {
+      const eventType =
+        typeof row.event_type === "string" ? row.event_type : ""
+      if (
+        eventType === "ACCEPTED" ||
+        eventType === "COMPLETED" ||
+        eventType === "CANCELLED"
+      ) {
+        clearHideBannerTimer()
+        setIncomingCallBanner(null)
+        return
+      }
+      if (eventType !== "INCOMING") return
+
+      const rawPhone =
+        typeof row.caller_phone === "string" ? row.caller_phone.trim() : ""
+      const callerPhone = rawPhone || "—"
+      const rawSlug = row.brand_slug
+      const brandSlug =
+        rawSlug === null
+          ? null
+          : typeof rawSlug === "string" && rawSlug.trim()
+            ? rawSlug.trim()
+            : null
+      const brandLabel = incomingCallBrandLabel(brandSlug)
+
+      clearHideBannerTimer()
+      setIncomingCallBanner({ callerPhone, brandLabel })
+      hideBannerAfterMs = setTimeout(() => {
+        hideBannerAfterMs = null
+        setIncomingCallBanner(null)
+      }, 60_000)
+    }
+
+    const channel = supabase
+      .channel("pos-incoming-calls-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "incoming_calls" },
+        (payload) => {
+          handleIncomingCallRow(payload.new as Record<string, unknown>)
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "incoming_calls" },
+        (payload) => {
+          handleIncomingCallRow(payload.new as Record<string, unknown>)
+        },
+      )
+      .subscribe((status, error) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error(
+            "[orders-panel] incoming_calls realtime",
+            status,
+            error,
+          )
+        }
+      })
+
+    return () => {
+      clearHideBannerTimer()
+      void supabase.removeChannel(channel)
+    }
+  }, [])
+
   const onTabChange = (v: string) => {
     if (isOrderFilterTab(v)) setTab(v)
   }
@@ -216,6 +314,37 @@ export function OrdersPanel({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
+      {incomingCallBanner ? (
+        <div
+          className="shrink-0 px-3 py-2.5 shadow-sm"
+          style={{ backgroundColor: "#ccff00", color: "#242424" }}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-3">
+            <span className="relative flex size-10 shrink-0 items-center justify-center">
+              <span
+                className="absolute size-10 animate-ping rounded-full bg-emerald-500/35"
+                aria-hidden
+              />
+              <span
+                className="relative flex size-9 items-center justify-center rounded-full bg-white/95 ring-2 ring-emerald-500 ring-offset-2 ring-offset-[#ccff00] animate-pulse"
+                aria-hidden
+              >
+                <Phone className="size-5" strokeWidth={2} />
+              </span>
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-bold leading-tight tabular-nums">
+                {incomingCallBanner.callerPhone}
+              </p>
+              <p className="mt-0.5 text-[12px] font-semibold leading-tight text-[#242424]/90">
+                {incomingCallBanner.brandLabel}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <Tabs
         value={tab}
         onValueChange={onTabChange}

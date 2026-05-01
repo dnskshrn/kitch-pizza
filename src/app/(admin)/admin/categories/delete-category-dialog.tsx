@@ -45,8 +45,11 @@ export function DeleteCategoryDialog({ category, open, onOpenChange }: Props) {
             {category ? (
               <>
                 <br />
-                <span className="text-foreground font-medium">
+                <span className="text-foreground block font-medium">
                   {category.name_ru}
+                </span>
+                <span className="text-foreground mt-1 block text-sm font-medium">
+                  {category.name_ro}
                 </span>
               </>
             ) : null}

@@ -32,7 +32,8 @@ type Props = {
 }
 
 export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
-  const [name, setName] = useState("")
+  const [nameRu, setNameRu] = useState("")
+  const [nameRo, setNameRo] = useState("")
   const [slug, setSlug] = useState("")
   const [sortOrder, setSortOrder] = useState(0)
   const [isActive, setIsActive] = useState(true)
@@ -41,12 +42,14 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
   useEffect(() => {
     if (!open) return
     if (mode === "edit" && category) {
-      setName(category.name_ru ?? category.name_ro ?? "")
+      setNameRu(category.name_ru ?? "")
+      setNameRo(category.name_ro ?? "")
       setSlug(category.slug ?? "")
       setSortOrder(category.sort_order)
       setIsActive(category.is_active)
     } else {
-      setName("")
+      setNameRu("")
+      setNameRo("")
       setSlug("")
       setSortOrder(0)
       setIsActive(true)
@@ -55,15 +58,20 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
 
   useEffect(() => {
     if (!open || mode === "edit") return
-    setSlug(slugFromName(name))
-  }, [name, open, mode])
+    setSlug(slugFromName(nameRu))
+  }, [nameRu, open, mode])
 
   function handleSave() {
-    const n = (name ?? "").trim()
+    const ru = (nameRu ?? "").trim()
+    const ro = (nameRo ?? "").trim()
+    if (!ru || !ro) {
+      alert("Укажите название на русском и румынском")
+      return
+    }
     const payload = {
-      name_ru: n,
-      name_ro: n,
-      slug: (slug ?? "").trim() || slugFromName(name),
+      name_ru: ru,
+      name_ro: ro,
+      slug: (slug ?? "").trim() || slugFromName(nameRu),
       sort_order: sortOrder,
       is_active: isActive,
     }
@@ -92,12 +100,21 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
-            <Label htmlFor="cat-name">Название</Label>
+            <Label htmlFor="cat-name-ru">Название (RU)</Label>
             <Input
-              id="cat-name"
-              value={name ?? ""}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Название"
+              id="cat-name-ru"
+              value={nameRu ?? ""}
+              onChange={(e) => setNameRu(e.target.value)}
+              placeholder="Название на русском"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="cat-name-ro">Название (RO)</Label>
+            <Input
+              id="cat-name-ro"
+              value={nameRo ?? ""}
+              onChange={(e) => setNameRo(e.target.value)}
+              placeholder="Denumire în română"
             />
           </div>
           <div className="grid gap-2">
@@ -116,7 +133,7 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
               placeholder="url-slug"
             />
             <p className="text-muted-foreground text-xs">
-              Заполняется из названия; можно изменить вручную.
+              Заполняется из названия (RU); можно изменить вручную.
             </p>
           </div>
           <div className="grid gap-2">
@@ -143,7 +160,9 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
           </Button>
           <Button
             onClick={handleSave}
-            disabled={pending || !(name ?? "").trim()}
+            disabled={
+              pending || !(nameRu ?? "").trim() || !(nameRo ?? "").trim()
+            }
           >
             {pending ? "Сохранение..." : "Сохранить"}
           </Button>

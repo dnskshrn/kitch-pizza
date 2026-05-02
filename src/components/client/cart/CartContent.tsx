@@ -2,9 +2,11 @@
 
 import {
   formatMoney,
+  formatWeightGrams,
   goodsPhrase,
   pickLocalizedName,
   promoErrorMessage,
+  type Lang,
 } from "@/lib/i18n/storefront"
 import {
   selectCartDiscount,
@@ -12,18 +14,153 @@ import {
 } from "@/lib/store/cart-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useLanguage } from "@/lib/store/language-store"
+import { createClient } from "@/lib/supabase/client"
 import type { CartItem } from "@/types/cart"
+import { getBrandBySlug } from "@/brands"
 import {
   Check,
   ChevronRight,
   Info,
   Loader2,
+  Minus,
+  Plus,
   ShoppingBasket,
   X,
 } from "lucide-react"
+import Image from "next/image"
 import Link from "next/link"
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { CartItemCard } from "./CartItemCard"
+
+/** Slug витрины: тот же источник, что `x-brand-slug` / `getBrand()` на сервере. */
+function getStorefrontBrandSlug(): string {
+  if (typeof document === "undefined") return "kitch-pizza"
+  const raw = document
+    .querySelector("[data-brand]")
+    ?.getAttribute("data-brand")
+    ?.trim()
+  return raw && raw.length > 0 ? raw : "kitch-pizza"
+}
+
+type CondimentMenuRow = {
+  id: string
+  name_ru: string
+  name_ro: string
+  image_url: string | null
+  weight_grams: number | null
+  price: number | null
+  is_default_condiment: boolean
+  condiment_default_qty?: number | null
+}
+
+function CondimentDrawerRow({
+  item,
+  lang,
+  qty,
+  unitBani,
+  tDecrease,
+  tIncrease,
+  onIncrementFromZero,
+  onDelta,
+}: {
+  item: CondimentMenuRow
+  lang: Lang
+  qty: number
+  unitBani: number
+  tDecrease: string
+  tIncrease: string
+  onIncrementFromZero: () => void
+  onDelta: (delta: 1 | -1) => void
+}) {
+  const name = pickLocalizedName(item, lang)
+  const hasPrice = unitBani > 0
+  const weightLabel =
+    item.weight_grams != null && Number.isFinite(item.weight_grams)
+      ? formatWeightGrams(item.weight_grams, lang)
+      : null
+
+  const addFreeLabel = lang === "RO" ? "Adaugă" : "Добавить"
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="relative size-14 shrink-0 overflow-hidden rounded-lg bg-muted/30">
+        {item.image_url ? (
+          <Image
+            src={item.image_url}
+            alt=""
+            fill
+            className="object-cover"
+            sizes="56px"
+          />
+        ) : null}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[15px] font-medium leading-snug text-[var(--color-text)]">
+          {name}
+        </p>
+        {qty > 0 && hasPrice ? (
+          <p className="mt-0.5 text-sm leading-snug">
+            <span className="tabular-nums text-[var(--color-text)]">
+              {formatMoney(unitBani * qty, lang)}
+            </span>
+            {weightLabel ? (
+              <span className="text-[var(--color-muted)]"> {weightLabel}</span>
+            ) : null}
+          </p>
+        ) : null}
+        {qty === 0 && hasPrice && weightLabel ? (
+          <p className="mt-0.5 text-sm text-[var(--color-muted)]">{weightLabel}</p>
+        ) : null}
+        {!hasPrice && weightLabel ? (
+          <p className="mt-0.5 text-sm text-[var(--color-muted)]">{weightLabel}</p>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 items-center">
+        {qty === 0 ? (
+          <button
+            type="button"
+            onClick={onIncrementFromZero}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-transparent px-[14px] py-2 text-sm font-medium text-[var(--color-text)] transition-colors hover:bg-muted/40"
+          >
+            {hasPrice ? (
+              <>
+                <span className="tabular-nums">{formatMoney(unitBani, lang)}</span>
+                <Plus className="size-4" strokeWidth={2.5} aria-hidden />
+              </>
+            ) : (
+              <>
+                <span>{addFreeLabel}</span>
+                <Plus className="size-4" strokeWidth={2.5} aria-hidden />
+              </>
+            )}
+          </button>
+        ) : (
+          <div className="storefront-modal-field inline-flex shrink-0 items-center gap-0 rounded-full p-0.5">
+            <button
+              type="button"
+              onClick={() => onDelta(-1)}
+              className="flex size-8 items-center justify-center rounded-full text-[var(--color-text)] transition-colors hover:bg-black/5"
+              aria-label={tDecrease}
+            >
+              <Minus className="size-4" strokeWidth={2.5} />
+            </button>
+            <span className="min-w-[2ch] px-1 text-center text-sm font-semibold tabular-nums">
+              {qty}
+            </span>
+            <button
+              type="button"
+              onClick={() => onDelta(1)}
+              className="flex size-8 items-center justify-center rounded-full text-[var(--color-text)] transition-colors hover:bg-black/5"
+              aria-label={tIncrease}
+            >
+              <Plus className="size-4" strokeWidth={2.5} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 type CartContentProps = {
   items: CartItem[]
@@ -53,9 +190,106 @@ export function CartContent({
   const applyPromo = useCartStore((s) => s.applyPromo)
   const removePromo = useCartStore((s) => s.removePromo)
   const discount = useCartStore(selectCartDiscount)
+  const isOpen = useCartStore((s) => s.isOpen)
+  const mergeCondimentsMeta = useCartStore((s) => s.mergeCondimentsMeta)
+  const applyCondimentDefaults = useCartStore((s) => s.applyCondimentDefaults)
+  const condimentQuantities = useCartStore((s) => s.condimentQuantities)
+  const setCondimentQty = useCartStore((s) => s.setCondimentQty)
   const deliveryFeeBani = useDeliveryStore((s) =>
     s.getDeliveryFeeBani(subtotal),
   )
+
+  const [condimentItems, setCondimentItems] = useState<CondimentMenuRow[]>([])
+
+  useEffect(() => {
+    if (!isOpen) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const supabase = createClient()
+        const brandSlug = getStorefrontBrandSlug()
+        const brandConfig = getBrandBySlug(brandSlug)
+        const { data: brandRow, error: bErr } = await supabase
+          .from("brands")
+          .select("id")
+          .eq("slug", brandConfig.slug)
+          .maybeSingle()
+        if (bErr || !brandRow) {
+          if (!cancelled) setCondimentItems([])
+          return
+        }
+        const brandId = (brandRow as { id: string }).id
+
+        const { data: catsRaw, error: cErr } = await (
+          supabase.from("menu_categories") as any
+        )
+          .select("id")
+          .eq("brand_id", brandId)
+          .eq("is_active", true)
+          .eq("is_condiment", true)
+        if (cErr || !catsRaw?.length) {
+          if (!cancelled) setCondimentItems([])
+          return
+        }
+        const catIds = (catsRaw as { id: string }[]).map((c) => c.id)
+        const { data: itemsRaw, error: iErr } = await (
+          supabase.from("menu_items") as any
+        )
+          .select(
+            "id,name_ru,name_ro,image_url,weight_grams,price,is_default_condiment,condiment_default_qty,sort_order",
+          )
+          .eq("brand_id", brandId)
+          .in("category_id", catIds)
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true })
+        if (cancelled) return
+        if (iErr || !itemsRaw?.length) {
+          setCondimentItems([])
+          return
+        }
+        const rows = itemsRaw as CondimentMenuRow[]
+        setCondimentItems(rows)
+        mergeCondimentsMeta(
+          rows.map((r) => ({
+            id: r.id,
+            name_ru: r.name_ru,
+            name_ro: r.name_ro,
+            price: r.price ?? 0,
+          })),
+        )
+        applyCondimentDefaults(rows)
+      } catch {
+        if (!cancelled) setCondimentItems([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isOpen, mergeCondimentsMeta, applyCondimentDefaults])
+
+  const showEcoCondimentsBanner = useMemo(
+    () =>
+      condimentItems.some(
+        (row) =>
+          (row.price ?? 0) === 0 &&
+          (condimentQuantities[row.id] ?? 0) > 0,
+      ),
+    [condimentItems, condimentQuantities],
+  )
+
+  function handleCondimentDelta(id: string, delta: 1 | -1) {
+    const cur = condimentQuantities[id] ?? 0
+    const next = Math.max(0, cur + delta)
+    setCondimentQty(id, next)
+  }
+
+  function handleDeclineFreeCondiments() {
+    for (const row of condimentItems) {
+      if ((row.price ?? 0) === 0 && (condimentQuantities[row.id] ?? 0) > 0) {
+        setCondimentQty(row.id, 0)
+      }
+    }
+  }
 
   const subtotalLei = formatMoney(subtotal, lang)
   const discountLei = formatMoney(discount, lang)
@@ -122,6 +356,52 @@ export function CartContent({
             ))
           )}
         </div>
+
+        {condimentItems.length > 0 ? (
+          <section className="-mx-4 mt-4 shrink-0 px-4 pb-1 pt-1 text-[var(--color-text)]">
+            <p className="mb-3 text-[15px] font-medium text-[var(--color-text)]">
+              {lang === "RO" ? "Adaugă încă" : "Добавить ещё"}
+            </p>
+            <div className="space-y-3">
+              {condimentItems.map((row) => {
+                const qty = condimentQuantities[row.id] ?? 0
+                const unitBani = row.price ?? 0
+                return (
+                  <div
+                    key={row.id}
+                    className="storefront-modal-surface storefront-modal-card-radius rounded-[16px] p-3"
+                  >
+                    <CondimentDrawerRow
+                      item={row}
+                      lang={lang}
+                      qty={qty}
+                      unitBani={unitBani}
+                      tDecrease={t.cart.decrease}
+                      tIncrease={t.cart.increase}
+                      onIncrementFromZero={() => setCondimentQty(row.id, 1)}
+                      onDelta={(d) => handleCondimentDelta(row.id, d)}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+            {showEcoCondimentsBanner ? (
+              <div
+                className="storefront-modal-card-radius mt-4 flex flex-col gap-3 rounded-[16px] bg-[var(--color-accent-soft)] p-4 text-[var(--color-accent-text)]"
+                aria-live="polite"
+              >
+                <p className="text-sm font-normal leading-snug">{t.cart.ecoChopsticksHint}</p>
+                <button
+                  type="button"
+                  onClick={handleDeclineFreeCondiments}
+                  className="w-full rounded-full border border-current/35 bg-transparent px-[14px] py-2 text-sm font-medium text-[var(--color-accent-text)] transition-opacity hover:opacity-90"
+                >
+                  {t.cart.ecoDeclineChopsticks}
+                </button>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <section className="mt-4 shrink-0 pb-4 pt-1">
           <p className="mb-2 text-xs text-[rgba(36,36,36,0.45)]">{t.cart.addToOrder}</p>

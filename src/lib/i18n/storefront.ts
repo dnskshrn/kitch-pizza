@@ -172,6 +172,9 @@ export const messages = {
       remove: "Удалить",
       decrease: "Уменьшить количество",
       increase: "Увеличить количество",
+      ecoChopsticksHint:
+        "🌿 Меньше палочек — больше пользы для природы!",
+      ecoDeclineChopsticks: "Отказаться",
     },
     promoErrors: {
       not_found: "Промокод не найден",
@@ -369,6 +372,9 @@ export const messages = {
       remove: "Șterge",
       decrease: "Micșorează cantitatea",
       increase: "Mărește cantitatea",
+      ecoChopsticksHint:
+        "🌿 Mai puține bețișoare — un beneficiu în plus pentru natură!",
+      ecoDeclineChopsticks: "Renunță",
     },
     promoErrors: {
       not_found: "Promocodul nu a fost găsit",

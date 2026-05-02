@@ -73,6 +73,24 @@ function getWeightPillLabel(
   return activeLabel
 }
 
+function includedItemDotColor(entry: {
+  name_ru: string
+  name_ro: string
+}): string {
+  const hay = `${entry.name_ru} ${entry.name_ro}`.toLowerCase()
+  if (hay.includes("васаби") || hay.includes("wasabi")) return "#4CAF50"
+  if (hay.includes("имбирь") || hay.includes("ghimbir")) return "#FF9800"
+  if (hay.includes("соус") || hay.includes("sos")) return "#5D4037"
+  if (
+    hay.includes("палочки") ||
+    hay.includes("bețisoare") ||
+    hay.includes("betisoare")
+  ) {
+    return "#9E9E9E"
+  }
+  return "#9E9E9E"
+}
+
 function useIsMobileViewport() {
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined"
@@ -268,6 +286,10 @@ export function ProductModalRoot() {
     ? pickLocalizedDescription(panelItem, lang)
     : null
 
+  const includedItems = (panelItem?.included_items ?? []).filter(
+    (e) => e.name_ru.trim() || e.name_ro.trim(),
+  )
+
   const imageBlock =
     panelItem && (
       <div className="relative mx-auto aspect-square w-[70%] max-w-[315px] shrink-0 md:absolute md:bottom-[20px] md:left-[20px] md:top-[20px] md:mx-0 md:w-auto md:max-w-none">
@@ -322,6 +344,30 @@ export function ProductModalRoot() {
             </p>
           ) : null}
         </div>
+        {includedItems.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-[15px] font-semibold leading-snug text-[#242424]">
+              {lang === "RO" ? "Inclus în comandă" : "Входит в заказ"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {includedItems.map((entry, idx) => (
+                <span
+                  key={`${entry.name_ru}-${entry.name_ro}-${idx}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#ccc] bg-transparent px-2.5 py-1 text-xs font-medium text-[#242424]"
+                >
+                  <span
+                    className="size-2 shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: includedItemDotColor(entry),
+                    }}
+                    aria-hidden
+                  />
+                  {pickLocalizedName(entry, lang)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {panelItem.has_sizes ? (
           <SizeSelector
             selectedSize={selectedSize}

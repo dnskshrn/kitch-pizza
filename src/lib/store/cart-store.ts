@@ -1,8 +1,15 @@
 import { validatePromoCode } from "@/lib/actions/validate-promo-code"
-import { getCartItemPrice, isSameCartConfiguration } from "@/lib/cart-helpers"
+import {
+  computeCartGoodsSubtotalBani,
+  isSameCartConfiguration,
+} from "@/lib/cart-helpers"
 import { calcPromoDiscount } from "@/lib/discount"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
-import type { CartItem, CartSelectedSize } from "@/types/cart"
+import type {
+  CartItem,
+  CartSelectedSize,
+  CondimentLineMeta,
+} from "@/types/cart"
 import type { MenuItem, PromoCode, Topping } from "@/types/database"
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
@@ -58,12 +65,21 @@ function isValidCartItem(raw: unknown): raw is CartItem {
 
 type CartState = {
   items: CartItem[]
+  condimentQuantities: Record<string, number>
+  condimentsMeta: Record<string, CondimentLineMeta>
   /** Время последнего сохранения корзины в persist (для срока годности). */
   savedAt: number
   isOpen: boolean
   appliedPromo: PromoCode | null
   promoError: PromoErrorState | null
   promoLoading: boolean
+  setCondimentQty: (id: string, qty: number) => void
+  mergeCondimentsMeta: (
+    rows: Array<{ id: string } & CondimentLineMeta>,
+  ) => void
+  applyCondimentDefaults: (
+    defaults: Array<{ id: string; condiment_default_qty?: number | null }>,
+  ) => void
   addItem: (
     menuItem: MenuItem,
     selectedSize: CartSelectedSize,
@@ -101,18 +117,20 @@ function promoErrorState(
   }
 }
 
-function computeCartSubtotal(items: CartItem[]): number {
-  return items.reduce((sum, i) => sum + getCartItemPrice(i) * i.quantity, 0)
-}
-
 /** Сброс промокода, если сумма корзины ниже минимума для применённого кода. */
 function ensurePromoMinOrder(
   appliedPromo: PromoCode | null,
   items: CartItem[],
+  condimentQuantities: Record<string, number>,
+  condimentsMeta: Record<string, CondimentLineMeta>,
 ): Partial<Pick<CartState, "appliedPromo" | "promoError">> | null {
   const p = appliedPromo
   if (!p?.min_order_bani) return null
-  const subtotal = computeCartSubtotal(items)
+  const subtotal = computeCartGoodsSubtotalBani(
+    items,
+    condimentQuantities,
+    condimentsMeta,
+  )
   if (subtotal < p.min_order_bani) {
     return {
       appliedPromo: null,
@@ -130,15 +148,74 @@ export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
       items: [],
+      condimentQuantities: {},
+      condimentsMeta: {},
       savedAt: Date.now(),
       isOpen: false,
       appliedPromo: null,
       promoError: null,
       promoLoading: false,
 
+      setCondimentQty: (id, qty) =>
+        set((s) => {
+          const q = Math.max(0, Math.floor(Number(qty)) || 0)
+          const nextQty = { ...s.condimentQuantities, [id]: q }
+          const patch = ensurePromoMinOrder(
+            s.appliedPromo,
+            s.items,
+            nextQty,
+            s.condimentsMeta,
+          )
+          return {
+            ...touchSavedAt(),
+            condimentQuantities: nextQty,
+            ...patch,
+          }
+        }),
+
+      mergeCondimentsMeta: (rows) =>
+        set((s) => {
+          const next = { ...s.condimentsMeta }
+          for (const r of rows) {
+            next[r.id] = {
+              name_ru: r.name_ru,
+              name_ro: r.name_ro,
+              price: r.price,
+            }
+          }
+          return { ...touchSavedAt(), condimentsMeta: next }
+        }),
+
+      applyCondimentDefaults: (defaults) =>
+        set((s) => {
+          const next = { ...s.condimentQuantities }
+          for (const row of defaults) {
+            if (next[row.id] !== undefined) continue
+            const raw = row.condiment_default_qty ?? 0
+            const q = Math.max(0, Math.floor(Number(raw)))
+            next[row.id] = Number.isFinite(q) ? q : 0
+          }
+          const patch = ensurePromoMinOrder(
+            s.appliedPromo,
+            s.items,
+            next,
+            s.condimentsMeta,
+          )
+          return {
+            ...touchSavedAt(),
+            condimentQuantities: next,
+            ...patch,
+          }
+        }),
+
       applyPromo: async (code) => {
         set({ promoLoading: true, promoError: null })
-        const subtotal = computeCartSubtotal(get().items)
+        const st = get()
+        const subtotal = computeCartGoodsSubtotalBani(
+          st.items,
+          st.condimentQuantities,
+          st.condimentsMeta,
+        )
         try {
           const result = await validatePromoCode(code, subtotal)
           if (result.valid) {
@@ -192,7 +269,12 @@ export const useCartStore = create<CartState>()(
             }
             newItems = [...state.items, next]
           }
-          const patch = ensurePromoMinOrder(state.appliedPromo, newItems)
+          const patch = ensurePromoMinOrder(
+            state.appliedPromo,
+            newItems,
+            state.condimentQuantities,
+            state.condimentsMeta,
+          )
           return {
             ...touchSavedAt(),
             items: newItems,
@@ -204,7 +286,12 @@ export const useCartStore = create<CartState>()(
       removeItem: (cartItemId) =>
         set((state) => {
           const newItems = state.items.filter((i) => i.id !== cartItemId)
-          const patch = ensurePromoMinOrder(state.appliedPromo, newItems)
+          const patch = ensurePromoMinOrder(
+            state.appliedPromo,
+            newItems,
+            state.condimentQuantities,
+            state.condimentsMeta,
+          )
           return {
             ...touchSavedAt(),
             items: newItems,
@@ -225,7 +312,12 @@ export const useCartStore = create<CartState>()(
           const newItems = s.items.map((i) =>
             i.id === cartItemId ? { ...i, quantity: nextQty } : i,
           )
-          const patch = ensurePromoMinOrder(s.appliedPromo, newItems)
+          const patch = ensurePromoMinOrder(
+            s.appliedPromo,
+            newItems,
+            s.condimentQuantities,
+            s.condimentsMeta,
+          )
           return {
             ...touchSavedAt(),
             items: newItems,
@@ -243,6 +335,8 @@ export const useCartStore = create<CartState>()(
       partialize: (state) => ({
         items: state.items,
         savedAt: state.savedAt,
+        condimentQuantities: state.condimentQuantities,
+        condimentsMeta: state.condimentsMeta,
       }),
       onRehydrateStorage: () => (state, error) => {
         if (error) return
@@ -257,7 +351,12 @@ export const useCartStore = create<CartState>()(
           Date.now() - savedAt > SEVEN_DAYS_MS
 
         if (expired) {
-          useCartStore.setState({ items: [], savedAt: Date.now() })
+          useCartStore.setState({
+            items: [],
+            savedAt: Date.now(),
+            condimentQuantities: {},
+            condimentsMeta: {},
+          })
           return
         }
 
@@ -278,9 +377,10 @@ export function selectCartItemCount(state: CartState): number {
 }
 
 export function selectCartSubtotal(state: CartState): number {
-  return state.items.reduce(
-    (sum, i) => sum + getCartItemPrice(i) * i.quantity,
-    0,
+  return computeCartGoodsSubtotalBani(
+    state.items,
+    state.condimentQuantities,
+    state.condimentsMeta,
   )
 }
 

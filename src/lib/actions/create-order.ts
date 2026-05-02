@@ -25,6 +25,12 @@ export type CreateOrderPayload = {
   deliveryFeeBani: number
   grandTotalBani: number
   items: CartItem[]
+  condimentOrderLines?: Array<{
+    menu_item_id: string
+    item_name: string
+    quantity: number
+    price: number
+  }>
 }
 
 export type CreateOrderResult =
@@ -194,7 +200,20 @@ export async function executeCreateOrder(
     }
   })
 
-  const { error: itemsError } = await supabase.from("order_items").insert(rows)
+  const condimentRows = (payload.condimentOrderLines ?? []).map((line) => ({
+    order_id: orderId,
+    menu_item_id: line.menu_item_id,
+    lunch_set_id: null as string | null,
+    item_name: line.item_name,
+    size: null as null,
+    quantity: line.quantity,
+    toppings: [] as { name: string; price: number }[],
+    price: line.price,
+  }))
+
+  const { error: itemsError } = await supabase
+    .from("order_items")
+    .insert([...rows, ...condimentRows])
 
   if (itemsError) {
     console.error("[createOrder] order_items insert", itemsError.message)

@@ -1,6 +1,7 @@
 "use client"
 
 import { createOrder } from "@/lib/actions/create-order"
+import { buildCondimentOrderLines } from "@/lib/cart-helpers"
 import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
 import { OrderSummary } from "@/components/client/checkout/order-summary"
@@ -365,6 +366,11 @@ export function CheckoutView({
         deliveryFeeBani,
         grandTotalBani: grandTotal,
         items,
+        condimentOrderLines: buildCondimentOrderLines(
+          useCartStore.getState().condimentQuantities,
+          useCartStore.getState().condimentsMeta,
+          lang,
+        ),
       })
       if (result.success) {
         router.push(

@@ -1,4 +1,8 @@
-import type { CartItem, CartSelectedSize } from "@/types/cart"
+import type {
+  CartItem,
+  CartSelectedSize,
+  CondimentLineMeta,
+} from "@/types/cart"
 import type { MenuItem } from "@/types/database"
 import { DEFAULT_LANG } from "@/lib/i18n/storefront"
 
@@ -64,4 +68,58 @@ export function getCartItemPrice(cartItem: CartItem): number {
     if (t) toppingsSum += t.price
   }
   return base + toppingsSum
+}
+
+export function computeCondimentsSubtotalBani(
+  quantities: Record<string, number>,
+  meta: Record<string, CondimentLineMeta>,
+): number {
+  let sum = 0
+  for (const [id, qty] of Object.entries(quantities)) {
+    if (qty <= 0) continue
+    sum += (meta[id]?.price ?? 0) * qty
+  }
+  return sum
+}
+
+export function computeCartGoodsSubtotalBani(
+  items: CartItem[],
+  condimentQuantities: Record<string, number>,
+  condimentsMeta: Record<string, CondimentLineMeta>,
+): number {
+  const itemsSum = items.reduce(
+    (s, i) => s + getCartItemPrice(i) * i.quantity,
+    0,
+  )
+  return itemsSum + computeCondimentsSubtotalBani(condimentQuantities, condimentsMeta)
+}
+
+export function buildCondimentOrderLines(
+  quantities: Record<string, number>,
+  meta: Record<string, CondimentLineMeta>,
+  lang: CartLang,
+): Array<{
+  menu_item_id: string
+  item_name: string
+  quantity: number
+  price: number
+}> {
+  const out: Array<{
+    menu_item_id: string
+    item_name: string
+    quantity: number
+    price: number
+  }> = []
+  for (const [id, qty] of Object.entries(quantities)) {
+    if (qty <= 0) continue
+    const m = meta[id]
+    if (!m) continue
+    out.push({
+      menu_item_id: id,
+      item_name: lang === "RO" ? m.name_ro : m.name_ru,
+      quantity: qty,
+      price: m.price * qty,
+    })
+  }
+  return out
 }

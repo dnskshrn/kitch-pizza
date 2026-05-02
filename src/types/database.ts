@@ -38,6 +38,8 @@ export type MenuItem = {
   discount_percent: number | null
   /** Метка витрины: выгодно | новинка | хит | острое | веган | постное */
   tag: string | null
+  /** Позиции, входящие в заказ (соусы, приборы и т.п.). */
+  included_items?: { name_ru: string; name_ro: string }[] | null
   category?: Category
 }
 

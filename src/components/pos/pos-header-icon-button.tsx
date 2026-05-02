@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import * as React from "react"
 import type { ComponentProps } from "react"
 
 /** Кнопка в шапке POS (закрыть / назад): стандартный тач-таргет 40×40, фон #f2f2f2. */
@@ -20,12 +21,13 @@ export const posHeaderCloseButtonClassName = cn(
   "focus-visible:ring-2 focus-visible:ring-ring/50",
 )
 
-export function PosHeaderIconButton({
-  className,
-  ...props
-}: ComponentProps<typeof Button>) {
+export const PosHeaderIconButton = React.forwardRef<
+  HTMLButtonElement,
+  ComponentProps<typeof Button>
+>(function PosHeaderIconButton({ className, ...props }, ref) {
   return (
     <Button
+      ref={ref}
       type="button"
       variant="ghost"
       size="icon"
@@ -33,4 +35,6 @@ export function PosHeaderIconButton({
       {...props}
     />
   )
-}
+})
+
+PosHeaderIconButton.displayName = "PosHeaderIconButton"

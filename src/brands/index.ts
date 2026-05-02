@@ -78,6 +78,21 @@ export function getBrandByHost(host: string): BrandConfig {
   return brand ?? brands[0] // fallback to first brand
 }
 
+/** Привести slug из БД к каноническому виду из `brands` (расхождения в данных / старые записи). */
+export function normalizePosBrandSlug(slug: string): string {
+  const t = slug.trim().toLowerCase()
+  if (!t) return ""
+  const aliases: Record<string, string> = {
+    thespot: "the-spot",
+    "the_spot": "the-spot",
+    "the spot": "the-spot",
+  }
+  return aliases[t] ?? slug.trim()
+}
+
 export function getBrandBySlug(slug: string): BrandConfig {
-  return brands.find((b) => b.slug === slug) ?? brands[0]
+  const key = slug.trim()
+  if (!key) return brands[0]
+  const normalized = normalizePosBrandSlug(key)
+  return brands.find((b) => b.slug === normalized) ?? brands[0]
 }

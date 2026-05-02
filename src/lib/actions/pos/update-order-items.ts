@@ -124,9 +124,6 @@ export async function removeOrderItemPos({
   const items = order?.order_items ?? []
   const item = items.find((row) => row.id === itemId)
   if (!order || !item) return { success: false, error: "Позиция не найдена" }
-  if (items.length <= 1) {
-    return { success: false, error: "В заказе должна остаться хотя бы одна позиция" }
-  }
 
   const nextItems = items.filter((row) => row.id !== itemId)
   const supabase = createServiceRoleClient()
@@ -255,6 +252,92 @@ export async function addOrderItemsPos({
 
   if (orderError) {
     console.error("[updateOrderItems] total after add", orderError.message)
+    return { success: false, error: "Не удалось обновить сумму заказа" }
+  }
+
+  return { success: true }
+}
+
+/**
+ * Полная замена строк заказа (мастер POS: сохранение шага «Оформление»).
+ * Пустой `lines` очищает корзину в БД и пересчитывает total.
+ */
+export async function replaceOrderItemsPos({
+  orderId,
+  lines,
+}: {
+  orderId: string
+  lines: Array<{
+    menuItemId: string
+    name: string
+    size: "s" | "l" | null
+    unitPriceBani: number
+    qty: number
+    toppings: { name: string; price: number }[]
+  }>
+}): Promise<UpdateOrderItemsResult> {
+  const staff = await getCurrentStaff()
+  if (!staff) return { success: false, error: "Сессия кассира недействительна" }
+
+  const order = await loadOrderForTotals(orderId)
+  if (!order) return { success: false, error: "Заказ не найден" }
+
+  const supabase = createServiceRoleClient()
+
+  const { error: deleteError } = await supabase
+    .from("order_items")
+    .delete()
+    .eq("order_id", orderId)
+
+  if (deleteError) {
+    console.error("[updateOrderItems] replace delete", deleteError.message)
+    return { success: false, error: "Не удалось обновить позиции заказа" }
+  }
+
+  if (lines.length > 0) {
+    const inserts = lines.map((line) => ({
+      order_id: orderId,
+      menu_item_id: line.menuItemId,
+      lunch_set_id: null as string | null,
+      item_name: line.name,
+      size: line.size,
+      quantity: line.qty,
+      toppings: line.toppings,
+      price: Math.round(line.unitPriceBani) * line.qty,
+    }))
+
+    const { error: insertError } = await supabase.from("order_items").insert(inserts)
+
+    if (insertError) {
+      console.error("[updateOrderItems] replace insert", insertError.message)
+      return { success: false, error: "Не удалось сохранить позиции" }
+    }
+  }
+
+  const { data: refreshed, error: refreshError } = await supabase
+    .from("orders")
+    .select("id, delivery_fee, discount, order_items(id, quantity, price)")
+    .eq("id", orderId)
+    .maybeSingle()
+
+  if (refreshError || !refreshed) {
+    console.error("[updateOrderItems] replace refresh", refreshError?.message)
+    return { success: false, error: "Не удалось пересчитать заказ" }
+  }
+
+  const row = refreshed as PosOrderTotalsRow
+  const total = recomputedTotalBani(row, row.order_items ?? [])
+
+  const { error: orderError } = await supabase
+    .from("orders")
+    .update({
+      total,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+
+  if (orderError) {
+    console.error("[updateOrderItems] replace total", orderError.message)
     return { success: false, error: "Не удалось обновить сумму заказа" }
   }
 

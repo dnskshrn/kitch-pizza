@@ -31,7 +31,7 @@ src/
 │   ├── (client)/        # публичная витрина и checkout
 │   ├── (admin)/admin/   # админка
 │   ├── pos/             # POS
-│   ├── api/             # upload + storefront phone auth
+│   ├── api/             # upload, storefront phone auth, PBX webhook (входящие звонки)
 │   ├── globals.css      # единственный импорт глобальных стилей
 │   └── layout.tsx       # root layout, fonts, brand favicon
 ├── brands/              # BrandConfig и host -> brand
@@ -55,7 +55,7 @@ src/
 
 ## Multi-brand
 
-- Канонический конфиг брендов: `src/brands/index.ts`.
+- Канонический конфиг брендов: `src/brands/index.ts`; для POS и значений **`brand_slug`** из БД используются **`normalizePosBrandSlug`** (алиасы вроде `thespot` → **`the-spot`**) и **`getBrandBySlug`** с учётом нормализации.
 - `middleware.ts` резолвит бренд по `Host` или локальным алиасам `/losos`, `/thespot`, затем ставит `x-brand-slug` и `x-pathname`.
 - Витрина читает бренд через `getBrand()` / `getBrandId()`; `(client)/layout` выставляет `data-brand`.
 - Админка не зависит от домена: активный бренд хранится в cookie `admin-brand-slug`, UUID берётся через `getAdminBrandId()`.
@@ -74,7 +74,7 @@ src/
 - Главная: промо, featured items для boutique брендов, категории и меню. Полоса категорий: `src/components/client/menu-category-bar.tsx` (sticky, скролл к секциям по `slug`); у **losos** и **the-spot** кнопки категорий без декоративных иконок.
 - **Шапка (мобилка):** `src/components/client/main-header.tsx`. У **the-spot / losos** в закрытом состоянии одна капсула: логотип, кнопка адреса (открывает модалку доставки), бургер. **Открытое меню** (`MobileFullMenuOverlay`, `<md`): полноэкранный слой на фоне `#F5F2F0` — верхняя белая полоса (логотип, переключатель RO/RU, закрытие), ниже кнопка адреса, внизу закреплённая **`tel:`**-кнопка звонка; пункты навигации «Меню / Акции / …» в оверлее не показываются. У **kitch-pizza** закрытая шапка прежняя (бургер, лого, телефон + баннер доставки); оверлей — тот же компонент.
 - **Модалка товара:** `src/components/client/product-modal/ProductModalRoot.tsx` — топпинги группируются по `topping_groups` с заголовком группы (данные `fetchStorefrontMenuItemToppingGroups` в `src/lib/data/storefront-item-toppings.ts`). Учитывается лимит выбора на группу (`topping_groups.max_selections`, см. админку). На мобилке фото блюда визуально меньше (~`w-[70%]` относительно контейнера, `max-w-[315px]`).
-- Корзина: `cart-store`, localStorage key `kitch-cart`, TTL 7 дней, промокоды через `validatePromoCode`.
+- Корзина: `cart-store`, localStorage key `kitch-cart`, TTL 7 дней, промокоды через `validatePromoCode`. Модалка корзины: `CartContent` / `CartSheet` — заголовок с числом позиций и кнопкой закрытия в одной строке (`CartContent.tsx`).
 - Доставка: `delivery-store`, localStorage key `kitch-delivery`, зоны по полигонам, геокодинг через Nominatim.
 - Checkout: `createOrder`, `OrderSummary`, `CheckoutProgressSteps`, success page с картой (`checkout-success-view`, `checkout-success-map`).
 - **Успешный заказ:** `src/components/client/checkout/checkout-success-view.tsx` — блок героя со стилизацией `storefront-checkout-success-hero` в `globals.css`; декоративная иллюстрация `/Vector.svg` только у **kitch-pizza**. У брендов **losos** и **the-spot** декор не показывается, текст без правых отступов под графику.
@@ -91,7 +91,7 @@ src/
 - Защита: middleware редиректит `/admin/*` без сессии на `/admin/login`.
 - Навигация начинается с `/admin/orders`, далее категории, меню, featured, toppings, promotions, promo codes, delivery zones.
 - Все CRUD операции должны работать в контексте `getAdminBrandId()`.
-- Заказы грузятся server-side через `getOrders`; смена статуса через `updateOrderStatus`.
+- Заказы грузятся server-side через `getOrders`; смена статуса через `updateOrderStatus`. В списке и фильтрах доступны все актуальные статусы (включая черновик, отменён, отклонён); в модалке деталей заказа для отмен/отказов показывается **`cancel_reason`**, адрес — **`delivery_address`** плюс отдельные поля **`address_*`**, если заполнены.
 - Загрузка изображений идёт через `POST /api/upload` в публичный bucket `menu-images`.
 
 Основные разделы:
@@ -99,7 +99,7 @@ src/
 | Route | Назначение |
 |---|---|
 | `/admin/orders` | список, фильтры, детали и статусы заказов |
-| `/admin/categories` | категории меню |
+| `/admin/categories` | категории меню: отдельные поля **название RU** и **название RO**; slug из RU; в таблице и в выборе категории в меню отображаются оба языка |
 | `/admin/menu` | позиции меню, размеры, скидки, теги, топпинги; **фильтр по категории и поиск** (название, описание RU/RO, категория) на клиенте в `menu-table.tsx` |
 | `/admin/featured-menu` | блок «Новое и популярное» |
 | `/admin/toppings` | группы топпингов и топпинги; можно создать новый топпинг или скопировать уже существующий в выбранную группу; у группы — **«Безлимит»** (по умолчанию) или число «сколько можно выбрать» → колонка `topping_groups.max_selections` |
@@ -118,16 +118,20 @@ src/
 - URL: `/pos/login` для PIN, `/pos` для рабочей зоны.
 - Auth: `src/lib/actions/pos/auth.ts`, cookie `pos-session`, JWT HS256, секрет `POS_SESSION_SECRET`.
 - Смены: `src/lib/actions/pos/shifts.ts`, таблица `shift_logs`; открытая смена закрывается при logout.
-- Корневая зона `src/app/pos/page.tsx`: левая панель заказов, справа — состояние **idle / detail / create / add-items** (режим добавления строк к уже оформленному заказу).
-- Клиентские данные POS: `src/lib/pos/fetch-orders.ts`, типы `src/types/pos.ts`.
-- **Supabase Realtime (POS):** в публикацию `supabase_realtime` должны входить `public.orders` и `public.order_items` (DDL в `supabase/migrations`, например `*_enable_pos_orders_realtime`). Иначе события `postgres_changes` в браузере не придут и список обновится только после перезагрузки.
-- **Список заказов:** `src/components/pos/orders-panel.tsx` — подписка на `INSERT`/`UPDATE` таблицы `orders`, повторная выборка строки и короткая повторная догрузка после вставки (чтобы подтянулся `item_count` после `order_items`).
-- **Карточка заказа:** `src/components/pos/order-detail.tsx` — Realtime: `UPDATE` по строке `orders` и изменения в `order_items` с фильтром `order_id`; верстка: данные клиента / доставка / служебное слева, справа блок «Данные о заказе» со списком строк (количество ±, свайп влево открывает красную кнопку удаления; не ниже одной строки), сводка подытог / доставка / скидка / итог, кресток закрытия с белым фоном (`posHeaderCloseButtonClassName`).
-- **Новый заказ:** мастер `src/components/pos/order-form.tsx` — шаг 1 (бренды из `brands`), шаг 2 (меню + корзина), шаг 3 (оформление). Создание: `createOrderPos`, `source = 'pos'`, `operator_id` из текущей сессии; в `order_items` сохраняются топпинги JSON вместе с позицией.
-- **Добавление к сохранённому заказу:** из `OrderDetail` кнопка «Добавить к заказу» переводит панель в `add-items` и открывает тот же `OrderForm` сразу на шаге 2 (`extendOrderId`, `addOrderItemsPos`) — только новые позиции из корзины пишутся в существующий `orders.id`, пересчитывается `total`.
-- **Правка позиции:** кнопка «Изменить» (если у строки есть `menu_item_id`) или клик по строке в POS-корзине открывает `PosProductModal`; для сохранённых строк вызывается `updateOrderItemCompositionPos` (размер, топпинги, количество, пересчёт цены строки и заказа), для черновика корзины строка заменяется локально. Выбор топпингов в модалке учитывает **`topping_groups.max_selections`** (как на витрине).
-- **POS-корзина:** строки в `OrderForm` имеют компактную двухрядную верстку; удаление — через `src/components/pos/swipe-to-delete.tsx` (свайп только раскрывает кнопку, само удаление по нажатию на неё).
-- Server Actions для строк заказа: `src/lib/actions/pos/update-order-items.ts` — `updateOrderItemQuantityPos`, `removeOrderItemPos`, `addOrderItemsPos`, `updateOrderItemCompositionPos`.
+- **Шапка POS:** логотип **Food Service** — **`PosFoodServiceLogo`** (`src/components/pos/pos-food-service-logo.tsx`), ассет **`public/food-service-pos-logo.svg`**; в **`PosAppShell`** и на **`/pos/login`** вместо надписи «Kitch POS».
+- **Высота экрана (без внешнего скролла):** после логина оболочка **`PosAppShell`** (`src/components/pos/pos-app-shell.tsx`) — **`h-screen` + `overflow-hidden`**, шапка **`shrink-0`** (блок **`p-4` + высота строки **`h-14`** ≈ 72px до контента **`main`**), области контента ниже — **`min-h-0`**, **`overflow-hidden`**, скролл только внутри панелей списка заказов, мастера, корзины/сводки. Страница **`src/app/pos/page.tsx`**: **`h-full` / `flex-1`**, колонки сетки **`h-full min-h-0 overflow-hidden`**.
+- Корневая страница `src/app/pos/page.tsx`: слева список заказов (**`OrdersPanel`**, `forwardRef` + **`OrdersPanelHandle`**: **`updateOrderLocalState`** для живого отображения карточки при вводе на шаге «Детали»; **`refetchOrders()`** — полная перезагрузка списков активных и выданных заказов с сервера). Справа состояние **idle** (подсказка + «Новый заказ»), **wizard** (мастер **`OrderForm`**, ref панели **`ordersPanelRef`**) или **detail** (`OrderDetail` только чтение для заказа со статусом **`done`**). Выбор строки списка: по статусу открывается мастер или просмотр (`src/lib/pos/order-wizard-status.ts`, `fetchPosOrderById`). Новый заказ: **`createDraftOrderPos`** из `create-draft-order.ts` → мастер с новым черновиком. У **`OrdersPanel`**: кнопка «Выданные» в шапке списка — без белого фона и тени, иконка серым (**`#808080`**); выделенная **`OrderCard`** — **`ring-inset`**, чтобы обводка не обрезалась при **`overflow`**. Марки брендов в карточках: **`PosBrandMark`** рендерит локальные SVG из **`/public`** через **`<img>`** (не **`next/image`**).
+- Заказы в POS: **`src/lib/pos/fetch-orders.ts`** — константа **`ORDERS_POS_SELECT`** + вложения **`brands(slug)`**, **`order_items(count)`**. Если slug из join отсутствует (**`null`**, пустой массив или пустая строка), но задан **`brand_id`**, выполняется запрос **`brands(id, slug)`** по нужным id; **`mapOrderRowToPosOrder`** применяет **`normalizePosBrandSlug`**. Основной список за последние 24 ч, статусы **`MAIN_POS_ORDER_STATUSES`**: `draft`, `new`, `in_progress`, `delivering`; архив «Выданные» — **`fetchCompletedPosOrders`**: **`done`**, по `updated_at`, limit 50. Канон статусов: `src/types/pos.ts` — **`draft` | `new` | `in_progress` | `delivering` | `done` | `cancelled` | `rejected`**.
+- **Realtime (POS):** публикации **`orders`** и **`order_items`** в `supabase_realtime` обязательны. В **`orders-panel.tsx`** два канала на клиентском **`createClient()`**: **`pos-orders`** (`postgres_changes`, `event: '*'`, таблица `orders`) — на каждое событие **`reloadOrders()`**; при **`INSERT`** дополнительно звук **`/pos-new-order-chime.wav`** (файл в **`public/`**); **`pos-order-items`** (`event: '*'`, таблица **`order_items`**) — на каждое событие **`reloadOrders()`**. После **`reloadOrders`** список пересобирается из **`fetchPosOrders`** / **`fetchCompletedPosOrders`** с функцией **`mergeOrdersPreserveBrandSlug`**, чтобы не терять **`brand_slug`** у строки, если ответ пришёл без slug при том же **`brand_id`**. Подписки снимаются в cleanup через **`removeChannel`**. Отдельно канал **`incoming_calls`** — баннер входящего звонка.
+- **Мастер заказа:** `src/components/pos/order-form.tsx` привязан к **`orderId`**: шаги «Бренд» → «Оформление» (меню и корзина) → «Детали» (контакт, **`delivery_address` + отдельные поля адреса в БД**, доставка, оплата). Индикатор шагов в шапке — **три отдельные кнопки** (белый фон, без тени, без стрелок между шагами). После успешного **`updateOrderBrandPos`** вызывается **`syncBrandSlugOnOrdersPanel`**: **`refetchOrders`** панели и **`updateOrderLocalState`** с **`normalizePosBrandSlug`** (в т.ч. из **`persistBrandOrError`** при уходе со шага 1). В шапке: закрытие панели и меню **«⋯»** (Popover) — **«Очистить корзину»** (`replaceOrderItemsPos`, затем **`refreshCartFromDb`** и **`refetchOrders`**) и **«Закрыть заказ»** (диалог причины → **`cancelOrderPos`**, выход в **idle**). **`PopoverTrigger` с `asChild`** — **`src/components/ui/button.tsx`** и **`PosHeaderIconButton`** с **`forwardRef`**.
+- **Prefetch заказа в мастере:** начальная загрузка заказа в **`useEffect`** зависит от **`orderId`**; объект **`form`** из React Hook Form **не** входит в массив зависимостей (во избежание повторной загрузки и сброса модалки товара при ререндере). Открытый заказ и **`step` (1–3)** задаются в **`OrderForm`** и не сбрасываются при **`refetchOrders`** на панели (при условии того же **`orderId`** и открытого мастера).
+- **Корзина в мастере (шаг «Оформление» и сводка на «Детали»):** **`PosCartItem`** (`src/types/pos.ts`) — опционально **`orderItemId`** для строк, уже сохранённых в БД. Изменения корзины **после успешного ответа** server action: **`addOrderItemsPos`**, **`updateOrderItemQuantityPos`** (в т.ч. объединение одинаковых позиций), **`removeOrderItemPos`** (в т.ч. «−» при qty 1), **`updateOrderItemCompositionPos`** (сохранение из модалки), **`replaceOrderItemsPos`** (очистка / уход со шага «Оформление»); затем **`refreshCartFromDb()`** и **`refetchOrders()`**. На время запроса интерфейс корзины блокируется; ошибки — **Sonner**. Принять/отклонить заказ с сайта — отдельные actions панели с **`reloadOrders`**.
+- **`OrdersPanel` / смена статуса карточки:** **`handleStatusChange`** сначала пишет статус в Supabase, затем **`reloadOrders()`** (без предварительного локального патча списка).
+- **Шаг «Детали»:** имя, телефон, адрес и структурные поля адреса при вводе сразу обновляют объект заказа в списке слева через **`updateOrderLocalState`**; **`updateOrderDetailsPos`** вызывается с **debounce 600 ms** после паузы во вводе. Переключатели **тип заказа (доставка / самовывоз)** и **способ оплаты** сохраняются **сразу** по клику. Кнопка **«Сохранить данные заказа»** — проверка Zod и немедленное сохранение (сброс debounce). Уведомления об ошибках сохранения — **Sonner**.
+- Переход по индикатору шагов и кнопкам «Назад» / «К деталям» **не блокируется** валидацией формы шага 3. При уходе **со шага 2** сначала **`await persistCartToServer()`** (`replaceOrderItemsPos`); только при успехе переключается шаг. При уходе **со шага 1** в фоне вызывается **`updateOrderBrandPos`** (`void persistBrandOrError`, без ожидания и без `form.trigger` на навигации).
+- **Карточка заказа / детали:** `src/components/pos/order-detail.tsx` — загрузка и Realtime по заказу и строкам; при **`interactionMode="readonly"`** ( **`done`** и лист «Выданные» в Sheet) — только просмотр; иначе редактирование состава (минус при **qty 1** снимает строку). Вёрстка деталей: **`@container`** на области скролла — при узкой ширине (лист «Выданные» **`sm:max-w-md`**) одна колонка, **`InfoRow`** стопкой, блок позиций на всю ширину; при ширине контейнера **`≥640px`** прежняя сетка 5/12 + 7/12. Активный черновик в работе — в мастере **`OrderForm`**.
+- Строки заказа: `src/lib/actions/pos/update-order-items.ts` — замена состава (**`replaceOrderItemsPos`** и др.), изменение количества, удаление строки допускает **очистить все позиции** заказа (в том числе последнюю через **`removeOrderItemPos`**), **`updateOrderItemCompositionPos`**; топпинги в модалке с учётом **`topping_groups.max_selections`**.
+- Свайп-удаление строк в активной работе — `src/components/pos/swipe-to-delete.tsx`; модалка товара — `pos-product-modal.tsx`.
 
 ## Данные и БД
 
@@ -138,7 +142,8 @@ src/
 - `promotions`, `featured_menu_items`.
 - `promo_codes`.
 - `delivery_zones` — `polygon` JSONB как массив `[lat, lng]`, `color` (TEXT, HEX `#RRGGBB`, default) для отрисовки полигона, цена/минималка/время доставки.
-- `orders`, `order_items`.
+- `orders`, `order_items` — в приложении поле **`user_birthday`** у заказов не используется (колонка в типах/селектах убрана).
+- `incoming_calls` — события виртуальной АТС (webhook → upsert по `call_id`): для дисплея входящего в POS; схему и RLS/Realtime добавить в проекте при необходимости.
 - `profiles`, `otp_codes` — storefront phone auth.
 - `staff`, `shift_logs` — POS.
 
@@ -148,25 +153,25 @@ src/
 - Дочерние таблицы без `brand_id` фильтруются через родительские сущности.
 - Денежные поля (`total`, `price`, `discount`, `delivery_fee`, `*_bani`) хранятся в банях.
 - Записи, которые обходят RLS, выполняются через service role client в `src/lib/supabase/service-role.ts`.
-- **Realtime Postgres Changes:** для подписки из клиента нужны включённые таблицы в публикации `supabase_realtime` и возможность клиента читать строки (или RLS будет скрывать события). Для локальной истории см. файлы в `supabase/migrations/`; продакшен применять через Supabase MCP/CLI/dashboard согласно процессу команды.
+- **Realtime Postgres Changes:** для подписки из клиента нужны включённые таблицы в публикации `supabase_realtime` и возможность клиента читать строки (или RLS будет скрывать события). Для списка заказов POS желательно разрешить чтение **`brands`** (минимум **`id`**, **`slug`**) для роли с тем же ключом, что и клиент POS — иначе join и запрос slug по id могут возвращать пусто. Для локальной истории см. файлы в `supabase/migrations/`; продакшен применять через Supabase MCP/CLI/dashboard согласно процессу команды.
 
 ## Миграции Supabase
 
 - SQL для схемы хранится в `supabase/migrations/` и должен синхронизироваться с подключённым проектом.
-- Типичные добавления: колонка `delivery_zones.color`; `topping_groups.max_selections`; публикация Realtime для `orders` и `order_items`.
+- Типичные добавления: колонка `delivery_zones.color`; `topping_groups.max_selections`; публикация Realtime для `orders` и `order_items`; при использовании баннера входящего в POS — таблица **`incoming_calls`** и включение её в `supabase_realtime` (аналогично заказам).
 
 ## Server Actions и API
 
 Server Actions в `src/lib/actions/`:
 
-- `create-order.ts` — заказ с витрины.
+- `create-order.ts` — заказ с витрины; после успешного сохранения заказа и строк (при наличии `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`) уходит уведомление в Telegram.
 - `create-order-admin.ts` — заказ из админки.
 - `validate-promo-code.ts`.
 - `check-delivery-zone.ts`.
 - `get-orders.ts`, `update-order-status.ts`.
 - `get-brands.ts`, `set-admin-brand.ts`.
 - `account/update-profile.ts`.
-- `pos/*` — auth, shifts, `create-order-pos`, `update-order-items` (количество, удаление, добавление строк к заказу, смена состава строки), zone check и др.
+- `pos/*` — auth, shifts, черновик (`create-draft-order` / `createDraftOrderPos`), смена бренда черновика (`update-order-brand-pos`), принятие/отклонение заказа с сайта (`accept-order-pos`, `reject-order-pos`), отмена (`cancel-order-pos`), `update-order-details-pos`, `update-order-items` (замена позиций, количество, удаление, смена состава строки), zone check, при необходимости создание заказа из POS (`create-order-pos`) и др.
 
 API routes:
 
@@ -177,6 +182,9 @@ API routes:
 | `POST /api/auth/verify-otp` | проверка OTP и cookie `storefront-session` |
 | `GET /api/auth/me` | текущий storefront profile |
 | `POST /api/auth/logout` | очистка storefront session |
+| `POST /api/pbx-webhook` | webhook MoldCell PBX: проверка `crm_token` === `PBX_WEBHOOK_TOKEN`, разбор `application/x-www-form-urlencoded` или JSON, upsert в `incoming_calls` по `callid` / `call_id`, маппинг `diversion` → `brand_slug`; ответ `200` с телом `OK` |
+
+Входящие звонки: поля событий ожидаются в соответствии с интеграцией PBX (в т.ч. `cmd`, `type`, `phone`, `diversion`). Клиент POS подписывается на **`incoming_calls`** только для UI-баннера; запись в таблицу делает сервер с **service role**.
 
 ## i18n
 
@@ -209,9 +217,11 @@ SMS_MD_SENDER=
 
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+
+PBX_WEBHOOK_TOKEN=
 ```
 
-`POS_SESSION_SECRET` должен быть не короче 32 символов.
+`POS_SESSION_SECRET` должен быть не короче 32 символов. `PBX_WEBHOOK_TOKEN` — общий секрет с телефонией (поле `crm_token` в теле webhook).
 
 ## npm scripts
 

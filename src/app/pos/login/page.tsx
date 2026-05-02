@@ -6,12 +6,12 @@ import { ArrowLeft, CornerDownLeft, Loader2 } from "lucide-react"
 import { verifyPin } from "@/lib/actions/pos/auth"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { PosFoodServiceLogo } from "@/components/pos/pos-food-service-logo"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -73,9 +73,13 @@ export default function PosLoginPage() {
   return (
     <div className="bg-background flex min-h-dvh items-center justify-center p-4">
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Kitch POS</CardTitle>
-          <CardDescription>Введите PIN для входа</CardDescription>
+        <CardHeader className="space-y-3">
+          <div className="flex justify-center pt-1">
+            <PosFoodServiceLogo className="mx-auto h-10 max-w-[min(280px,85vw)] object-center sm:h-11" />
+          </div>
+          <CardDescription className="text-center">
+            Введите PIN для входа
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <div className="flex justify-center gap-2">

@@ -51,7 +51,8 @@ function orderSubtotalBani(order: OrderWithItems): number {
   return order.total - order.delivery_fee + order.discount
 }
 
-function formatPhoneDisplay(phone: string): string {
+function formatPhoneDisplay(phone: string | null): string {
+  if (!phone) return "—"
   const d = phone.replace(/\D/g, "")
   if (d.length >= 11 && d.startsWith("373")) {
     return `+${d.slice(0, 3)} ${d.slice(3, 5)} ${d.slice(5, 8)} ${d.slice(8)}`
@@ -141,7 +142,7 @@ export function OrdersTable({ orders }: OrdersTableProps) {
                       {order.delivery_mode === "pickup" ? (
                         <Badge variant="outline">Самовывоз</Badge>
                       ) : (
-                        <span className="text-sm" title={order.delivery_address}>
+                        <span className="text-sm" title={order.delivery_address ?? ""}>
                           {truncateAddress(order.delivery_address, 40)}
                         </span>
                       )}
@@ -212,12 +213,17 @@ export function OrdersTable({ orders }: OrdersTableProps) {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="new">Новый</SelectItem>
-                            <SelectItem value="in_progress">В работе</SelectItem>
-                            <SelectItem value="delivering">Доставляется</SelectItem>
-                            <SelectItem value="done">Выполнен</SelectItem>
-                            <SelectItem value="cancelled">Отменён</SelectItem>
-                          </SelectContent>
+            <SelectItem value="draft">Черновик</SelectItem>
+            <SelectItem value="new">Новый</SelectItem>
+            <SelectItem value="confirmed">Подтверждён</SelectItem>
+            <SelectItem value="cooking">Готовится</SelectItem>
+            <SelectItem value="ready">Готов</SelectItem>
+            <SelectItem value="in_progress">В работе</SelectItem>
+            <SelectItem value="delivering">Доставляется</SelectItem>
+            <SelectItem value="done">Выполнен</SelectItem>
+            <SelectItem value="cancelled">Отменён</SelectItem>
+            <SelectItem value="rejected">Отклонён</SelectItem>
+          </SelectContent>
                         </Select>
                       </div>
                     </TableCell>
@@ -310,6 +316,17 @@ function OrderDetailsDialog({ order }: { order: OrderWithItems }) {
   const hasPromo = Boolean(order.promo_code?.trim()) || order.discount > 0
   const comment = order.comment?.trim()
 
+  const addrRow = (label: string, value: string | null | undefined) => {
+    const t = value?.trim()
+    if (!t) return null
+    return (
+      <p>
+        <span className="text-muted-foreground">{label}: </span>
+        <span className="break-words">{t}</span>
+      </p>
+    )
+  }
+
   return (
     <div className="space-y-4 text-sm">
       <section className="space-y-2">
@@ -331,13 +348,39 @@ function OrderDetailsDialog({ order }: { order: OrderWithItems }) {
         {order.delivery_mode === "pickup" ? (
           <p>Самовывоз</p>
         ) : (
-          <p className="break-words">{order.delivery_address}</p>
+          <>
+            <p className="break-words">
+              <span className="text-muted-foreground">Адрес: </span>
+              {order.delivery_address?.trim() || "—"}
+            </p>
+            {addrRow("Подъезд", order.address_entrance)}
+            {addrRow("Этаж", order.address_floor)}
+            {addrRow("Квартира", order.address_apartment)}
+            {addrRow("Домофон", order.address_intercom)}
+          </>
         )}
         <p>
           <span className="text-muted-foreground">Время: </span>
           {scheduledTimeLabel(order.scheduled_time)}
         </p>
       </section>
+
+      {order.status === "cancelled" || order.status === "rejected" ? (
+        <>
+          <Separator />
+          <section className="space-y-2">
+            <h3 className="font-heading text-base font-semibold">
+              {order.status === "rejected"
+                ? "Отклонение заказа"
+                : "Отмена заказа"}
+            </h3>
+            <p>
+              <span className="text-muted-foreground">Причина: </span>
+              {order.cancel_reason?.trim() || "—"}
+            </p>
+          </section>
+        </>
+      ) : null}
 
       <Separator />
 

@@ -163,7 +163,17 @@ export type DeliveryZoneCheckResult = {
   lng: number
 }
 
-export type OrderStatus = "new" | "in_progress" | "delivering" | "done" | "cancelled"
+export type OrderStatus =
+  | "draft"
+  | "new"
+  | "confirmed"
+  | "cooking"
+  | "ready"
+  | "in_progress"
+  | "delivering"
+  | "done"
+  | "cancelled"
+  | "rejected"
 
 export type DeliveryMode = "delivery" | "pickup"
 
@@ -173,10 +183,10 @@ export interface Order {
   id: string
   order_number: number
   user_name: string | null
-  user_phone: string
+  user_phone: string | null
   status: OrderStatus
   delivery_mode: DeliveryMode
-  delivery_address: string
+  delivery_address: string | null
   payment_method: PaymentMethod
   change_from: number | null
   total: number
@@ -188,6 +198,11 @@ export interface Order {
   tg_message_id: string | null
   created_at: string
   updated_at: string
+  cancel_reason?: string | null
+  address_entrance?: string | null
+  address_floor?: string | null
+  address_apartment?: string | null
+  address_intercom?: string | null
 }
 
 export interface OrderItem {

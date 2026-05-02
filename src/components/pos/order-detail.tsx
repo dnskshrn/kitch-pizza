@@ -30,7 +30,7 @@ import {
   XIcon,
 } from "lucide-react"
 import Image from "next/image"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 
 function formatMdl(bani: number): string {
   return `${(bani / 100).toLocaleString("ru-RU", {
@@ -53,14 +53,17 @@ function formatDateTime(iso: string): string {
   }
 }
 
-function formatBirthday(s: string | null): string {
-  if (!s) return "—"
-  const d = s.slice(0, 10)
-  return d.length === 10 ? d.split("-").reverse().join(".") : s
-}
-
 function statusBadge(status: PosOrderStatus) {
   switch (status) {
+    case "draft":
+      return (
+        <Badge
+          className="border-0 bg-zinc-200 text-zinc-800 hover:bg-zinc-200/90"
+          variant="secondary"
+        >
+          Черновик
+        </Badge>
+      )
     case "new":
       return (
         <Badge
@@ -99,6 +102,12 @@ function statusBadge(status: PosOrderStatus) {
       )
     case "cancelled":
       return <Badge variant="destructive">Отменён</Badge>
+    case "rejected":
+      return (
+        <Badge variant="destructive" className="border-0">
+          Отклонён
+        </Badge>
+      )
     default:
       return null
   }
@@ -147,15 +156,18 @@ type EditMenuItemModalRow = Pick<
 type OrderDetailRow = {
   id: string
   order_number: number
-  brand_id: string
+  brand_id: string | null
   operator_id: string | null
   source: PosOrderSource | null
   status: PosOrderStatus
   user_name: string | null
-  user_phone: string
-  user_birthday: string | null
+  user_phone: string | null
   delivery_mode: "delivery" | "pickup"
   delivery_address: string | null
+  address_entrance: string | null
+  address_floor: string | null
+  address_apartment: string | null
+  address_intercom: string | null
   payment_method: "cash" | "card"
   change_from: number | null
   total: number
@@ -224,7 +236,7 @@ function DetailCard({
   className?: string
 }) {
   return (
-    <section className={`rounded-xl bg-white p-4 ${className}`}>
+    <section className={`rounded-xl bg-white p-3 @[640px]:p-4 ${className}`}>
       <div className="mb-4 flex items-center gap-2">
         <span className="flex size-8 items-center justify-center rounded-full bg-[#f2f2f2] text-[#242424]">
           {icon}
@@ -248,9 +260,9 @@ function InfoRow({
   children?: React.ReactNode
 }) {
   return (
-    <div className="grid grid-cols-[112px_minmax(0,1fr)] gap-3 text-[14px] leading-snug">
-      <dt className="text-[#808080]">{label}</dt>
-      <dd className="min-w-0 font-medium text-[#242424]">
+    <div className="flex min-w-0 flex-col gap-1 text-[14px] leading-snug @[640px]:grid @[640px]:grid-cols-[112px_minmax(0,1fr)] @[640px]:gap-3 @[640px]:leading-snug">
+      <dt className="shrink-0 text-[#808080]">{label}</dt>
+      <dd className="min-w-0 break-words font-medium text-[#242424]">
         {children ?? value ?? "—"}
       </dd>
     </div>
@@ -295,6 +307,8 @@ type OrderDetailProps = {
   onAddItemsToOrder: (orderId: string) => void
   /** Шаг 3 мастера — данные клиента, доставка, оплата. */
   onEditOrderDetails: (orderId: string) => void
+  /** Только просмотр: без редактирования строк и действий статуса. */
+  interactionMode?: "default" | "readonly"
 }
 
 export function OrderDetail({
@@ -302,7 +316,10 @@ export function OrderDetail({
   onClose,
   onAddItemsToOrder,
   onEditOrderDetails,
+  interactionMode = "default",
 }: OrderDetailProps) {
+  const isReadOnly = interactionMode === "readonly"
+
   const [order, setOrder] = useState<OrderDetailRow | null>(null)
   const [operatorName, setOperatorName] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -417,7 +434,10 @@ export function OrderDetail({
   const handleQuantityChange = async (item: OrderItemRow, delta: number) => {
     if (!order || itemBusyId) return
     const nextQuantity = item.quantity + delta
-    if (nextQuantity < 1) return
+    if (nextQuantity < 1) {
+      await handleRemoveItem(item)
+      return
+    }
 
     setItemBusyId(item.id)
     try {
@@ -440,9 +460,6 @@ export function OrderDetail({
 
   const handleRemoveItem = async (item: OrderItemRow) => {
     if (!order || itemBusyId) return
-    const items = order.order_items ?? []
-    if (items.length <= 1) return
-
     setItemBusyId(item.id)
     try {
       const result = await removeOrderItemPos({
@@ -552,7 +569,7 @@ export function OrderDetail({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-between gap-4 px-5 py-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -580,25 +597,25 @@ export function OrderDetail({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
-        <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-5 flex min-w-0 flex-col gap-4">
+      <div className="@container min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-5">
+        <div className="flex flex-col gap-4 @[640px]:grid @[640px]:grid-cols-12 @[640px]:gap-4">
+          <div className="flex min-w-0 flex-col gap-4 @[640px]:col-span-5">
             <DetailCard title="Данные клиента" icon={<User className="size-4" />}>
               <dl className="grid gap-3">
                 <InfoRow label="Имя" value={order.user_name?.trim() || "—"} />
                 <InfoRow label="Телефон">
-                  <a
-                    href={`tel:${order.user_phone.replace(/\s/g, "")}`}
-                    className="inline-flex min-w-0 items-center gap-2 text-[#242424] hover:underline"
-                  >
-                    <Phone className="size-4 shrink-0 text-[#808080]" aria-hidden />
-                    <span className="truncate">{order.user_phone}</span>
-                  </a>
+                  {order.user_phone?.trim() ? (
+                    <a
+                      href={`tel:${order.user_phone.replace(/\s/g, "")}`}
+                      className="inline-flex min-w-0 items-center gap-2 text-[#242424] hover:underline"
+                    >
+                      <Phone className="size-4 shrink-0 text-[#808080]" aria-hidden />
+                      <span className="truncate">{order.user_phone}</span>
+                    </a>
+                  ) : (
+                    <span className="text-[#808080]">—</span>
+                  )}
                 </InfoRow>
-                <InfoRow
-                  label="День рождения"
-                  value={formatBirthday(order.user_birthday)}
-                />
               </dl>
             </DetailCard>
 
@@ -615,6 +632,30 @@ export function OrderDetail({
                     {order.delivery_address?.trim() || "—"}
                   </span>
                 </InfoRow>
+                {order.delivery_mode === "delivery" ? (
+                  <>
+                    <InfoRow label="Подъезд">
+                      <span className="break-words">
+                        {order.address_entrance?.trim() || "—"}
+                      </span>
+                    </InfoRow>
+                    <InfoRow label="Этаж">
+                      <span className="break-words">
+                        {order.address_floor?.trim() || "—"}
+                      </span>
+                    </InfoRow>
+                    <InfoRow label="Квартира">
+                      <span className="break-words">
+                        {order.address_apartment?.trim() || "—"}
+                      </span>
+                    </InfoRow>
+                    <InfoRow label="Домофон">
+                      <span className="break-words">
+                        {order.address_intercom?.trim() || "—"}
+                      </span>
+                    </InfoRow>
+                  </>
+                ) : null}
                 <InfoRow label="Оплата">
                   <span className="inline-flex items-center gap-2">
                     {order.payment_method === "cash" ? (
@@ -649,8 +690,8 @@ export function OrderDetail({
             </DetailCard>
           </div>
 
-          <div className="col-span-7 flex min-h-[min(420px,calc(100vh-340px))] min-w-0 flex-col lg:min-h-[480px]">
-            <section className="flex min-h-full min-w-0 flex-1 flex-col rounded-xl bg-white p-4">
+          <div className="flex min-w-0 flex-col @[640px]:col-span-7 @[640px]:min-h-[min(420px,calc(100vh-340px))] @[640px]:lg:min-h-[480px]">
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-xl bg-white p-3 @[640px]:min-h-full @[640px]:p-4">
                 <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#f2f2f2] text-[#242424]">
@@ -660,24 +701,26 @@ export function OrderDetail({
                     Данные о заказе
                   </h3>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-8 shrink-0 rounded-lg border border-[#f2f2f2] bg-white px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-[#242424] shadow-none hover:bg-[#f2f2f2]"
-                    onClick={() => onEditOrderDetails(order.id)}
-                  >
-                    Редактировать данные
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-8 shrink-0 rounded-lg border border-[#f2f2f2] bg-white px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[#242424] shadow-none hover:bg-[#f2f2f2]"
-                    onClick={() => onAddItemsToOrder(order.id)}
-                  >
-                    Добавить к заказу
-                  </Button>
-                </div>
+                {!isReadOnly ? (
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 shrink-0 rounded-lg border border-[#f2f2f2] bg-white px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-[#242424] shadow-none hover:bg-[#f2f2f2]"
+                      onClick={() => onEditOrderDetails(order.id)}
+                    >
+                      Редактировать данные
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 shrink-0 rounded-lg border border-[#f2f2f2] bg-white px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-[#242424] shadow-none hover:bg-[#f2f2f2]"
+                      onClick={() => onAddItemsToOrder(order.id)}
+                    >
+                      Добавить к заказу
+                    </Button>
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-0">
@@ -691,14 +734,9 @@ export function OrderDetail({
                       const canRemove = (order.order_items?.length ?? 0) > 1
                       const hasMenuBinding = Boolean(itemRow.menu_item_id)
 
-                      return (
-                        <SwipeToDelete
-                          key={itemRow.id}
-                          disabled={isBusy || !canRemove}
-                          onDelete={() => void handleRemoveItem(itemRow)}
-                        >
+                      const articleInner = (
                         <article
-                          className="flex flex-wrap items-center gap-2 rounded-lg bg-[#f2f2f2] p-2 sm:flex-nowrap sm:gap-2.5"
+                          className="flex flex-wrap items-start gap-2 rounded-lg bg-[#f2f2f2] p-2 @[480px]:flex-nowrap @[480px]:items-center @[480px]:gap-2.5"
                         >
                           <div className="relative size-12 shrink-0 overflow-hidden rounded-full bg-white">
                             {imageUrl ? (
@@ -712,7 +750,7 @@ export function OrderDetail({
                             ) : null}
                           </div>
 
-                          <div className="min-w-0 flex-1 basis-[120px]">
+                          <div className="min-w-0 flex-1">
                             <p className="line-clamp-1 text-[13px] font-bold leading-tight text-[#242424]">
                               {itemDisplayTitle(itemRow)}
                               {itemRow.size ? ` · ${itemRow.size.toUpperCase()}` : ""}
@@ -729,43 +767,51 @@ export function OrderDetail({
                               <span className="font-mono text-[11px] tabular-nums text-[#808080]">
                                 {formatMdl(unitPriceBani(itemRow))} / шт.
                               </span>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 shrink-0 rounded-full px-2.5 text-[11px] font-bold text-[#242424] hover:bg-white active:bg-[#e8e8e8] disabled:opacity-40"
-                                disabled={isBusy || !hasMenuBinding}
-                                onClick={() => void openEditMenuItemModal(itemRow)}
-                              >
-                                Изменить
-                              </Button>
+                              {!isReadOnly ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 shrink-0 rounded-full px-2.5 text-[11px] font-bold text-[#242424] hover:bg-white active:bg-[#e8e8e8] disabled:opacity-40"
+                                  disabled={isBusy || !hasMenuBinding}
+                                  onClick={() => void openEditMenuItemModal(itemRow)}
+                                >
+                                  Изменить
+                                </Button>
+                              ) : null}
                             </div>
                           </div>
 
-                          <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2 sm:ml-0 sm:gap-2.5">
-                            <div className="flex shrink-0 items-center gap-1 rounded-full bg-white p-0.5">
-                              <button
-                                type="button"
-                                aria-label="Уменьшить количество"
-                                disabled={isBusy || itemRow.quantity <= 1}
-                                onClick={() => void handleQuantityChange(itemRow, -1)}
-                                className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                <Minus className="size-3.5" />
-                              </button>
+                          <div className="ml-auto flex w-full shrink-0 flex-wrap items-center justify-end gap-2 @[480px]:ml-0 @[480px]:w-auto @[480px]:justify-start @[480px]:gap-2.5">
+                            {isReadOnly ? (
                               <span className="w-5 text-center font-mono text-[12px] font-bold tabular-nums text-[#242424]">
-                                {itemRow.quantity}
+                                ×{itemRow.quantity}
                               </span>
-                              <button
-                                type="button"
-                                aria-label="Увеличить количество"
-                                disabled={isBusy}
-                                onClick={() => void handleQuantityChange(itemRow, 1)}
-                                className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                <Plus className="size-3.5" />
-                              </button>
-                            </div>
+                            ) : (
+                              <div className="flex shrink-0 items-center gap-1 rounded-full bg-white p-0.5">
+                                <button
+                                  type="button"
+                                  aria-label="Уменьшить количество"
+                                  disabled={isBusy}
+                                  onClick={() => void handleQuantityChange(itemRow, -1)}
+                                  className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  <Minus className="size-3.5" />
+                                </button>
+                                <span className="w-5 text-center font-mono text-[12px] font-bold tabular-nums text-[#242424]">
+                                  {itemRow.quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label="Увеличить количество"
+                                  disabled={isBusy}
+                                  onClick={() => void handleQuantityChange(itemRow, 1)}
+                                  className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  <Plus className="size-3.5" />
+                                </button>
+                              </div>
+                            )}
 
                             <div className="flex min-w-[6.5rem] items-center gap-2">
                               <div className="min-w-[5.5rem] shrink-0 text-right font-mono text-[12px] font-bold tabular-nums text-[#242424]">
@@ -774,7 +820,21 @@ export function OrderDetail({
                             </div>
                           </div>
                         </article>
-                        </SwipeToDelete>
+                      )
+
+                      return (
+                        <Fragment key={itemRow.id}>
+                          {isReadOnly ? (
+                            articleInner
+                          ) : (
+                            <SwipeToDelete
+                              disabled={isBusy || !canRemove}
+                              onDelete={() => void handleRemoveItem(itemRow)}
+                            >
+                              {articleInner}
+                            </SwipeToDelete>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </div>
@@ -824,25 +884,38 @@ export function OrderDetail({
         onClose={() => setProductEditModal(null)}
       />
 
-      <div className="mt-auto shrink-0 space-y-2 border-t border-[#e8e8e8] bg-white p-3">
-        {order.status === "done" || order.status === "cancelled" ? (
-          <p className="text-muted-foreground text-center text-sm">
-            {order.status === "done"
-              ? "Заказ выдан"
-              : "Заказ отменён"}
-          </p>
-        ) : null}
-        {order.status === "new" && parseSource(order.source) === "website" ? (
-          <div className="flex flex-col gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-destructive/40 text-destructive hover:bg-destructive/10"
-              disabled={statusBusy}
-              onClick={() => void handleStatus("cancelled")}
-            >
-              Отклонить
-            </Button>
+      {!isReadOnly ? (
+        <div className="mt-auto shrink-0 space-y-2 border-t border-[#e8e8e8] bg-white p-3">
+          {order.status === "done" || order.status === "cancelled" ? (
+            <p className="text-muted-foreground text-center text-sm">
+              {order.status === "done"
+                ? "Заказ выдан"
+                : "Заказ отменён"}
+            </p>
+          ) : null}
+          {order.status === "new" && parseSource(order.source) === "website" ? (
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-destructive/40 text-destructive hover:bg-destructive/10"
+                disabled={statusBusy}
+                onClick={() => void handleStatus("cancelled")}
+              >
+                Отклонить
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                className="w-full"
+                disabled={statusBusy}
+                onClick={() => void handleStatus("in_progress")}
+              >
+                Принять
+              </Button>
+            </div>
+          ) : null}
+          {order.status === "new" && parseSource(order.source) === "pos" ? (
             <Button
               type="button"
               variant="default"
@@ -850,44 +923,37 @@ export function OrderDetail({
               disabled={statusBusy}
               onClick={() => void handleStatus("in_progress")}
             >
-              Принять
+              В работу
             </Button>
-          </div>
-        ) : null}
-        {order.status === "new" && parseSource(order.source) === "pos" ? (
-          <Button
-            type="button"
-            variant="default"
-            className="w-full"
-            disabled={statusBusy}
-            onClick={() => void handleStatus("in_progress")}
-          >
-            В работу
-          </Button>
-        ) : null}
-        {order.status === "in_progress" ? (
-          <Button
-            type="button"
-            variant="default"
-            className="w-full"
-            disabled={statusBusy}
-            onClick={() => void handleStatus("delivering")}
-          >
-            Готово к выдаче
-          </Button>
-        ) : null}
-        {order.status === "delivering" ? (
-          <Button
-            type="button"
-            variant="default"
-            className="w-full"
-            disabled={statusBusy}
-            onClick={() => void handleStatus("done")}
-          >
-            Выдан
-          </Button>
-        ) : null}
-      </div>
+          ) : null}
+          {order.status === "in_progress" ? (
+            <Button
+              type="button"
+              variant="default"
+              className="w-full"
+              disabled={statusBusy}
+              onClick={() => void handleStatus("delivering")}
+            >
+              Готово к выдаче
+            </Button>
+          ) : null}
+          {order.status === "delivering" ? (
+            <Button
+              type="button"
+              variant="default"
+              className="w-full"
+              disabled={statusBusy}
+              onClick={() => void handleStatus("done")}
+            >
+              Выдан
+            </Button>
+          ) : null}
+        </div>
+      ) : order.status === "done" ? (
+        <div className="mt-auto shrink-0 border-t border-[#e8e8e8] bg-white p-3">
+          <p className="text-center text-sm text-[#808080]">Заказ выдан</p>
+        </div>
+      ) : null}
     </div>
   )
 }

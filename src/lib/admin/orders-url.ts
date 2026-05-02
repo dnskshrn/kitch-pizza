@@ -2,13 +2,18 @@ import type { OrderStatus } from "@/types/database"
 
 export const ORDERS_PAGE_SIZE = 50
 
-const ORDER_STATUSES: OrderStatus[] = [
+const ORDER_STATUSES = [
+  "draft",
   "new",
+  "confirmed",
+  "cooking",
+  "ready",
   "in_progress",
   "delivering",
   "done",
   "cancelled",
-]
+  "rejected",
+] as const satisfies readonly OrderStatus[]
 
 export type OrdersUrlState = {
   status: OrderStatus | null
@@ -48,7 +53,8 @@ export function parseOrdersSearchParams(
 ): OrdersUrlState {
   const statusRaw = first(raw.status)
   const status =
-    statusRaw && ORDER_STATUSES.includes(statusRaw as OrderStatus)
+    statusRaw &&
+    (ORDER_STATUSES as readonly string[]).includes(statusRaw)
       ? (statusRaw as OrderStatus)
       : null
 

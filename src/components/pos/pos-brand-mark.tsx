@@ -2,7 +2,6 @@
 
 import { getBrandBySlug } from "@/brands/index"
 import { cn } from "@/lib/utils"
-import Image from "next/image"
 
 type PosBrandMarkProps = {
   brandSlug: string
@@ -23,18 +22,18 @@ export function PosBrandMark({
       className={cn("inline-flex shrink-0 items-center justify-center", className)}
       title={brand.name}
     >
-      <Image
+      {/* eslint-disable-next-line @next/next/no-img-element -- локальные SVG-марки; next/image даёт сбои на части SVG в POS */}
+      <img
         src={brand.logo}
-        alt={brand.name}
-        width={200}
-        height={64}
+        alt=""
+        decoding="async"
+        draggable={false}
         className={cn(
-          "h-auto w-auto object-contain object-left",
+          "block h-auto w-auto object-contain object-left",
           size === "md"
             ? "max-h-7 max-w-[min(140px,28vw)] sm:max-w-[160px]"
             : "max-h-4 max-w-[100px]",
         )}
-        priority={size === "md"}
       />
     </span>
   )

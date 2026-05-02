@@ -7,9 +7,13 @@ export type UpdateOrderDetailsPosInput = {
   orderId: string
   userName: string
   userPhone: string
-  userBirthday?: string
   deliveryMode: "delivery" | "pickup"
+  /** Улица и дом */
   deliveryAddress?: string
+  addressEntrance?: string | null
+  addressFloor?: string | null
+  addressApartment?: string | null
+  addressIntercom?: string | null
   paymentMethod: "cash" | "card"
   changeFrom?: number
   comment?: string
@@ -52,10 +56,6 @@ export async function updateOrderDetailsPos(
       ? Math.max(0, Math.round(input.changeFrom))
       : null
 
-  const birthdayRaw = input.userBirthday?.trim()
-  const userBirthday =
-    birthdayRaw && birthdayRaw.length >= 8 ? birthdayRaw.slice(0, 10) : null
-
   let supabase
   try {
     supabase = createServiceRoleClient()
@@ -73,8 +73,6 @@ export async function updateOrderDetailsPos(
     console.error("[updateOrderDetailsPos] load", loadError?.message)
     return { success: false, error: "Заказ не найден" }
   }
-
-  const brandId = (orderRow as { brand_id: string }).brand_id
 
   const { data: itemRows, error: itemsError } = await supabase
     .from("order_items")
@@ -104,6 +102,16 @@ export async function updateOrderDetailsPos(
     user_phone: phone,
     delivery_mode: input.deliveryMode,
     delivery_address: deliveryAddress,
+    address_entrance:
+      input.addressEntrance != null ? String(input.addressEntrance).trim() || null : null,
+    address_floor:
+      input.addressFloor != null ? String(input.addressFloor).trim() || null : null,
+    address_apartment:
+      input.addressApartment != null
+        ? String(input.addressApartment).trim() || null
+        : null,
+    address_intercom:
+      input.addressIntercom != null ? String(input.addressIntercom).trim() || null : null,
     payment_method: input.paymentMethod,
     change_from: changeFromBani,
     total: totalBani,
@@ -114,17 +122,10 @@ export async function updateOrderDetailsPos(
     updated_at: updatedAt,
   }
 
-  if (userBirthday) {
-    patch.user_birthday = userBirthday
-  } else {
-    patch.user_birthday = null
-  }
-
   const { error: updateError } = await supabase
     .from("orders")
     .update(patch)
     .eq("id", input.orderId)
-    .eq("brand_id", brandId)
 
   if (updateError) {
     console.error("[updateOrderDetailsPos] update", updateError.message)

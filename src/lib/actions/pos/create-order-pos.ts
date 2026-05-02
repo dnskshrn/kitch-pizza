@@ -17,7 +17,6 @@ export type CreateOrderPosInput = {
   items: CreateOrderPosItem[]
   userName: string
   userPhone: string
-  userBirthday?: string
   deliveryMode: "delivery" | "pickup"
   deliveryAddress?: string
   paymentMethod: "cash" | "card"
@@ -97,10 +96,6 @@ export async function createOrderPos(
       ? Math.max(0, Math.round(input.changeFrom))
       : null
 
-  const birthdayRaw = input.userBirthday?.trim()
-  const userBirthday =
-    birthdayRaw && birthdayRaw.length >= 8 ? birthdayRaw.slice(0, 10) : null
-
   let supabase
   try {
     supabase = createServiceRoleClient()
@@ -125,10 +120,6 @@ export async function createOrderPos(
     promo_code: input.promoCode?.trim() || null,
     scheduled_time: "asap",
     comment: input.comment?.trim() || null,
-  }
-
-  if (userBirthday) {
-    insertRow.user_birthday = userBirthday
   }
 
   const { data: orderRow, error: orderError } = await supabase

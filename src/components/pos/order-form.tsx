@@ -1,6 +1,7 @@
 "use client"
 
-import { brands, type BrandConfig } from "@/brands/index"
+import { normalizePosBrandSlug, type BrandConfig } from "@/brands/index"
+import type { OrdersPanelHandle } from "@/components/pos/orders-panel"
 import {
   PosHeaderIconButton,
   posHeaderCloseButtonClassName,
@@ -17,21 +18,47 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
 import type { DeliveryZoneCheckResultPos } from "@/lib/actions/pos/check-delivery-zone-pos"
-import { createOrderPos } from "@/lib/actions/pos/create-order-pos"
+import { cancelOrderPos } from "@/lib/actions/pos/cancel-order-pos"
 import { updateOrderDetailsPos } from "@/lib/actions/pos/update-order-details-pos"
-import { addOrderItemsPos } from "@/lib/actions/pos/update-order-items"
+import { updateOrderBrandPos } from "@/lib/actions/pos/update-order-brand-pos"
+import {
+  addOrderItemsPos,
+  removeOrderItemPos,
+  replaceOrderItemsPos,
+  updateOrderItemCompositionPos,
+  updateOrderItemQuantityPos,
+} from "@/lib/actions/pos/update-order-items"
 import { validatePromoCode } from "@/lib/actions/validate-promo-code"
 import { calcPromoDiscount } from "@/lib/discount"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { MenuItem } from "@/types/database"
-import type { PosCartItem } from "@/types/pos"
+import type { PosCartItem, PosOrder, PosWizardBrandOption } from "@/types/pos"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
   AlertCircle,
@@ -42,14 +69,17 @@ import {
   Loader2,
   MapPin,
   Minus,
+  MoreVertical,
   Plus,
   ShoppingBag,
   Truck,
   XIcon,
 } from "lucide-react"
 import Image from "next/image"
+import type { RefObject } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
+import { toast } from "sonner"
 import { z } from "zod"
 
 type MenuCategoryRow = {
@@ -79,9 +109,12 @@ const checkoutSchema = z
   .object({
     userName: z.string().min(1, "Введите имя"),
     userPhone: z.string().min(1, "Введите телефон"),
-    userBirthday: z.string().optional(),
     deliveryMode: z.enum(["delivery", "pickup"]),
     deliveryAddress: z.string().optional(),
+    addressEntrance: z.string().optional(),
+    addressFloor: z.string().optional(),
+    addressApartment: z.string().optional(),
+    addressIntercom: z.string().optional(),
     paymentMethod: z.enum(["cash", "card"]),
     changeFromLei: z.string().optional(),
     comment: z.string().optional(),
@@ -90,13 +123,44 @@ const checkoutSchema = z
     if (data.deliveryMode === "delivery" && !data.deliveryAddress?.trim()) {
       ctx.addIssue({
         code: "custom",
-        message: "Укажите адрес доставки",
+        message: "Укажите улицу и дом",
         path: ["deliveryAddress"],
       })
     }
   })
 
 type CheckoutFormValues = z.infer<typeof checkoutSchema>
+
+function checkoutValuesFromPosListOrder(o: PosOrder): CheckoutFormValues {
+  return {
+    userName: o.user_name?.trim() ?? "",
+    userPhone: phoneInputFromStored(o.user_phone ?? ""),
+    deliveryMode: o.delivery_mode,
+    deliveryAddress:
+      o.delivery_mode === "delivery"
+        ? (o.delivery_address?.trim() ?? "")
+        : "",
+    addressEntrance: o.address_entrance?.trim() ?? "",
+    addressFloor: o.address_floor?.trim() ?? "",
+    addressApartment: o.address_apartment?.trim() ?? "",
+    addressIntercom: o.address_intercom?.trim() ?? "",
+    paymentMethod: o.payment_method ?? "cash",
+    changeFromLei:
+      o.change_from != null && o.change_from > 0
+        ? String(o.change_from / 100)
+        : "",
+    comment: o.comment ?? "",
+  }
+}
+
+function cartFingerprint(lines: PosCartItem[]): string {
+  return lines
+    .map(
+      (c, i) =>
+        `${i}:${c.orderItemId ?? ""}:${c.menuItemId}:${c.size ?? ""}:${c.qty}:${c.price}:${c.toppings.map((t) => `${t.name}:${t.price}`).join(";")}`,
+    )
+    .join("|")
+}
 
 function formatMdlAmount(bani: number): string {
   return (bani / 100).toLocaleString("ru-RU", {
@@ -208,26 +272,33 @@ function CartItemRow({
   onUpdateQty,
   onRemove,
   onOpenLine,
+  cartInteractionDisabled,
 }: {
   line: PosCartItem
   idx: number
-  onUpdateQty: (idx: number, delta: number) => void
-  onRemove: (idx: number) => void
+  onUpdateQty: (idx: number, delta: number) => void | Promise<void>
+  onRemove: (idx: number) => void | Promise<void>
   onOpenLine: (idx: number) => void
+  cartInteractionDisabled: boolean
 }) {
+  const locked = cartInteractionDisabled
   return (
-    <SwipeToDelete onDelete={() => onRemove(idx)}>
+    <SwipeToDelete onDelete={() => onRemove(idx)} disabled={locked}>
       <article
         role="button"
         tabIndex={0}
-        onClick={() => onOpenLine(idx)}
+        onClick={() => !locked && onOpenLine(idx)}
         onKeyDown={(e) => {
+          if (locked) return
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault()
             onOpenLine(idx)
           }
         }}
-        className="flex cursor-pointer flex-col gap-2 rounded-lg bg-[#f2f2f2] p-2 outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-[#242424]/30"
+        className={cn(
+          "flex cursor-pointer flex-col gap-2 rounded-lg bg-[#f2f2f2] p-2 outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-[#242424]/30",
+          locked && "pointer-events-none cursor-default opacity-60",
+        )}
       >
         <div className="flex items-start gap-2">
           <div className="relative size-10 shrink-0 overflow-hidden rounded-full bg-white">
@@ -259,10 +330,14 @@ function CartItemRow({
             <button
               type="button"
               aria-label="Уменьшить количество"
-              disabled={line.qty <= 1}
+              disabled={locked}
               onClick={(e) => {
                 e.stopPropagation()
-                onUpdateQty(idx, -1)
+                if (line.qty <= 1) {
+                  void onRemove(idx)
+                  return
+                }
+                void onUpdateQty(idx, -1)
               }}
               className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -274,16 +349,17 @@ function CartItemRow({
             <button
               type="button"
               aria-label="Увеличить количество"
+              disabled={locked}
               onClick={(e) => {
                 e.stopPropagation()
-                onUpdateQty(idx, 1)
+                void onUpdateQty(idx, 1)
               }}
               className="flex size-6 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Plus className="size-3.5" />
             </button>
           </div>
-          <span className="min-w-0 shrink-0 text-right font-mono text-[13px] font-bold tabular-nums text-[#242424]">
+          <span className="flex min-w-0 shrink-0 items-center gap-1 text-right font-mono text-[13px] font-bold tabular-nums text-[#242424]">
             {formatMdl(line.price * line.qty)}
           </span>
         </div>
@@ -304,27 +380,29 @@ function CartPanel({
   nextLabel,
   nextDisabled,
   errorBanner,
+  cartInteractionDisabled,
 }: {
   cart: PosCartItem[]
   cartCount: number
   subtotalBani: number
-  onUpdateQty: (idx: number, delta: number) => void
-  onRemove: (idx: number) => void
+  onUpdateQty: (idx: number, delta: number) => void | Promise<void>
+  onRemove: (idx: number) => void | Promise<void>
   onOpenLine: (idx: number) => void
   onNext: () => void
   nextLabel: string
   nextDisabled: boolean
   errorBanner?: string | null
+  cartInteractionDisabled: boolean
 }) {
   return (
     /* Серая полоса-отступ справа — часть родительского bg-[#f2f2f2] */
-    <div className="flex min-h-0 w-[300px] shrink-0 flex-col p-3 pl-0">
+    <div className="flex h-full min-h-0 w-[300px] shrink-0 flex-col overflow-hidden p-3 pl-0">
       {errorBanner ? (
-        <p className="text-destructive mb-2 px-1 text-center text-xs leading-snug">
+        <p className="text-destructive mb-2 shrink-0 px-1 text-center text-xs leading-snug">
           {errorBanner}
         </p>
       ) : null}
-      <aside className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
+      <aside className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
         {/* Заголовок */}
         <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-5 py-3.5">
           <span className="text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
@@ -347,12 +425,16 @@ function CartPanel({
             <div className="space-y-2 p-3 pr-2">
               {cart.map((line, idx) => (
                 <CartItemRow
-                  key={`${line.menuItemId}-${line.size ?? "x"}-${idx}`}
+                  key={
+                    line.orderItemId ??
+                    `${line.menuItemId}-${line.size ?? "x"}-${idx}`
+                  }
                   line={line}
                   idx={idx}
                   onUpdateQty={onUpdateQty}
                   onRemove={onRemove}
                   onOpenLine={onOpenLine}
+                  cartInteractionDisabled={cartInteractionDisabled}
                 />
               ))}
             </div>
@@ -389,16 +471,20 @@ function FormHeader({
   leftSlot,
   stepIndicator,
   onClose,
+  headerMenu,
 }: {
   leftSlot: React.ReactNode
   stepIndicator: React.ReactNode
   onClose: () => void
+  /** Меню «⋯» слева от кнопки закрытия */
+  headerMenu?: React.ReactNode
 }) {
   return (
     <div className="grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 px-4">
       <div className="flex min-w-0 items-center gap-2">{leftSlot}</div>
       <div className="flex items-center">{stepIndicator}</div>
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-1">
+        {headerMenu}
         <PosHeaderIconButton
           aria-label="Закрыть"
           className={posHeaderCloseButtonClassName}
@@ -412,20 +498,6 @@ function FormHeader({
 }
 
 /* ─── Основной компонент ──────────────────────────────────────── */
-type OrderFormProps = {
-  onClose: () => void
-  /** Новый заказ после шага «Оформление». */
-  onOrderCreated?: (orderId: string) => void
-  /** Если задан UUID — форма открывается на шаге меню для добавления позиций к существующему заказу. */
-  extendOrderId?: string
-  /** После успешного addOrderItemsPos или отмены «назад» со шага меню. */
-  onExtendDone?: () => void
-  /** Редактирование шага «Оформление» для существующего заказа (клиент, доставка, оплата). */
-  editOrderDetailsId?: string
-  /** После сохранения или «Назад» с шага оформления в режиме редактирования. */
-  onEditDetailsDone?: () => void
-}
-
 function phoneInputFromStored(phone: string): string {
   const t = phone.replace(/\s+/g, "")
   if (t.startsWith("+373")) return t.slice(4)
@@ -469,6 +541,7 @@ function posCartFromOrderLine(line: {
     ? line.menu_items[0]
     : line.menu_items
   return {
+    orderItemId: line.id,
     menuItemId: line.menu_item_id ?? "",
     name: baseName,
     size,
@@ -479,19 +552,65 @@ function posCartFromOrderLine(line: {
   }
 }
 
+type OrderFormProps = {
+  /** UUID заказа POS (черновик или существующий) — мастер оформления. */
+  orderId: string
+  /** Бренды: конфиг витрины + UUID из БД (загрузка списка на уровне страницы POS). */
+  wizardBrands: PosWizardBrandOption[]
+  /** Заказ из списка панели — для полей «Детали» без отдельного запроса при смене шага. */
+  listOrder: PosOrder | null
+  onClose: () => void
+  ordersPanelRef?: RefObject<OrdersPanelHandle | null>
+}
+
+function posLinePayloadFromCartItem(c: PosCartItem) {
+  return {
+    menuItemId: c.menuItemId,
+    name:
+      c.toppings.length > 0
+        ? `${c.name} + ${c.toppings.map((t) => t.name).join(", ")}`
+        : c.name,
+    size: c.size,
+    unitPriceBani: c.price,
+    qty: c.qty,
+    toppings: c.toppings.map((t) => ({
+      name: t.name,
+      price: Math.round(t.price),
+    })),
+  }
+}
+
 export function OrderForm({
+  orderId: posOrderId,
+  wizardBrands,
+  listOrder,
   onClose,
-  onOrderCreated,
-  extendOrderId,
-  onExtendDone,
-  editOrderDetailsId,
-  onEditDetailsDone,
+  ordersPanelRef,
 }: OrderFormProps) {
-  const [step, setStep] = useState<1 | 2 | 3>(() => {
-    if (editOrderDetailsId) return 3
-    if (extendOrderId) return 2
-    return 1
-  })
+  const updateOrderLocalState = useCallback(
+    (orderId: string, patch: Partial<PosOrder>) => {
+      ordersPanelRef?.current?.updateOrderLocalState(orderId, patch)
+    },
+    [ordersPanelRef],
+  )
+
+  const refetchOrdersPanel = useCallback(async () => {
+    await ordersPanelRef?.current?.refetchOrders?.()
+  }, [ordersPanelRef])
+
+  /** После смены бренда в БД подтягиваем список и фиксируем slug в локальном состоянии панели (join `brands` в выборке иногда приходит с задержкой или пустым). */
+  const syncBrandSlugOnOrdersPanel = useCallback(
+    async (slug: string) => {
+      await refetchOrdersPanel()
+      updateOrderLocalState(posOrderId, {
+        brand_slug: normalizePosBrandSlug(slug.trim()),
+        updated_at: new Date().toISOString(),
+      })
+    },
+    [refetchOrdersPanel, updateOrderLocalState, posOrderId],
+  )
+
+  const [step, setStep] = useState<1 | 2 | 3>(1)
   const [selectedBrand, setSelectedBrand] = useState<BrandConfig | null>(null)
   const [brandId, setBrandId] = useState<string | null>(null)
   const [categories, setCategories] = useState<MenuCategoryRow[]>([])
@@ -499,9 +618,13 @@ export function OrderForm({
   const [menuItems, setMenuItems] = useState<MenuItemRow[]>([])
   const [menuLoading, setMenuLoading] = useState(false)
   const [cart, setCart] = useState<PosCartItem[]>([])
+  const lastSyncedCartFingerprintRef = useRef("")
+  const categoriesReadyBrandRef = useRef<string | null>(null)
+  const menuLoadedKeyRef = useRef<string | null>(null)
   const [modalItem, setModalItem] = useState<MenuItemRow | null>(null)
   const [cartEditIndex, setCartEditIndex] = useState<number | null>(null)
   const cartModalBusyRef = useRef(false)
+  const [cartActionBusy, setCartActionBusy] = useState(false)
 
   const [promoInput, setPromoInput] = useState("")
   const [promoResult, setPromoResult] = useState<
@@ -516,23 +639,16 @@ export function OrderForm({
   const [zoneResult, setZoneResult] = useState<DeliveryZoneCheckResultPos | null>(null)
   const [zoneChecking, setZoneChecking] = useState(false)
 
-  const [extendPrep, setExtendPrep] = useState<{
-    loading: boolean
-    error: string | null
-  }>(() => ({
-    loading: Boolean(extendOrderId),
+  const [orderPrep, setOrderPrep] = useState<{ loading: boolean; error: string | null }>({
+    loading: true,
     error: null,
-  }))
-  const [extendOrderNumber, setExtendOrderNumber] = useState<number | null>(null)
+  })
+  const [orderNumber, setOrderNumber] = useState<number | null>(null)
   const [extendSubmitting, setExtendSubmitting] = useState(false)
+  const [clearCartBusy, setClearCartBusy] = useState(false)
+  const cartInteractionDisabled =
+    cartActionBusy || extendSubmitting || clearCartBusy
   const [extendError, setExtendError] = useState<string | null>(null)
-  const [editDetailsPrep, setEditDetailsPrep] = useState<{
-    loading: boolean
-    error: string | null
-  }>(() => ({
-    loading: Boolean(editOrderDetailsId),
-    error: null,
-  }))
   const [editBaselineDeliveryFeeBani, setEditBaselineDeliveryFeeBani] =
     useState<number | null>(null)
 
@@ -541,9 +657,12 @@ export function OrderForm({
     defaultValues: {
       userName: "",
       userPhone: "",
-      userBirthday: "",
       deliveryMode: "delivery",
       deliveryAddress: "",
+      addressEntrance: "",
+      addressFloor: "",
+      addressApartment: "",
+      addressIntercom: "",
       paymentMethod: "cash",
       changeFromLei: "",
       comment: "",
@@ -577,7 +696,7 @@ export function OrderForm({
     ) {
       return 0
     }
-    if (editOrderDetailsId && editBaselineDeliveryFeeBani != null) {
+    if (editBaselineDeliveryFeeBani != null) {
       return editBaselineDeliveryFeeBani
     }
     return 0
@@ -585,11 +704,68 @@ export function OrderForm({
     deliveryMode,
     zoneResult,
     subtotalBani,
-    editOrderDetailsId,
     editBaselineDeliveryFeeBani,
   ])
 
   const totalBani = subtotalBani - discountBani + deliveryFeeBani
+
+  const detailsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+  const stepRef = useRef(step)
+  stepRef.current = step
+  const scheduleDebouncedDetailsSaveRef = useRef(() => {})
+
+  const detailsPricingRef = useRef({
+    subtotalBani,
+    discountBani,
+    deliveryFeeBani,
+    promoResult: null as import("@/types/database").PromoCode | null,
+    promoInput: "",
+  })
+  detailsPricingRef.current = {
+    subtotalBani,
+    discountBani,
+    deliveryFeeBani,
+    promoResult,
+    promoInput,
+  }
+
+  const clearDetailsDebounce = useCallback(() => {
+    if (detailsSaveTimerRef.current !== undefined) {
+      clearTimeout(detailsSaveTimerRef.current)
+      detailsSaveTimerRef.current = undefined
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      clearDetailsDebounce()
+    }
+  }, [clearDetailsDebounce])
+
+  useEffect(() => {
+    if (step !== 3) clearDetailsDebounce()
+  }, [step, clearDetailsDebounce])
+
+  const detailsFormDirty = form.formState.isDirty
+
+  useEffect(() => {
+    if (!listOrder || listOrder.id !== posOrderId) return
+    if (detailsFormDirty) return
+    form.reset(checkoutValuesFromPosListOrder(listOrder))
+    const pc = listOrder.promo_code?.trim() ?? ""
+    setPromoInput(pc)
+    if (!pc) {
+      setPromoResult(null)
+      setPromoError(null)
+    }
+  }, [listOrder, posOrderId, detailsFormDirty, form])
+
+  useEffect(() => {
+    categoriesReadyBrandRef.current = null
+    menuLoadedKeyRef.current = null
+  }, [posOrderId])
 
   /* Debounce-проверка зоны доставки при вводе адреса */
   useEffect(() => {
@@ -636,122 +812,56 @@ export function OrderForm({
   }, [])
 
   useEffect(() => {
-    if (selectedBrand) void resolveBrandId(selectedBrand.slug)
-  }, [selectedBrand, resolveBrandId])
-
-  useEffect(() => {
-    if (!extendOrderId) {
-      setExtendPrep({ loading: false, error: null })
-      setExtendError(null)
-      if (!editOrderDetailsId) {
-        setExtendOrderNumber(null)
-      }
+    if (!selectedBrand) {
+      setBrandId(null)
       return
     }
-
-    let cancelled = false
-    setExtendPrep({ loading: true, error: null })
-
-    void (async () => {
-      const supabase = createClient()
-      const { data, error } = await supabase
-        .from("orders")
-        .select("order_number, brands(slug)")
-        .eq("id", extendOrderId)
-        .maybeSingle()
-
-      if (cancelled) return
-
-      if (error || !data) {
-        setExtendPrep({ loading: false, error: "Не удалось загрузить заказ" })
-        return
-      }
-
-      const bEmbed = data.brands as { slug: string } | { slug: string }[] | null
-      const slug = Array.isArray(bEmbed) ? bEmbed[0]?.slug : bEmbed?.slug
-      if (!slug) {
-        setExtendPrep({ loading: false, error: "Бренд заказа не найден" })
-        return
-      }
-
-      const cfg = brands.find((x) => x.slug === slug)
-      if (!cfg) {
-        setExtendPrep({ loading: false, error: "Неизвестный бренд" })
-        return
-      }
-
-      setSelectedBrand(cfg)
-      setExtendOrderNumber(data.order_number as number)
-      setCart([])
-      setModalItem(null)
-      setPromoInput("")
-      setPromoResult(null)
-      setPromoError(null)
-      setExtendPrep({ loading: false, error: null })
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [extendOrderId, editOrderDetailsId])
-
-  useEffect(() => {
-    if (!editOrderDetailsId) {
-      setEditDetailsPrep({ loading: false, error: null })
-      setEditBaselineDeliveryFeeBani(null)
+    const row = wizardBrands.find((b) => b.slug === selectedBrand.slug)
+    if (row?.dbId) {
+      setBrandId(row.dbId)
       return
     }
+    void resolveBrandId(selectedBrand.slug)
+  }, [selectedBrand, wizardBrands, resolveBrandId])
 
+  useEffect(() => {
     let cancelled = false
-    setEditDetailsPrep({ loading: true, error: null })
+    lastSyncedCartFingerprintRef.current = ""
+    setOrderPrep({ loading: true, error: null })
 
     void (async () => {
       const supabase = createClient()
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "*, brands(slug), order_items(id, item_name, menu_item_id, size, quantity, price, toppings, menu_items(image_url))",
+          "delivery_fee, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(id, item_name, menu_item_id, size, quantity, price, toppings, menu_items(image_url))",
         )
-        .eq("id", editOrderDetailsId)
+        .eq("id", posOrderId)
         .maybeSingle()
 
       if (cancelled) return
 
       if (error || !data) {
-        setEditDetailsPrep({
-          loading: false,
-          error: "Не удалось загрузить заказ",
-        })
+        setOrderPrep({ loading: false, error: "Не удалось загрузить заказ" })
         return
       }
 
-      const bEmbed = data.brands as { slug: string } | { slug: string }[] | null
-      const slug = Array.isArray(bEmbed) ? bEmbed[0]?.slug : bEmbed?.slug
-      if (!slug) {
-        setEditDetailsPrep({
-          loading: false,
-          error: "Бренд заказа не найден",
-        })
-        return
-      }
-
-      const cfg = brands.find((x) => x.slug === slug)
-      if (!cfg) {
-        setEditDetailsPrep({ loading: false, error: "Неизвестный бренд" })
-        return
-      }
-
-      const row = data as {
+      const raw = data as {
         order_number: number
         user_name: string | null
-        user_phone: string
-        user_birthday: string | null
+        user_phone: string | null
         delivery_mode: "delivery" | "pickup"
         delivery_address: string | null
+        delivery_fee: number
         payment_method: "cash" | "card"
         change_from: number | null
         comment: string | null
         promo_code: string | null
+        address_entrance: string | null
+        address_floor: string | null
+        address_apartment: string | null
+        address_intercom: string | null
+        brands: { slug: string } | { slug: string }[] | null
         order_items: Array<{
           id: string
           item_name: string
@@ -767,23 +877,73 @@ export function OrderForm({
         }> | null
       }
 
-      const lines = row.order_items ?? []
+      const bEmbed = raw.brands
+      const slug = Array.isArray(bEmbed)
+        ? bEmbed[0]?.slug
+        : bEmbed?.slug
+
+      const lines = raw.order_items ?? []
       const cartLines = lines.map(posCartFromOrderLine)
       const sub = cartLines.reduce((s, c) => s + c.price * c.qty, 0)
 
-      setSelectedBrand(cfg)
-      setExtendOrderNumber(row.order_number)
+      setOrderNumber(raw.order_number)
+      setExtendError(null)
       setEditBaselineDeliveryFeeBani(
-        Math.max(0, Math.round((data as { delivery_fee: number }).delivery_fee ?? 0)),
+        Math.max(0, Math.round(raw.delivery_fee ?? 0)),
       )
-      setCart(cartLines)
       setModalItem(null)
       setCartEditIndex(null)
 
-      setPromoInput(row.promo_code?.trim() ?? "")
+      if (!slug) {
+        setSelectedBrand(null)
+        setBrandId(null)
+        setCart([])
+        lastSyncedCartFingerprintRef.current = cartFingerprint([])
+        setPromoInput("")
+        setPromoResult(null)
+        setPromoError(null)
+        form.reset({
+          userName: raw.user_name?.trim() ?? "",
+          userPhone: phoneInputFromStored(raw.user_phone ?? ""),
+          deliveryMode: raw.delivery_mode,
+          deliveryAddress:
+            raw.delivery_mode === "delivery"
+              ? (raw.delivery_address?.trim() ?? "")
+              : "",
+          addressEntrance: raw.address_entrance?.trim() ?? "",
+          addressFloor: raw.address_floor?.trim() ?? "",
+          addressApartment: raw.address_apartment?.trim() ?? "",
+          addressIntercom: raw.address_intercom?.trim() ?? "",
+          paymentMethod: raw.payment_method,
+          changeFromLei:
+            raw.change_from != null && raw.change_from > 0
+              ? String(raw.change_from / 100)
+              : "",
+          comment: raw.comment ?? "",
+        })
+        if (!cancelled) {
+          setOrderPrep({ loading: false, error: null })
+          setStep(1)
+        }
+        return
+      }
+
+      const cfg = wizardBrands.find(
+        (x) => normalizePosBrandSlug(slug ?? "") === x.slug,
+      )
+      if (!cfg) {
+        setOrderPrep({ loading: false, error: "Неизвестный бренд" })
+        return
+      }
+
+      setSelectedBrand(cfg)
+
+      setCart(cartLines)
+      lastSyncedCartFingerprintRef.current = cartFingerprint(cartLines)
+      setPromoInput(raw.promo_code?.trim() ?? "")
       setPromoError(null)
-      if (row.promo_code?.trim() && sub > 0) {
-        const res = await validatePromoCode(row.promo_code.trim(), sub)
+      if (raw.promo_code?.trim() && sub > 0) {
+        const res = await validatePromoCode(raw.promo_code.trim(), sub)
         if (cancelled) return
         if (res.valid) {
           setPromoResult(res.promo)
@@ -795,33 +955,38 @@ export function OrderForm({
       }
 
       form.reset({
-        userName: row.user_name?.trim() ?? "",
-        userPhone: phoneInputFromStored(row.user_phone),
-        userBirthday: row.user_birthday?.slice(0, 10) ?? "",
-        deliveryMode: row.delivery_mode,
+        userName: raw.user_name?.trim() ?? "",
+        userPhone: phoneInputFromStored(raw.user_phone ?? ""),
+        deliveryMode: raw.delivery_mode,
         deliveryAddress:
-          row.delivery_mode === "delivery"
-            ? (row.delivery_address?.trim() ?? "")
+          raw.delivery_mode === "delivery"
+            ? (raw.delivery_address?.trim() ?? "")
             : "",
-        paymentMethod: row.payment_method,
+        addressEntrance: raw.address_entrance?.trim() ?? "",
+        addressFloor: raw.address_floor?.trim() ?? "",
+        addressApartment: raw.address_apartment?.trim() ?? "",
+        addressIntercom: raw.address_intercom?.trim() ?? "",
+        paymentMethod: raw.payment_method,
         changeFromLei:
-          row.change_from != null && row.change_from > 0
-            ? String(row.change_from / 100)
+          raw.change_from != null && raw.change_from > 0
+            ? String(raw.change_from / 100)
             : "",
-        comment: row.comment ?? "",
+        comment: raw.comment ?? "",
       })
 
       if (!cancelled) {
-        setEditDetailsPrep({ loading: false, error: null })
+        setOrderPrep({ loading: false, error: null })
+        setStep(2)
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [editOrderDetailsId, form])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- prefetch только при смене заказа; в deps `{form}` давал повторную загрузку и сброс модалки
+  }, [posOrderId])
 
-  const loadCategories = useCallback(async (bid: string) => {
+  const loadCategories = useCallback(async (bid: string): Promise<boolean> => {
     const supabase = createClient()
     const { data, error } = await supabase
       .from("menu_categories")
@@ -834,7 +999,7 @@ export function OrderForm({
       console.error("[order-form] categories", error.message)
       setCategories([])
       setActiveCategoryId("")
-      return
+      return false
     }
     const rows = (data ?? []) as MenuCategoryRow[]
     setCategories(rows)
@@ -843,14 +1008,20 @@ export function OrderForm({
       if (prev && rows.some((c) => c.id === prev)) return prev
       return rows[0]!.id
     })
+    return true
   }, [])
 
   useEffect(() => {
-    if (step === 2 && brandId) void loadCategories(brandId)
+    if (step !== 2 || !brandId) return
+    if (categoriesReadyBrandRef.current === brandId) return
+    void (async () => {
+      const ok = await loadCategories(brandId)
+      if (ok) categoriesReadyBrandRef.current = brandId
+    })()
   }, [step, brandId, loadCategories])
 
-  const loadMenuItems = useCallback(async () => {
-    if (!brandId || !activeCategoryId) return
+  const loadMenuItems = useCallback(async (): Promise<boolean> => {
+    if (!brandId || !activeCategoryId) return false
     setMenuLoading(true)
     const supabase = createClient()
     const { data, error } = await supabase
@@ -867,14 +1038,82 @@ export function OrderForm({
     if (error) {
       console.error("[order-form] menu_items", error.message)
       setMenuItems([])
-      return
+      return false
     }
     setMenuItems((data ?? []) as MenuItemRow[])
+    return true
   }, [brandId, activeCategoryId])
 
   useEffect(() => {
-    if (step === 2 && activeCategoryId) void loadMenuItems()
-  }, [step, activeCategoryId, loadMenuItems])
+    if (step !== 2 || !brandId || !activeCategoryId) return
+    const key = `${brandId}:${activeCategoryId}`
+    if (menuLoadedKeyRef.current === key) return
+    void (async () => {
+      const ok = await loadMenuItems()
+      if (ok) menuLoadedKeyRef.current = key
+    })()
+  }, [step, brandId, activeCategoryId, loadMenuItems])
+
+  const refreshCartFromDb = useCallback(async () => {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from("orders")
+      .select(
+        "order_items(id, item_name, menu_item_id, size, quantity, price, toppings, menu_items(image_url))",
+      )
+      .eq("id", posOrderId)
+      .maybeSingle()
+
+    if (error || !data) {
+      console.error("[order-form] refreshCartFromDb", error?.message ?? "empty")
+      return
+    }
+    const rows =
+      (
+        data as {
+          order_items: Array<{
+            id: string
+            item_name: string
+            menu_item_id: string | null
+            size: string | null
+            quantity: number
+            price: number
+            toppings: unknown
+            menu_items:
+              | { image_url: string | null }
+              | { image_url: string | null }[]
+              | null
+          }>
+        }
+      ).order_items ?? []
+    const lines = rows.map(posCartFromOrderLine)
+    lastSyncedCartFingerprintRef.current = cartFingerprint(lines)
+    setCart(lines)
+  }, [posOrderId])
+
+  const handleClearCart = useCallback(async () => {
+    if (cart.length === 0) {
+      toast.message("Корзина уже пуста")
+      return
+    }
+    setClearCartBusy(true)
+    try {
+      const res = await replaceOrderItemsPos({
+        orderId: posOrderId,
+        lines: [],
+      })
+      if (!res.success) {
+        toast.error(res.error ?? "Не удалось очистить корзину")
+        return
+      }
+      setModalItem(null)
+      setCartEditIndex(null)
+      await refreshCartFromDb()
+      await refetchOrdersPanel()
+    } finally {
+      setClearCartBusy(false)
+    }
+  }, [cart.length, posOrderId, refreshCartFromDb, refetchOrdersPanel])
 
   const cartCount = useMemo(
     () => cart.reduce((n, it) => n + it.qty, 0),
@@ -889,37 +1128,68 @@ export function OrderForm({
   }, [])
 
   const addCartItem = useCallback(
-    (entry: PosCartItem) => {
+    async (entry: PosCartItem) => {
       if (entry.price <= 0 || entry.qty < 1) return
-      setCart((prev) => {
-        const idx = prev.findIndex(
-          (x) =>
-            x.menuItemId === entry.menuItemId &&
-            (x.size ?? null) === (entry.size ?? null) &&
-            toppingsSignature(x.toppings) === toppingsSignature(entry.toppings),
-        )
+      if (cartInteractionDisabled) return
+      const idx = cart.findIndex(
+        (x) =>
+          x.menuItemId === entry.menuItemId &&
+          (x.size ?? null) === (entry.size ?? null) &&
+          toppingsSignature(x.toppings) === toppingsSignature(entry.toppings),
+      )
+      setCartActionBusy(true)
+      try {
         if (idx >= 0) {
-          const next = [...prev]
-          next[idx] = {
-            ...next[idx]!,
-            qty: next[idx]!.qty + entry.qty,
+          const existing = cart[idx]!
+          if (existing.orderItemId) {
+            const res = await updateOrderItemQuantityPos({
+              orderId: posOrderId,
+              itemId: existing.orderItemId,
+              quantity: existing.qty + entry.qty,
+            })
+            if (!res.success) {
+              toast.error("Не удалось обновить количество")
+              return
+            }
+          } else {
+            toast.error("Некорректное состояние корзины")
+            return
           }
-          return next
+        } else {
+          const res = await addOrderItemsPos({
+            orderId: posOrderId,
+            lines: [posLinePayloadFromCartItem(entry)],
+          })
+          if (!res.success) {
+            toast.error("Не удалось добавить позицию")
+            return
+          }
         }
-        return [...prev, entry]
-      })
+        await refreshCartFromDb()
+        await refetchOrdersPanel()
+      } finally {
+        setCartActionBusy(false)
+      }
     },
-    [toppingsSignature],
+    [
+      cart,
+      cartInteractionDisabled,
+      posOrderId,
+      refreshCartFromDb,
+      toppingsSignature,
+      refetchOrdersPanel,
+    ],
   )
 
   const handleProductClick = useCallback(
     (row: MenuItemRow) => {
+      if (cartInteractionDisabled) return
       setCartEditIndex(null)
       const hasToppingGroups = (row.menu_item_topping_groups?.length ?? 0) > 0
       if (!row.has_sizes && !hasToppingGroups) {
         const price = unitPriceBani(row, null)
         if (price <= 0) return
-        addCartItem({
+        void addCartItem({
           menuItemId: row.id,
           name: row.name_ru,
           size: null,
@@ -932,24 +1202,79 @@ export function OrderForm({
       }
       setModalItem(row)
     },
-    [addCartItem],
+    [addCartItem, cartInteractionDisabled],
   )
 
-  const updateQty = (idx: number, delta: number) => {
-    setCart((prev) => {
-      const next = [...prev]
-      const row = next[idx]
-      if (!row) return prev
+  const updateQty = useCallback(
+    async (idx: number, delta: number) => {
+      if (cartInteractionDisabled) return
+      const row = cart[idx]
+      if (!row?.orderItemId) return
       const q = row.qty + delta
-      if (q < 1) return prev
-      next[idx] = { ...row, qty: q }
-      return next
-    })
-  }
+      setCartActionBusy(true)
+      try {
+        if (q < 1) {
+          const res = await removeOrderItemPos({
+            orderId: posOrderId,
+            itemId: row.orderItemId,
+          })
+          if (!res.success) {
+            toast.error("Не удалось удалить позицию")
+            return
+          }
+        } else {
+          const res = await updateOrderItemQuantityPos({
+            orderId: posOrderId,
+            itemId: row.orderItemId,
+            quantity: q,
+          })
+          if (!res.success) {
+            toast.error("Не удалось обновить количество")
+            return
+          }
+        }
+        await refreshCartFromDb()
+        await refetchOrdersPanel()
+      } finally {
+        setCartActionBusy(false)
+      }
+    },
+    [
+      cart,
+      cartInteractionDisabled,
+      posOrderId,
+      refreshCartFromDb,
+      refetchOrdersPanel,
+    ],
+  )
 
-  const removeLine = (idx: number) => {
-    setCart((prev) => prev.filter((_, i) => i !== idx))
-  }
+  const removeLine = useCallback(
+    async (idx: number) => {
+      if (cartInteractionDisabled) return
+      const row = cart[idx]
+      if (!row) return
+      if (!row.orderItemId) {
+        setCart((prev) => prev.filter((_, i) => i !== idx))
+        return
+      }
+      setCartActionBusy(true)
+      try {
+        const res = await removeOrderItemPos({
+          orderId: posOrderId,
+          itemId: row.orderItemId,
+        })
+        if (!res.success) {
+          toast.error("Не удалось удалить позицию")
+          return
+        }
+        await refreshCartFromDb()
+        await refetchOrdersPanel()
+      } finally {
+        setCartActionBusy(false)
+      }
+    },
+    [cart, cartInteractionDisabled, posOrderId, refreshCartFromDb, refetchOrdersPanel],
+  )
 
   const closeProductModal = useCallback(() => {
     setModalItem(null)
@@ -982,6 +1307,49 @@ export function OrderForm({
     }
   }, [cart])
 
+  const saveCartLineFromModal = useCallback(
+    async (cartIndex: number, c: PosCartItem) => {
+      if (cartInteractionDisabled) {
+        throw new Error("Повторите попытку")
+      }
+      const prevLine = cart[cartIndex]
+      if (!prevLine?.orderItemId) {
+        throw new Error("Некорректное состояние корзины")
+      }
+      setCartActionBusy(true)
+      try {
+        const linePayload = posLinePayloadFromCartItem(c)
+        const res = await updateOrderItemCompositionPos({
+          orderId: posOrderId,
+          itemId: prevLine.orderItemId,
+          menuItemId: c.menuItemId,
+          itemName: linePayload.name,
+          size: c.size,
+          quantity: c.qty,
+          unitPriceBani: c.price,
+          toppings: c.toppings.map((t) => ({
+            name: t.name,
+            price: Math.round(t.price),
+          })),
+        })
+        if (!res.success) {
+          throw new Error(res.error ?? "Не удалось сохранить позицию")
+        }
+        await refreshCartFromDb()
+        await refetchOrdersPanel()
+      } finally {
+        setCartActionBusy(false)
+      }
+    },
+    [
+      cart,
+      cartInteractionDisabled,
+      posOrderId,
+      refreshCartFromDb,
+      refetchOrdersPanel,
+    ],
+  )
+
   const applyPromo = async () => {
     const code = promoInput.trim()
     if (!code) {
@@ -999,164 +1367,407 @@ export function OrderForm({
     }
     setPromoResult(res.promo)
     setPromoError(null)
+    window.setTimeout(() => {
+      scheduleDebouncedDetailsSaveRef.current()
+    }, 0)
   }
 
-  const submitCheckout = async (values: CheckoutFormValues) => {
-    if (editOrderDetailsId) {
-      if (!selectedBrand) return
-      setSubmitError(null)
-      setSubmitting(true)
-      const changeBani =
-        values.paymentMethod === "cash"
-          ? parseLeiToBani(values.changeFromLei ?? "")
-          : null
+  const [closeOrderOpen, setCloseOrderOpen] = useState(false)
+  const [closeOrderPreset, setCloseOrderPreset] = useState<string>("")
+  const [closeOrderOther, setCloseOrderOther] = useState("")
+  const [closeOrderSaving, setCloseOrderSaving] = useState(false)
+  const [cancelOrderFeedback, setCancelOrderFeedback] = useState<string | null>(
+    null,
+  )
+  const [orderMenuOpen, setOrderMenuOpen] = useState(false)
 
-      const res = await updateOrderDetailsPos({
-        orderId: editOrderDetailsId,
-        userName: values.userName,
-        userPhone: values.userPhone,
-        userBirthday: values.userBirthday?.trim() || undefined,
-        deliveryMode: values.deliveryMode,
-        deliveryAddress:
-          values.deliveryMode === "delivery"
-            ? values.deliveryAddress
-            : undefined,
-        paymentMethod: values.paymentMethod,
-        changeFrom: changeBani ?? undefined,
-        comment: values.comment?.trim() || undefined,
-        promoCode: promoResult ? promoInput.trim().toUpperCase() : undefined,
-        discount: discountBani > 0 ? discountBani : 0,
-        deliveryFee: deliveryFeeBani,
-      })
-
-      setSubmitting(false)
-      if (!res.success) {
-        setSubmitError(res.error)
-        return
-      }
-      onEditDetailsDone?.()
-      return
+  const persistBrandOrError = async (): Promise<boolean> => {
+    if (!selectedBrand) {
+      setExtendError("Выберите бренд")
+      return false
     }
-
-    if (!selectedBrand) return
-    setSubmitError(null)
-    setSubmitting(true)
-    const changeBani =
-      values.paymentMethod === "cash"
-        ? parseLeiToBani(values.changeFromLei ?? "")
-        : null
-
-    const res = await createOrderPos({
+    const res = await updateOrderBrandPos({
+      orderId: posOrderId,
       brandSlug: selectedBrand.slug,
-      items: cart.map((c) => ({
+    })
+    if (!res.success) {
+      setExtendError(res.error)
+      return false
+    }
+    setExtendError(null)
+    await syncBrandSlugOnOrdersPanel(selectedBrand.slug)
+    return true
+  }
+
+  const persistCartToServer = async (): Promise<boolean> => {
+    if (!brandId || !selectedBrand) {
+      setExtendError("Сначала выберите бренд")
+      return false
+    }
+    setExtendError(null)
+    setExtendSubmitting(true)
+    try {
+      const linesPayload = cart.map((c) => ({
         menuItemId: c.menuItemId,
         name:
           c.toppings.length > 0
             ? `${c.name} + ${c.toppings.map((t) => t.name).join(", ")}`
             : c.name,
         size: c.size,
-        price: c.price,
+        unitPriceBani: c.price,
         qty: c.qty,
         toppings: c.toppings.map((t) => ({
           name: t.name,
           price: Math.round(t.price),
         })),
-      })),
-      userName: values.userName,
-      userPhone: values.userPhone,
-      userBirthday: values.userBirthday?.trim() || undefined,
-      deliveryMode: values.deliveryMode,
-      deliveryAddress:
-        values.deliveryMode === "delivery"
-          ? values.deliveryAddress
-          : undefined,
-      paymentMethod: values.paymentMethod,
-      changeFrom: changeBani ?? undefined,
-      comment: values.comment?.trim() || undefined,
-      promoCode: promoResult ? promoInput.trim().toUpperCase() : undefined,
-      discount: discountBani > 0 ? discountBani : undefined,
-      deliveryFee: deliveryFeeBani,
-    })
-
-    setSubmitting(false)
-    if (!res.success) {
-      setSubmitError(res.error)
-      return
-    }
-    onOrderCreated?.(res.orderId)
-  }
-
-  const submitExtendItems = async () => {
-    if (!extendOrderId || cart.length === 0) return
-    setExtendError(null)
-    setExtendSubmitting(true)
-    try {
-      const res = await addOrderItemsPos({
-        orderId: extendOrderId,
-        lines: cart.map((c) => ({
-          menuItemId: c.menuItemId,
-          name:
-            c.toppings.length > 0
-              ? `${c.name} + ${c.toppings.map((t) => t.name).join(", ")}`
-              : c.name,
-          size: c.size,
-          unitPriceBani: c.price,
-          qty: c.qty,
-          toppings: c.toppings.map((t) => ({
-            name: t.name,
-            price: Math.round(t.price),
-          })),
-        })),
+      }))
+      const res = await replaceOrderItemsPos({
+        orderId: posOrderId,
+        lines: linesPayload,
       })
       if (!res.success) {
         setExtendError(res.error)
-        return
+        return false
       }
-      onExtendDone?.()
+      await refreshCartFromDb()
+      await refetchOrdersPanel()
+      return true
     } finally {
       setExtendSubmitting(false)
     }
   }
 
+  const buildPhoneForSave = (raw: string) => {
+    const d = raw.replace(/\s+/g, "")
+    return d.startsWith("+") ? d : `+373${d}`
+  }
+
+  function detailsArePersistable(values: CheckoutFormValues): boolean {
+    if (!values.userName.trim() || !values.userPhone.trim()) return false
+    if (
+      values.deliveryMode === "delivery" &&
+      !values.deliveryAddress?.trim()
+    ) {
+      return false
+    }
+    return true
+  }
+
+  const runDetailsSaveToServer = useCallback(
+    async (
+      valuesOverride?: CheckoutFormValues,
+      opts?: { forSubmit?: boolean },
+    ): Promise<boolean> => {
+      if (!selectedBrand) {
+        if (opts?.forSubmit) setSubmitError("Выберите бренд на шаге 1")
+        return false
+      }
+      const values = valuesOverride ?? form.getValues()
+      if (!detailsArePersistable(values)) {
+        return false
+      }
+      const {
+        subtotalBani: sub,
+        discountBani: disc,
+        deliveryFeeBani: fee,
+        promoResult: pr,
+        promoInput: pi,
+      } = detailsPricingRef.current
+
+      const changeBani =
+        values.paymentMethod === "cash"
+          ? parseLeiToBani(values.changeFromLei ?? "")
+          : null
+
+      const res = await updateOrderDetailsPos({
+        orderId: posOrderId,
+        userName: values.userName,
+        userPhone: buildPhoneForSave(values.userPhone),
+        deliveryMode: values.deliveryMode,
+        deliveryAddress:
+          values.deliveryMode === "delivery"
+            ? values.deliveryAddress
+            : undefined,
+        addressEntrance: values.addressEntrance?.trim() || null,
+        addressFloor: values.addressFloor?.trim() || null,
+        addressApartment: values.addressApartment?.trim() || null,
+        addressIntercom: values.addressIntercom?.trim() || null,
+        paymentMethod: values.paymentMethod,
+        changeFrom: changeBani ?? undefined,
+        comment: values.comment?.trim() || undefined,
+        promoCode: pr ? pi.trim().toUpperCase() : undefined,
+        discount: disc > 0 ? disc : 0,
+        deliveryFee: fee,
+      })
+      if (!res.success) {
+        if (opts?.forSubmit) setSubmitError(res.error)
+        else toast.error("Не удалось сохранить данные")
+        return false
+      }
+      const safeDiscount = Math.min(disc, sub)
+      const cardTotal = sub - safeDiscount + fee
+      updateOrderLocalState(posOrderId, {
+        total: cardTotal,
+        delivery_fee: fee,
+        discount: safeDiscount,
+        updated_at: new Date().toISOString(),
+      })
+      if (opts?.forSubmit) setSubmitError(null)
+      return true
+    },
+    [selectedBrand, form, posOrderId, updateOrderLocalState],
+  )
+
+  const scheduleDebouncedDetailsSave = useCallback(() => {
+    clearDetailsDebounce()
+    detailsSaveTimerRef.current = setTimeout(() => {
+      detailsSaveTimerRef.current = undefined
+      if (stepRef.current !== 3) return
+      void runDetailsSaveToServer()
+    }, 600)
+  }, [clearDetailsDebounce, runDetailsSaveToServer])
+
+  scheduleDebouncedDetailsSaveRef.current = scheduleDebouncedDetailsSave
+
+  const patchDetailsCardAndScheduleSave = useCallback(
+    (patch: Partial<PosOrder>) => {
+      updateOrderLocalState(posOrderId, {
+        ...patch,
+        updated_at: new Date().toISOString(),
+      })
+      scheduleDebouncedDetailsSave()
+    },
+    [posOrderId, updateOrderLocalState, scheduleDebouncedDetailsSave],
+  )
+
+  const persistCheckoutValues = async (
+    values: CheckoutFormValues,
+  ): Promise<boolean> => {
+    clearDetailsDebounce()
+    return runDetailsSaveToServer(values, { forSubmit: true })
+  }
+
+  const navigateToStep = (target: 1 | 2 | 3) => {
+    if (target === step) return
+    const from = step
+    if (from === 2) {
+      void (async () => {
+        if (
+          (target === 3 || target === 1) &&
+          cartFingerprint(cart) === lastSyncedCartFingerprintRef.current
+        ) {
+          setStep(target)
+          return
+        }
+        const ok = await persistCartToServer()
+        if (!ok) return
+        setStep(target)
+      })()
+      return
+    }
+    setStep(target)
+    if (from === 1) void persistBrandOrError()
+  }
+
+  const confirmCancelOrder = async () => {
+    if (!closeOrderPreset) return
+    if (closeOrderPreset === "__other__" && !closeOrderOther.trim()) return
+    const reason =
+      closeOrderPreset === "__other__"
+        ? closeOrderOther.trim()
+        : closeOrderPreset
+
+    setCancelOrderFeedback(null)
+    setCloseOrderSaving(true)
+    try {
+      const res = await cancelOrderPos({ orderId: posOrderId, reason })
+      if (!res.success) {
+        setCancelOrderFeedback(res.error ?? "Не удалось закрыть заказ")
+        return
+      }
+      setCloseOrderOpen(false)
+      onClose()
+    } finally {
+      setCloseOrderSaving(false)
+    }
+  }
+
+  const closeOrderReasonPresets = [
+    "Ошибка оператора",
+    "Клиент не пришел",
+    "Клиент передумал",
+  ] as const
+
+  const closeOrderDialog = (
+    <Dialog
+      open={closeOrderOpen}
+      onOpenChange={(o) => {
+        setCloseOrderOpen(o)
+        if (!o) {
+          setCloseOrderPreset("")
+          setCloseOrderOther("")
+          setCancelOrderFeedback(null)
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Закрыть заказ?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <Select
+            value={closeOrderPreset || undefined}
+            onValueChange={setCloseOrderPreset}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Выберите причину" />
+            </SelectTrigger>
+            <SelectContent>
+              {closeOrderReasonPresets.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+              <SelectItem value="__other__">Другое</SelectItem>
+            </SelectContent>
+          </Select>
+          {closeOrderPreset === "__other__" ? (
+            <Input
+              placeholder="Укажите причину"
+              value={closeOrderOther}
+              onChange={(e) => setCloseOrderOther(e.target.value)}
+              className="w-full"
+            />
+          ) : null}
+          {cancelOrderFeedback ? (
+            <p className="text-destructive text-sm">{cancelOrderFeedback}</p>
+          ) : null}
+        </div>
+        <DialogFooter className="gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setCloseOrderOpen(false)}
+          >
+            Отмена
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={
+              closeOrderSaving ||
+              !closeOrderPreset ||
+              (closeOrderPreset === "__other__" &&
+                closeOrderOther.trim().length === 0)
+            }
+            onClick={() => void confirmCancelOrder()}
+          >
+            {closeOrderSaving ? "Закрытие…" : "Подтвердить"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
+  const submitCheckout = async (values: CheckoutFormValues) => {
+    setSubmitError(null)
+    setSubmitting(true)
+    try {
+      const ok = await persistCheckoutValues(values)
+      if (!ok) return
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   const onSubmit = form.handleSubmit(submitCheckout)
 
-  /* Индикатор шагов */
+  /* Индикатор шагов — кнопки без разделителей */
   const stepIndicator = (
     <nav
-      className="flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap"
-      role="status"
+      className="flex max-w-full min-w-0 shrink-0 items-center gap-2 overflow-x-auto text-xs whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      role="navigation"
       aria-label="Шаги оформления заказа"
     >
-      <span
-        className={
-          step === 1 ? "font-bold text-foreground" : "text-muted-foreground"
-        }
-      >
-        1.&nbsp;Бренд
-      </span>
-      <span className="text-muted-foreground" aria-hidden>→</span>
-      <span
-        className={
-          step === 2 ? "font-bold text-foreground" : "text-muted-foreground"
-        }
-      >
-        2.&nbsp;Заказ
-      </span>
-      <span className="text-muted-foreground" aria-hidden>→</span>
-      <span
-        className={
-          step === 3 ? "font-bold text-foreground" : "text-muted-foreground"
-        }
-      >
-        3.&nbsp;Оформление
-      </span>
+      {([1, 2, 3] as const).map((n) => (
+        <button
+          key={n}
+          type="button"
+          disabled={
+            orderPrep.loading ||
+            (step === 2 && n === 3 && cartInteractionDisabled)
+          }
+          onClick={() => navigateToStep(n)}
+          className={cn(
+            "rounded-lg border-0 bg-white px-3 py-2 shadow-none ring-0 transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#242424]/20",
+            step === n
+              ? "font-bold text-[#242424]"
+              : "font-normal text-[#808080] hover:text-[#242424]",
+            "disabled:pointer-events-none disabled:opacity-50",
+          )}
+        >
+          {n === 1 ? "1. Бренд" : null}
+          {n === 2 ? "2. Оформление" : null}
+          {n === 3 ? "3. Детали" : null}
+        </button>
+      ))}
     </nav>
   )
 
-  if (
-    (extendOrderId && extendPrep.loading) ||
-    (editOrderDetailsId && editDetailsPrep.loading)
-  ) {
+  const wizardHeaderMenu = (
+    <Popover open={orderMenuOpen} onOpenChange={setOrderMenuOpen}>
+      <PopoverTrigger asChild>
+        <PosHeaderIconButton
+          type="button"
+          aria-label="Действия с заказом"
+          disabled={clearCartBusy || extendSubmitting || submitting}
+        >
+          <MoreVertical className="size-4" strokeWidth={2} />
+        </PosHeaderIconButton>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={6}
+        className="w-[min(100vw-2rem,15rem)] gap-0.5 rounded-xl border border-[#e8e8e8] bg-white p-1 shadow-md"
+      >
+        <button
+          type="button"
+          disabled={
+            clearCartBusy ||
+            extendSubmitting ||
+            cart.length === 0
+          }
+          onClick={() => {
+            setOrderMenuOpen(false)
+            void handleClearCart()
+          }}
+          className={cn(
+            "flex w-full items-center rounded-lg px-3 py-2.5 text-left text-[13px] font-medium text-[#242424]",
+            "hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40",
+          )}
+        >
+          Очистить корзину
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOrderMenuOpen(false)
+            setCancelOrderFeedback(null)
+            setCloseOrderOpen(true)
+          }}
+          className={cn(
+            "flex w-full items-center rounded-lg px-3 py-2.5 text-left text-[13px] font-medium text-red-600",
+            "hover:bg-red-50",
+          )}
+        >
+          Закрыть заказ
+        </button>
+      </PopoverContent>
+    </Popover>
+  )
+
+  if (orderPrep.loading) {
     return (
       <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 p-6 text-sm">
         <Loader2
@@ -1168,11 +1779,7 @@ export function OrderForm({
     )
   }
 
-  const prefetchError = extendOrderId
-    ? extendPrep.error
-    : editOrderDetailsId
-      ? editDetailsPrep.error
-      : null
+  const prefetchError = orderPrep.error
 
   if (prefetchError) {
     return (
@@ -1186,195 +1793,203 @@ export function OrderForm({
   }
 
   /* ── Шаг 1: выбор бренда ── */
-  if (step === 1 && !extendOrderId && !editOrderDetailsId) {
+  if (step === 1) {
     return (
-      <div className="flex h-full min-h-0 flex-col">
-        <FormHeader
-          leftSlot={
-            <h2 className="min-w-0 truncate text-sm font-bold text-foreground">
-              Для какого бренда заказ?
-            </h2>
-          }
-          stepIndicator={stepIndicator}
-          onClose={onClose}
-        />
+      <>
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          <FormHeader
+            leftSlot={
+              <h2 className="min-w-0 truncate text-sm font-bold text-foreground">
+                Для какого бренда заказ?
+              </h2>
+            }
+            stepIndicator={stepIndicator}
+            headerMenu={wizardHeaderMenu}
+            onClose={onClose}
+          />
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 pt-3">
-          {brands.map((b) => (
-            <button
-              key={b.slug}
-              type="button"
-              className={cn(
-                "flex min-h-[min(28vh,180px)] flex-1 cursor-pointer flex-col items-center justify-center gap-4 rounded-xl border-2 bg-white px-6 py-8 shadow-sm transition-all",
-                "hover:bg-muted/30 hover:brightness-[0.99] active:scale-[0.99]",
-              )}
-              style={{ borderColor: b.colors.accent }}
-              onClick={() => {
-                setCart([])
-                setModalItem(null)
-                setCartEditIndex(null)
-                setPromoInput("")
-                setPromoResult(null)
-                setPromoError(null)
-                setSelectedBrand(b)
-                setStep(2)
-              }}
-            >
-              <div className="flex h-16 w-full max-w-[220px] shrink-0 items-center justify-center">
-                <Image
-                  src={b.logo}
-                  alt={b.name}
-                  width={240}
-                  height={96}
-                  className="max-h-16 w-auto max-w-full object-contain"
-                  unoptimized
-                />
-              </div>
-              <span className="text-center text-sm font-bold text-foreground">
-                {b.name}
-              </span>
-            </button>
-          ))}
+            {extendError ? (
+              <p className="text-destructive bg-destructive/5 rounded-lg px-3 py-2 text-center text-sm">
+                {extendError}
+              </p>
+            ) : null}
+            {wizardBrands.map((b) => (
+              <button
+                key={b.slug}
+                type="button"
+                className={cn(
+                  "flex min-h-[min(28vh,180px)] flex-1 cursor-pointer flex-col items-center justify-center gap-4 rounded-xl border-2 bg-white px-6 py-8 shadow-sm transition-all",
+                  "hover:bg-muted/30 hover:brightness-[0.99] active:scale-[0.99]",
+                )}
+                style={{ borderColor: b.colors.accent }}
+                onClick={() => {
+                  void (async () => {
+                    setExtendError(null)
+                    setCart([])
+                    setModalItem(null)
+                    setCartEditIndex(null)
+                    setPromoInput("")
+                    setPromoResult(null)
+                    setPromoError(null)
+                    const res = await updateOrderBrandPos({
+                      orderId: posOrderId,
+                      brandSlug: b.slug,
+                    })
+                    if (!res.success) {
+                      setExtendError(res.error)
+                      return
+                    }
+                    await syncBrandSlugOnOrdersPanel(b.slug)
+                    setSelectedBrand(b)
+                    setStep(2)
+                  })()
+                }}
+              >
+                <div className="flex h-16 w-full max-w-[220px] shrink-0 items-center justify-center">
+                  <Image
+                    src={b.logo}
+                    alt={b.name}
+                    width={240}
+                    height={96}
+                    className="max-h-16 w-auto max-w-full object-contain"
+                    unoptimized
+                  />
+                </div>
+                <span className="text-center text-sm font-bold text-foreground">
+                  {b.name}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+        {closeOrderDialog}
+      </>
     )
   }
 
   /* ── Шаг 2: выбор меню ── */
-  if (step === 2 && selectedBrand && !editOrderDetailsId) {
+  if (step === 2 && selectedBrand) {
     return (
-      <div className="flex h-full min-h-0 flex-col">
-        {/* Навигационная шапка */}
-        <FormHeader
-          leftSlot={
-            <>
-              <PosHeaderIconButton
-                aria-label="Назад"
-                onClick={() =>
-                  extendOrderId ? onExtendDone?.() : setStep(1)
-                }
-              >
-                <ArrowLeft className="size-4" />
-              </PosHeaderIconButton>
-              {extendOrderId && extendOrderNumber != null ? (
-                <span className="min-w-0 truncate text-sm font-bold text-foreground">
-                  {`Добавить к заказу #${extendOrderNumber}`}
-                </span>
-              ) : (
-                <PosBrandMark brandSlug={selectedBrand.slug} size="md" />
-              )}
-            </>
-          }
-          stepIndicator={stepIndicator}
-          onClose={onClose}
-        />
+      <>
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          <FormHeader
+            leftSlot={
+              <>
+                <PosHeaderIconButton
+                  aria-label="Назад"
+                  onClick={() => navigateToStep(1)}
+                  disabled={extendSubmitting}
+                >
+                  <ArrowLeft className="size-4" />
+                </PosHeaderIconButton>
+                {orderNumber != null ? (
+                  <span className="min-w-0 truncate text-sm font-bold text-foreground">
+                    {`Заказ #${orderNumber}`}
+                  </span>
+                ) : (
+                  <PosBrandMark brandSlug={selectedBrand.slug} size="md" />
+                )}
+              </>
+            }
+            stepIndicator={stepIndicator}
+            headerMenu={wizardHeaderMenu}
+            onClose={onClose}
+          />
 
-        {/* Контент: центр (меню) + правая панель (корзина) */}
-        <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
+          <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 pr-0">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
+                <Tabs
+                  value={activeCategoryId}
+                  onValueChange={setActiveCategoryId}
+                  className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                >
+                  <p className="text-muted-foreground shrink-0 px-4 pt-4 pb-3 text-center text-[11px] font-normal uppercase tracking-[0.08em]">
+                    Оформление заказа
+                  </p>
 
-          {/* ── ЦЕНТР: меню — белая карточка с отступом от серого острова ── */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 pr-0">
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
-              <Tabs
-                value={activeCategoryId}
-                onValueChange={setActiveCategoryId}
-                className="flex min-h-0 flex-1 flex-col overflow-hidden"
-              >
-                {/* Заголовок секции */}
-                <p className="shrink-0 px-4 pt-4 pb-3 text-center text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
-                  {extendOrderId ? "Добавить позиции" : "Оформление заказа"}
-                </p>
-
-                {/* Горизонтальные табы категорий */}
-                {categories.length > 0 && (
-                  <div className="shrink-0 px-3 pb-3">
-                    <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                      <div className="w-max min-w-full rounded-full bg-[#f2f2f2] p-1">
-                        <TabsList
-                          variant="pos"
-                          className="inline-flex h-auto min-h-8 w-max flex-nowrap items-center justify-start gap-1 border-0 bg-transparent p-0 shadow-none ring-0"
-                        >
-                          {categories.map((c) => (
-                            <TabsTrigger
-                              key={c.id}
-                              value={c.id}
-                              className="h-auto shrink-0 rounded-full px-3 py-1.5 text-xs"
-                            >
-                              {c.name_ru}
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
+                  {categories.length > 0 && (
+                    <div className="shrink-0 px-3 pb-3">
+                      <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                        <div className="w-max min-w-full rounded-full bg-[#f2f2f2] p-1">
+                          <TabsList
+                            variant="pos"
+                            className="inline-flex h-auto min-h-8 w-max flex-nowrap items-center justify-start gap-1 border-0 bg-transparent p-0 shadow-none ring-0"
+                          >
+                            {categories.map((c) => (
+                              <TabsTrigger
+                                key={c.id}
+                                value={c.id}
+                                className="h-auto shrink-0 rounded-full px-3 py-1.5 text-xs"
+                              >
+                                {c.name_ru}
+                              </TabsTrigger>
+                            ))}
+                          </TabsList>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Сетка товаров */}
-                {categories.length === 0 ? (
-                  <p className="p-4 text-center text-sm text-muted-foreground">
-                    Нет категорий меню для этого бренда.
-                  </p>
-                ) : (
-                  categories.map((c) => (
-                    <TabsContent
-                      key={c.id}
-                      value={c.id}
-                      className="mt-0 min-h-0 flex-1 overflow-y-auto px-3 pb-3 data-[state=inactive]:hidden"
-                    >
-                      {menuLoading ? (
-                        <p className="py-8 text-center text-sm text-muted-foreground">
-                          Загрузка меню…
-                        </p>
-                      ) : menuItems.length === 0 ? (
-                        <p className="py-8 text-center text-sm text-muted-foreground">
-                          Нет товаров в этой категории.
-                        </p>
-                      ) : (
-                        <div className="@container">
-                          <div className="grid grid-cols-2 gap-3 @[28rem]:grid-cols-3 @[40rem]:grid-cols-4">
-                            {menuItems.map((item) => (
-                              <ProductCard
-                                key={item.id}
-                                item={item}
-                                onAdd={() => handleProductClick(item)}
-                              />
-                            ))}
+                  {categories.length === 0 ? (
+                    <p className="text-muted-foreground p-4 text-center text-sm">
+                      Нет категорий меню для этого бренда.
+                    </p>
+                  ) : (
+                    categories.map((c) => (
+                      <TabsContent
+                        key={c.id}
+                        value={c.id}
+                        className="mt-0 min-h-0 flex-1 overflow-y-auto px-3 pb-3 data-[state=inactive]:hidden"
+                      >
+                        {menuLoading ? (
+                          <p className="text-muted-foreground py-8 text-center text-sm">
+                            Загрузка меню…
+                          </p>
+                        ) : menuItems.length === 0 ? (
+                          <p className="text-muted-foreground py-8 text-center text-sm">
+                            Нет товаров в этой категории.
+                          </p>
+                        ) : (
+                          <div className="@container">
+                            <div className="grid grid-cols-2 gap-3 @[28rem]:grid-cols-3 @[40rem]:grid-cols-4">
+                              {menuItems.map((item) => (
+                                <ProductCard
+                                  key={item.id}
+                                  item={item}
+                                  onAdd={() => handleProductClick(item)}
+                                />
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </TabsContent>
-                  ))
-                )}
-              </Tabs>
+                        )}
+                      </TabsContent>
+                    ))
+                  )}
+                </Tabs>
+              </div>
             </div>
-          </div>
 
-          {/* ── ПРАВАЯ ПАНЕЛЬ: корзина ── */}
-          <CartPanel
-            cart={cart}
-            cartCount={cartCount}
-            subtotalBani={subtotalBani}
-            onUpdateQty={updateQty}
-            onRemove={removeLine}
-            onOpenLine={(idx) => void openCartLineModal(idx)}
-            onNext={() =>
-              extendOrderId ? void submitExtendItems() : setStep(3)
-            }
-            nextLabel={
-              extendSubmitting
-                ? "Сохранение…"
-                : extendOrderId
-                  ? "Добавить к заказу"
-                  : "К оформлению"
-            }
-            nextDisabled={cart.length === 0 || extendSubmitting}
-            errorBanner={extendOrderId ? extendError : null}
-          />
+            <CartPanel
+              cart={cart}
+              cartCount={cartCount}
+              subtotalBani={subtotalBani}
+              onUpdateQty={updateQty}
+              onRemove={removeLine}
+              onOpenLine={(idx) => void openCartLineModal(idx)}
+              onNext={() => navigateToStep(3)}
+              nextLabel={extendSubmitting ? "Сохранение…" : "К деталям"}
+              nextDisabled={extendSubmitting}
+              errorBanner={extendError}
+              cartInteractionDisabled={cartInteractionDisabled}
+            />
+          </div>
         </div>
 
         <PosProductModal
           item={modalItem}
           onClose={closeProductModal}
-          onAdd={(c) => addCartItem(c)}
+          onAdd={(c) => void addCartItem(c)}
           cartEditDraft={
             cartEditIndex !== null &&
             modalItem &&
@@ -1391,55 +2006,48 @@ export function OrderForm({
                 }
               : null
           }
-          onCartEditSave={async (cartIndex, c) => {
-            setCart((prev) => {
-              const next = [...prev]
-              if (next[cartIndex]) next[cartIndex] = c
-              return next
-            })
-          }}
+          onCartEditSave={saveCartLineFromModal}
         />
-      </div>
+        {closeOrderDialog}
+      </>
     )
   }
 
   /* ── Шаг 3: оформление ── */
   return (
     <>
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         {/* Навигационная шапка */}
         <FormHeader
-        leftSlot={
-          <>
-            <PosHeaderIconButton
-              aria-label="Назад"
-              onClick={() =>
-                editOrderDetailsId
-                  ? onEditDetailsDone?.()
-                  : setStep(2)
-              }
-            >
-              <ArrowLeft className="size-4" />
-            </PosHeaderIconButton>
-            <span className="min-w-0 truncate text-sm font-bold text-foreground">
-              {editOrderDetailsId && extendOrderNumber != null
-                ? `Редактировать · #${extendOrderNumber}`
-                : "Оформление"}
-            </span>
-          </>
-        }
-        stepIndicator={stepIndicator}
-        onClose={onClose}
-      />
+          leftSlot={
+            <>
+              <PosHeaderIconButton
+                aria-label="Назад"
+                onClick={() => navigateToStep(2)}
+                disabled={submitting}
+              >
+                <ArrowLeft className="size-4" />
+              </PosHeaderIconButton>
+              <span className="min-w-0 truncate text-sm font-bold text-foreground">
+                {orderNumber != null
+                  ? `Заказ #${orderNumber} · Детали`
+                  : "Детали"}
+              </span>
+            </>
+          }
+          stepIndicator={stepIndicator}
+          headerMenu={wizardHeaderMenu}
+          onClose={onClose}
+        />
 
         {/* Контент: форма + сводка */}
-        <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden">
 
         {/* ── ЦЕНТР: форма — белая карточка в сером острове ── */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 pr-0">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
-            <p className="shrink-0 px-4 pt-4 pb-3 text-center text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
-              Данные заказа
+            <p className="text-muted-foreground shrink-0 px-4 pt-4 pb-3 text-center text-[11px] font-normal uppercase tracking-[0.08em]">
+              Детали заказа
             </p>
             <Form {...form}>
               <form
@@ -1455,13 +2063,33 @@ export function OrderForm({
                       <div className="grid grid-cols-2 gap-2">
                         <ModeButton
                           active={field.value === "delivery"}
-                          onClick={() => field.onChange("delivery")}
+                          onClick={() => {
+                            field.onChange("delivery")
+                            updateOrderLocalState(posOrderId, {
+                              delivery_mode: "delivery",
+                              updated_at: new Date().toISOString(),
+                            })
+                            clearDetailsDebounce()
+                            window.setTimeout(() => {
+                              void runDetailsSaveToServer()
+                            }, 0)
+                          }}
                           icon={<Truck className="size-4 shrink-0" />}
                           label="Доставка"
                         />
                         <ModeButton
                           active={field.value === "pickup"}
-                          onClick={() => field.onChange("pickup")}
+                          onClick={() => {
+                            field.onChange("pickup")
+                            updateOrderLocalState(posOrderId, {
+                              delivery_mode: "pickup",
+                              updated_at: new Date().toISOString(),
+                            })
+                            clearDetailsDebounce()
+                            window.setTimeout(() => {
+                              void runDetailsSaveToServer()
+                            }, 0)
+                          }}
                           icon={<ShoppingBag className="size-4 shrink-0" />}
                           label="Самовывоз"
                         />
@@ -1480,7 +2108,17 @@ export function OrderForm({
                         <FormItem>
                           <FormLabel className="text-xs text-muted-foreground">Имя</FormLabel>
                           <FormControl>
-                            <Input {...field} autoComplete="name" />
+                            <Input
+                              {...field}
+                              autoComplete="name"
+                              onChange={(e) => {
+                                field.onChange(e)
+                                const v = e.target.value
+                                patchDetailsCardAndScheduleSave({
+                                  user_name: v.trim() ? v : null,
+                                })
+                              }}
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -1500,6 +2138,14 @@ export function OrderForm({
                                 placeholder="XXXXXXXX"
                                 autoComplete="tel"
                                 className="pl-12"
+                                onChange={(e) => {
+                                  field.onChange(e)
+                                  patchDetailsCardAndScheduleSave({
+                                    user_phone: buildPhoneForSave(
+                                      e.target.value,
+                                    ),
+                                  })
+                                }}
                               />
                             </div>
                           </FormControl>
@@ -1510,39 +2156,142 @@ export function OrderForm({
                   </div>
 
                   {deliveryMode === "delivery" ? (
-                    <FormField
-                      control={form.control}
-                      name="deliveryAddress"
-                      render={({ field }) => (
-                        <FormItem className="mt-3">
-                          <FormLabel className="text-xs text-muted-foreground">Адрес доставки</FormLabel>
-                          <FormControl>
-                            <Input {...field} placeholder="Улица, дом, квартира" />
-                          </FormControl>
-                          <FormMessage />
-                          <DeliveryZoneInfo
-                            result={zoneResult}
-                            checking={zoneChecking}
-                            subtotalBani={subtotalBani}
-                          />
-                        </FormItem>
-                      )}
-                    />
+                    <>
+                      <FormField
+                        control={form.control}
+                        name="deliveryAddress"
+                        render={({ field }) => (
+                          <FormItem className="mt-3">
+                            <FormLabel className="text-xs text-muted-foreground">
+                              Улица и дом
+                            </FormLabel>
+                            <FormControl>
+                              <Input
+                                {...field}
+                                placeholder="Улица, дом"
+                                onChange={(e) => {
+                                  field.onChange(e)
+                                  patchDetailsCardAndScheduleSave({
+                                    delivery_address:
+                                      e.target.value.trim() || null,
+                                  })
+                                }}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        <FormField
+                          control={form.control}
+                          name="addressEntrance"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs text-muted-foreground">
+                                Подъезд
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  placeholder=""
+                                  onChange={(e) => {
+                                    field.onChange(e)
+                                    patchDetailsCardAndScheduleSave({
+                                      address_entrance:
+                                        e.target.value.trim() || null,
+                                    })
+                                  }}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="addressFloor"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs text-muted-foreground">
+                                Этаж
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  placeholder=""
+                                  onChange={(e) => {
+                                    field.onChange(e)
+                                    patchDetailsCardAndScheduleSave({
+                                      address_floor:
+                                        e.target.value.trim() || null,
+                                    })
+                                  }}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="addressApartment"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs text-muted-foreground">
+                                Квартира
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  placeholder=""
+                                  onChange={(e) => {
+                                    field.onChange(e)
+                                    patchDetailsCardAndScheduleSave({
+                                      address_apartment:
+                                        e.target.value.trim() || null,
+                                    })
+                                  }}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="addressIntercom"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs text-muted-foreground">
+                                Домофон
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  placeholder=""
+                                  onChange={(e) => {
+                                    field.onChange(e)
+                                    patchDetailsCardAndScheduleSave({
+                                      address_intercom:
+                                        e.target.value.trim() || null,
+                                    })
+                                  }}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <DeliveryZoneInfo
+                        result={zoneResult}
+                        checking={zoneChecking}
+                        subtotalBani={subtotalBani}
+                      />
+                    </>
                   ) : null}
 
-                  <FormField
-                    control={form.control}
-                    name="userBirthday"
-                    render={({ field }) => (
-                      <FormItem className="mt-3">
-                        <FormLabel className="text-xs text-muted-foreground">День рождения</FormLabel>
-                        <FormControl>
-                          <Input {...field} type="date" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                 </FormSection>
 
                 {/* ── Метод оплаты ── */}
@@ -1554,13 +2303,25 @@ export function OrderForm({
                       <div className="grid grid-cols-2 gap-2">
                         <ModeButton
                           active={field.value === "cash"}
-                          onClick={() => field.onChange("cash")}
+                          onClick={() => {
+                            field.onChange("cash")
+                            clearDetailsDebounce()
+                            window.setTimeout(() => {
+                              void runDetailsSaveToServer()
+                            }, 0)
+                          }}
                           icon={<Banknote className="size-4 shrink-0" />}
                           label="Наличными"
                         />
                         <ModeButton
                           active={field.value === "card"}
-                          onClick={() => field.onChange("card")}
+                          onClick={() => {
+                            field.onChange("card")
+                            clearDetailsDebounce()
+                            window.setTimeout(() => {
+                              void runDetailsSaveToServer()
+                            }, 0)
+                          }}
                           icon={<CreditCard className="size-4 shrink-0" />}
                           label="Картой курьеру"
                         />
@@ -1661,14 +2422,14 @@ export function OrderForm({
                   {submitting ? (
                     <span className="flex items-center gap-2">
                       <Loader2 className="size-4 shrink-0 animate-spin" />
-                      {editOrderDetailsId ? "Сохранение…" : "Создание…"}
+                      Сохранение…
                     </span>
-                  ) : editOrderDetailsId ? (
-                    "Сохранить изменения"
                   ) : (
-                    "Создать заказ"
+                    "Сохранить данные заказа"
                   )}
-                  {!submitting && <ChevronRight className="size-5 shrink-0" />}
+                  {!submitting && (
+                    <ChevronRight className="size-5 shrink-0" />
+                  )}
                 </button>
               </form>
             </Form>
@@ -1676,8 +2437,8 @@ export function OrderForm({
         </div>
 
         {/* ── ПРАВАЯ ПАНЕЛЬ: сводка заказа — белая карточка в сером острове ── */}
-        <div className="flex min-h-0 w-[300px] shrink-0 flex-col p-3 pl-0">
-          <aside className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
+        <div className="flex h-full min-h-0 w-[300px] shrink-0 flex-col overflow-hidden p-3 pl-0">
+          <aside className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
             <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-5 py-3.5">
               <span className="text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
                 Сводка
@@ -1693,12 +2454,16 @@ export function OrderForm({
               <div className="space-y-2 p-3 pr-2">
                 {cart.map((line, idx) => (
                   <CartItemRow
-                    key={`${line.menuItemId}-${line.size ?? "x"}-${idx}`}
+                    key={
+                      line.orderItemId ??
+                      `${line.menuItemId}-${line.size ?? "x"}-${idx}`
+                    }
                     line={line}
                     idx={idx}
                     onUpdateQty={updateQty}
                     onRemove={removeLine}
                     onOpenLine={(i) => void openCartLineModal(i)}
+                    cartInteractionDisabled={cartInteractionDisabled}
                   />
                 ))}
               </div>
@@ -1738,12 +2503,12 @@ export function OrderForm({
           </aside>
         </div>
       </div>
-      </div>
+    </div>
 
       <PosProductModal
         item={modalItem}
         onClose={closeProductModal}
-        onAdd={(c) => addCartItem(c)}
+        onAdd={(c) => void addCartItem(c)}
         cartEditDraft={
           cartEditIndex !== null &&
           modalItem &&
@@ -1760,14 +2525,9 @@ export function OrderForm({
               }
             : null
         }
-        onCartEditSave={async (cartIndex, c) => {
-          setCart((prev) => {
-            const next = [...prev]
-            if (next[cartIndex]) next[cartIndex] = c
-            return next
-          })
-        }}
+        onCartEditSave={saveCartLineFromModal}
       />
+      {closeOrderDialog}
     </>
   )
 }

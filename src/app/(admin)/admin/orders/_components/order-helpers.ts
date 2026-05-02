@@ -23,8 +23,16 @@ export function pluralPositions(n: number): string {
 
 export function statusLabel(s: OrderStatus): string {
   switch (s) {
+    case "draft":
+      return "Черновик"
     case "new":
       return "Новый"
+    case "confirmed":
+      return "Подтверждён"
+    case "cooking":
+      return "Готовится"
+    case "ready":
+      return "Готов"
     case "in_progress":
       return "В работе"
     case "delivering":
@@ -33,15 +41,21 @@ export function statusLabel(s: OrderStatus): string {
       return "Выполнен"
     case "cancelled":
       return "Отменён"
-    default:
-      return s
+    case "rejected":
+      return "Отклонён"
   }
 }
 
 export function statusBadgeClass(s: OrderStatus): string {
   switch (s) {
+    case "draft":
+      return "border-transparent bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
     case "new":
       return "border-transparent bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-100"
+    case "confirmed":
+      return "border-transparent bg-sky-100 text-sky-950 dark:bg-sky-950 dark:text-sky-100"
+    case "cooking":
+    case "ready":
     case "in_progress":
       return "border-transparent bg-amber-100 text-amber-950 dark:bg-amber-950 dark:text-amber-100"
     case "delivering":
@@ -49,9 +63,8 @@ export function statusBadgeClass(s: OrderStatus): string {
     case "done":
       return "border-transparent bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100"
     case "cancelled":
+    case "rejected":
       return "border-transparent bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-100"
-    default:
-      return ""
   }
 }
 
@@ -72,8 +85,8 @@ export function sizeLabelRu(size: string | null): string | null {
   return null
 }
 
-export function truncateAddress(text: string, maxLen: number): string {
-  const t = text.trim()
+export function truncateAddress(text: string | null | undefined, maxLen: number): string {
+  const t = (text ?? "").trim()
   if (t.length <= maxLen) return t
   return `${t.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`
 }

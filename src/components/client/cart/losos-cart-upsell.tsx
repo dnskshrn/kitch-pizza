@@ -40,9 +40,10 @@ function normalizeMenuRows(raw: unknown): MenuItem[] {
       menu_categories?: unknown
     }
     const variants = sortVariants(row.menu_item_variants)
-    const { menu_item_variants: _mv, menu_categories: _mc, ...rest } =
-      row as MenuItem & Record<string, unknown>
-    return { ...(rest as MenuItem), variants }
+    const stripped = { ...row } as Record<string, unknown>
+    delete stripped.menu_item_variants
+    delete stripped.menu_categories
+    return { ...(stripped as unknown as MenuItem), variants }
   })
 }
 

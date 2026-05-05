@@ -232,9 +232,8 @@ export function CartContent({
         }
         const brandId = (brandRow as { id: string }).id
 
-        const { data: catsRaw, error: cErr } = await (
-          supabase.from("menu_categories") as any
-        )
+        const { data: catsRaw, error: cErr } = await supabase
+          .from("menu_categories")
           .select("id")
           .eq("brand_id", brandId)
           .eq("is_active", true)
@@ -244,9 +243,8 @@ export function CartContent({
           return
         }
         const catIds = (catsRaw as { id: string }[]).map((c) => c.id)
-        const { data: itemsRaw, error: iErr } = await (
-          supabase.from("menu_items") as any
-        )
+        const { data: itemsRaw, error: iErr } = await supabase
+          .from("menu_items")
           .select(
             "id,name_ru,name_ro,image_url,weight_grams,price,is_default_condiment,condiment_default_qty,sort_order",
           )

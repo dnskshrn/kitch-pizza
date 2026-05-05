@@ -32,9 +32,8 @@ export async function ensureCondimentCategory(): Promise<string> {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
-  const { data: existing, error: selErr } = await (
-    supabase.from("menu_categories") as any
-  )
+  const { data: existing, error: selErr } = await supabase
+    .from("menu_categories")
     .select("id")
     .eq("brand_id", brandId)
     .eq("is_condiment", true)
@@ -45,9 +44,8 @@ export async function ensureCondimentCategory(): Promise<string> {
   const existingId = existing as { id: string } | null
   if (existingId?.id) return existingId.id
 
-  const { data: inserted, error: insErr } = await (
-    supabase.from("menu_categories") as any
-  )
+  const { data: inserted, error: insErr } = await supabase
+    .from("menu_categories")
     .insert({
       brand_id: brandId,
       name_ru: "Кондименты",
@@ -94,7 +92,8 @@ export async function createCondimentMenuItem(
 ): Promise<string> {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { data: row, error } = await (supabase.from("menu_items") as any)
+  const { data: row, error } = await supabase
+    .from("menu_items")
     .insert({
       brand_id: brandId,
       category_id: data.category_id,
@@ -135,7 +134,8 @@ export async function updateCondimentMenuItem(
 ) {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await (supabase.from("menu_items") as any)
+  const { error } = await supabase
+    .from("menu_items")
     .update({
       category_id: data.category_id,
       name_ru: data.name_ru,

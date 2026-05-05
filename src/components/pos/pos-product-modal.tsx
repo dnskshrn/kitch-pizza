@@ -154,7 +154,7 @@ export function PosProductModal({
     setEditSaveError(null)
     if (!item) return
 
-    let fromItem = sortVariantsPos(item.variants ?? [])
+    const fromItem = sortVariantsPos(item.variants ?? [])
 
     if (editDraft && isOrderLineEdit) {
       setQty(editDraft.qty)

@@ -40,6 +40,11 @@ function isValidCartItem(raw: unknown): raw is CartItem {
   const sz = o.selectedSize
   if (sz !== null && sz !== "l" && sz !== "s") return false
 
+  const vid = o.variantId
+  if (vid != null && typeof vid !== "string") return false
+  const vn = o.variantNameSnapshot
+  if (vn != null && typeof vn !== "string") return false
+
   if (!Array.isArray(o.selectedToppingIds)) return false
   if (!o.selectedToppingIds.every((id) => typeof id === "string")) return false
 
@@ -85,6 +90,10 @@ type CartState = {
     selectedSize: CartSelectedSize,
     toppingIds: string[],
     toppingsList: Topping[],
+    lineMeta?: {
+      variantId?: string | null
+      variantNameSnapshot?: string | null
+    },
   ) => void
   removeItem: (cartItemId: string) => void
   updateQuantity: (cartItemId: string, delta: 1 | -1) => void
@@ -242,10 +251,22 @@ export const useCartStore = create<CartState>()(
 
       removePromo: () => set({ appliedPromo: null, promoError: null }),
 
-      addItem: (menuItem, selectedSize, toppingIds, toppingsList) => {
+      addItem: (menuItem, selectedSize, toppingIds, toppingsList, lineMeta) => {
         set((state) => {
+          const variantId =
+            lineMeta?.variantId === undefined ? null : lineMeta.variantId
+          const variantNameSnapshot =
+            lineMeta?.variantNameSnapshot === undefined
+              ? null
+              : lineMeta.variantNameSnapshot
           const existing = state.items.find((entry) =>
-            isSameCartConfiguration(entry, menuItem, selectedSize, toppingIds),
+            isSameCartConfiguration(
+              entry,
+              menuItem,
+              selectedSize,
+              variantId,
+              toppingIds,
+            ),
           )
           let newItems: CartItem[]
           if (existing) {
@@ -263,6 +284,8 @@ export const useCartStore = create<CartState>()(
               id,
               menuItem,
               selectedSize,
+              variantId,
+              variantNameSnapshot,
               selectedToppingIds: [...toppingIds],
               toppingsList: [...toppingsList],
               quantity: 1,
@@ -360,8 +383,22 @@ export const useCartStore = create<CartState>()(
           return
         }
 
-        const cleaned = items.filter(isValidCartItem)
-        if (cleaned.length !== items.length) {
+        const cleaned = items
+          .filter(isValidCartItem)
+          .map((ci) => ({
+            ...ci,
+            variantId: ci.variantId ?? null,
+            variantNameSnapshot: ci.variantNameSnapshot ?? null,
+          }))
+        if (
+          cleaned.length !== items.length ||
+          items.some(
+            (raw, i) =>
+              (raw.variantId ?? null) !== (cleaned[i]?.variantId ?? null) ||
+              (raw.variantNameSnapshot ?? null) !==
+                (cleaned[i]?.variantNameSnapshot ?? null),
+          )
+        ) {
           useCartStore.setState({
             items: cleaned,
             savedAt,

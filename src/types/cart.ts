@@ -13,6 +13,10 @@ export type CartItem = {
   id: string
   menuItem: MenuItem
   selectedSize: CartSelectedSize
+  /** UUID варианта; для старых записей корзины может быть null при selectedSize s/l */
+  variantId: string | null
+  /** Локализованное имя варианта для order_items.size (текст); null — без имени или legacy s/l */
+  variantNameSnapshot: string | null
   selectedToppingIds: string[]
   toppingsList: Topping[]
   quantity: number

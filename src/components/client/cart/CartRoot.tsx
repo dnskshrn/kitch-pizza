@@ -29,7 +29,7 @@ function useIsMobileViewport() {
   return isMobile
 }
 
-export function CartRoot() {
+export function CartRoot({ brandSlug }: { brandSlug: string }) {
   const { t } = useLanguage()
   const isMobile = useIsMobileViewport()
   const isOpen = useCartStore((s) => s.isOpen)
@@ -52,10 +52,12 @@ export function CartRoot() {
       cartItem.selectedSize ?? undefined,
       cartItem.selectedToppingIds,
       cartItem.id,
+      cartItem.variantId ?? undefined,
     )
   }
 
   const contentProps = {
+    brandSlug,
     items,
     subtotal,
     itemCount,

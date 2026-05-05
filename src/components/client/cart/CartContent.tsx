@@ -16,6 +16,7 @@ import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { createClient } from "@/lib/supabase/client"
 import type { CartItem } from "@/types/cart"
+import type { Category } from "@/types/database"
 import { getBrandBySlug } from "@/brands"
 import {
   Check,
@@ -31,6 +32,10 @@ import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { CartItemCard } from "./CartItemCard"
+import {
+  LososUpsellCategoryStrip,
+  LososUpsellSlidePanel,
+} from "./losos-cart-upsell"
 
 /** Slug витрины: тот же источник, что `x-brand-slug` / `getBrand()` на сервере. */
 function getStorefrontBrandSlug(): string {
@@ -163,6 +168,7 @@ function CondimentDrawerRow({
 }
 
 type CartContentProps = {
+  brandSlug: string
   items: CartItem[]
   subtotal: number
   itemCount: number
@@ -173,6 +179,7 @@ type CartContentProps = {
 }
 
 export function CartContent({
+  brandSlug,
   items,
   subtotal,
   itemCount,
@@ -183,6 +190,7 @@ export function CartContent({
 }: CartContentProps) {
   const { lang, t } = useLanguage()
   const [codeInput, setCodeInput] = useState("")
+  const [upsellCategory, setUpsellCategory] = useState<Category | null>(null)
 
   const appliedPromo = useCartStore((s) => s.appliedPromo)
   const promoError = useCartStore((s) => s.promoError)
@@ -198,6 +206,10 @@ export function CartContent({
   const deliveryFeeBani = useDeliveryStore((s) =>
     s.getDeliveryFeeBani(subtotal),
   )
+
+  useEffect(() => {
+    if (!isOpen) setUpsellCategory(null)
+  }, [isOpen])
 
   const [condimentItems, setCondimentItems] = useState<CondimentMenuRow[]>([])
 
@@ -310,31 +322,32 @@ export function CartContent({
   }
 
   return (
-    <div className="storefront-modal-bg relative flex h-full min-h-0 flex-col overflow-hidden">
-      <header className="shrink-0 px-4 pb-6 pt-4 md:pb-7 md:pt-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <ShoppingBasket
-              className="size-6 shrink-0 text-[#242424]"
-              strokeWidth={2}
-              aria-hidden
-            />
-            <h2 className="text-[20px] font-bold leading-tight text-[#242424]">
-              {goodsPhrase(itemCount, lang)}
-            </h2>
+    <div className="storefront-modal-bg flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="shrink-0 px-4 pb-6 pt-4 md:pb-7 md:pt-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <ShoppingBasket
+                className="size-6 shrink-0 text-[#242424]"
+                strokeWidth={2}
+                aria-hidden
+              />
+              <h2 className="text-[20px] font-bold leading-tight text-[#242424]">
+                {goodsPhrase(itemCount, lang)}
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="storefront-modal-surface flex size-10 shrink-0 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
+              aria-label={t.cart.closeCart}
+            >
+              <X className="size-5" strokeWidth={2.5} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="storefront-modal-surface flex size-10 shrink-0 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/5"
-            aria-label={t.cart.closeCart}
-          >
-            <X className="size-5" strokeWidth={2.5} />
-          </button>
-        </div>
-      </header>
+        </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[112px] [-webkit-overflow-scrolling:touch]">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[112px] [-webkit-overflow-scrolling:touch]">
         <div className="space-y-3">
           {items.length === 0 ? (
             <div className="flex min-h-[120px] items-center justify-center rounded-[16px] py-8 text-center text-[rgba(36,36,36,0.5)]">
@@ -403,26 +416,14 @@ export function CartContent({
           </section>
         ) : null}
 
-        <section className="mt-4 shrink-0 pb-4 pt-1">
-          <p className="mb-2 text-xs text-[rgba(36,36,36,0.45)]">{t.cart.addToOrder}</p>
-          <div className="-mx-1 flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
-            {/* TODO: апселл — реальные категории «Соусы» / «Напитки» */}
-            <div className="storefront-modal-surface storefront-modal-card-radius w-[120px] shrink-0 rounded-[16px] p-3">
-              <div
-                className="mb-2 aspect-square w-full rounded-lg border border-dashed border-[#ddd]"
-                aria-hidden
-              />
-              <p className="text-center text-sm font-medium text-[#242424]">{t.cart.sauces}</p>
-            </div>
-            <div className="storefront-modal-surface storefront-modal-card-radius w-[120px] shrink-0 rounded-[16px] p-3">
-              <div
-                className="mb-2 aspect-square w-full rounded-lg border border-dashed border-[#ddd]"
-                aria-hidden
-              />
-              <p className="text-center text-sm font-medium text-[#242424]">{t.cart.drinks}</p>
-            </div>
-          </div>
-        </section>
+        {brandSlug === "losos" ? (
+          <LososUpsellCategoryStrip
+            cartIsOpen={isOpen}
+            lang={lang}
+            addToOrderHeading={t.cart.addToOrder}
+            onPickCategory={setUpsellCategory}
+          />
+        ) : null}
 
         <section className="shrink-0 pb-4 pt-1" aria-label={t.cart.promoAndDetails}>
           <div className="storefront-modal-surface storefront-modal-card-radius rounded-[20px] p-4">
@@ -510,40 +511,62 @@ export function CartContent({
             </div>
           </div>
         </section>
-      </div>
-
-      {/* Статичный нижний островок: только сумма + кнопка, чтобы товары получали больше места для скролла. */}
-      <section
-        className="pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
-        aria-label={t.cart.total}
-      >
-        <div className="storefront-modal-surface pointer-events-auto rounded-full p-2">
-          <div className="flex items-center gap-3">
-            <p className="pl-3 text-[20px] font-bold tabular-nums text-[#242424]">
-              {totalLei}
-            </p>
-            {isCartEmpty ? (
-              <button
-                type="button"
-                disabled
-                className="storefront-modal-cta flex flex-1 cursor-not-allowed items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold opacity-45"
-              >
-                {t.cart.checkout}
-                <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
-              </button>
-            ) : (
-              <Link
-                href="/checkout"
-                onClick={onClose}
-                className="storefront-modal-cta flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold transition-all hover:brightness-95 active:scale-[0.98]"
-              >
-                {t.cart.checkout}
-                <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
-              </Link>
-            )}
-          </div>
         </div>
-      </section>
+
+        {/* Статичный нижний островок: только сумма + кнопка, чтобы товары получали больше места для скролла. */}
+        <section
+          className="pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+          aria-label={t.cart.total}
+        >
+          <div className="storefront-modal-surface pointer-events-auto rounded-full p-2">
+            <div className="flex items-center gap-3">
+              <p className="pl-3 text-[20px] font-bold tabular-nums text-[#242424]">
+                {totalLei}
+              </p>
+              {isCartEmpty ? (
+                <button
+                  type="button"
+                  disabled
+                  className="storefront-modal-cta flex flex-1 cursor-not-allowed items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold opacity-45"
+                >
+                  {t.cart.checkout}
+                  <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
+                </button>
+              ) : (
+                <Link
+                  href="/checkout"
+                  onClick={onClose}
+                  className="storefront-modal-cta flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold transition-all hover:brightness-95 active:scale-[0.98]"
+                >
+                  {t.cart.checkout}
+                  <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
+                </Link>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {brandSlug === "losos" && upsellCategory ? (
+          <button
+            type="button"
+            aria-label={
+              lang === "RO"
+                ? "Închide lista de recomandări"
+                : "Закрыть список рекомендаций"
+            }
+            className="absolute inset-0 z-[8] bg-black/40 transition-opacity"
+            onClick={() => setUpsellCategory(null)}
+          />
+        ) : null}
+
+        {brandSlug === "losos" ? (
+          <LososUpsellSlidePanel
+            upsellCategory={upsellCategory}
+            onClose={() => setUpsellCategory(null)}
+            lang={lang}
+          />
+        ) : null}
+      </div>
     </div>
   )
 }

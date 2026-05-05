@@ -14,8 +14,13 @@ import {
   updateOrderItemCompositionPos,
   updateOrderItemQuantityPos,
 } from "@/lib/actions/pos/update-order-items"
+import { orderItemSizeDisplayLabel } from "@/lib/order-item-size-display"
+import {
+  POS_MENU_ITEM_FOR_MODAL_SELECT,
+  posMenuRowForModal,
+} from "@/lib/pos/menu-item-modal-row"
 import { createClient } from "@/lib/supabase/client"
-import type { MenuItem } from "@/types/database"
+import type { MenuItem, MenuItemVariant } from "@/types/database"
 import type { PosCartItem, PosOrderSource, PosOrderStatus } from "@/types/pos"
 import {
   CalendarDays,
@@ -130,6 +135,7 @@ type OrderItemRow = {
   id: string
   item_name: string
   menu_item_id: string | null
+  variant_id: string | null
   size: string | null
   quantity: number
   price: number
@@ -140,16 +146,15 @@ type OrderItemRow = {
 type EditMenuItemModalRow = Pick<
   MenuItem,
   | "id"
+  | "category_id"
   | "name_ru"
   | "description_ru"
   | "price"
   | "has_sizes"
-  | "size_s_price"
-  | "size_l_price"
-  | "size_s_label"
-  | "size_l_label"
   | "image_url"
 > & {
+  variants?: MenuItemVariant[] | null
+  menu_item_variants?: MenuItemVariant[] | null
   menu_item_topping_groups?: { id: string }[] | null
 }
 
@@ -478,13 +483,6 @@ export function OrderDetail({
     }
   }
 
-  const normalizedSizeFromLine = (line: OrderItemRow): "s" | "l" | null => {
-    const s = line.size?.toLowerCase() ?? ""
-    if (s === "s") return "s"
-    if (s === "l") return "l"
-    return null
-  }
-
   const openEditMenuItemModal = async (line: OrderItemRow) => {
     const menuId = line.menu_item_id
     if (!menuId || itemBusyId) return
@@ -494,9 +492,7 @@ export function OrderDetail({
       const supabase = createClient()
       const { data, error } = await supabase
         .from("menu_items")
-        .select(
-          "id, name_ru, description_ru, price, has_sizes, size_s_price, size_l_price, size_s_label, size_l_label, image_url, menu_item_topping_groups(id)",
-        )
+        .select(POS_MENU_ITEM_FOR_MODAL_SELECT)
         .eq("id", menuId)
         .maybeSingle()
 
@@ -508,7 +504,7 @@ export function OrderDetail({
         return
       }
       setProductEditModal({
-        menuRow: data as EditMenuItemModalRow,
+        menuRow: posMenuRowForModal(data as EditMenuItemModalRow),
         line,
       })
     } finally {
@@ -536,6 +532,7 @@ export function OrderDetail({
       menuItemId: cartPayload.menuItemId,
       itemName: displayName,
       size: cartPayload.size,
+      variantId: cartPayload.variantId ?? null,
       quantity: cartPayload.qty,
       unitPriceBani: cartPayload.price,
       toppings: toppingsDb,
@@ -753,7 +750,9 @@ export function OrderDetail({
                           <div className="min-w-0 flex-1">
                             <p className="line-clamp-1 text-[13px] font-bold leading-tight text-[#242424]">
                               {itemDisplayTitle(itemRow)}
-                              {itemRow.size ? ` · ${itemRow.size.toUpperCase()}` : ""}
+                              {orderItemSizeDisplayLabel(itemRow.size)
+                                ? ` · ${orderItemSizeDisplayLabel(itemRow.size)}`
+                                : ""}
                             </p>
                             {toppings.length > 0 ? (
                               <p className="mt-0.5 line-clamp-1 text-[11px] leading-tight text-[#808080]">
@@ -867,7 +866,8 @@ export function OrderDetail({
             ? {
                 orderItemId: productEditModal.line.id,
                 qty: productEditModal.line.quantity,
-                size: normalizedSizeFromLine(productEditModal.line),
+                size: productEditModal.line.size,
+                variantId: productEditModal.line.variant_id,
                 toppings: (productEditModal.line.toppings ?? []).flatMap((t) => {
                   const name = typeof t?.name === "string" ? t.name : ""
                   const priceRaw = typeof t?.price === "number" ? t.price : NaN

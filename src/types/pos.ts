@@ -20,7 +20,9 @@ export type PosOrderSource = "website" | "pos"
 export type PosCartItem = {
   menuItemId: string
   name: string
-  size: "s" | "l" | null
+  /** Снимок для order_items.size: исторически `'s'`/`'l'`, либо подпись варианта */
+  size: string | null
+  variantId?: string | null
   price: number
   qty: number
   imageUrl?: string

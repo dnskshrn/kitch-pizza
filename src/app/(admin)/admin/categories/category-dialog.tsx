@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
+import { useEffect, useRef, useState, useTransition } from "react"
 import type { Category } from "@/types/database"
 import { createCategory, updateCategory } from "./actions"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -14,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { Upload } from "lucide-react"
 
 function slugFromName(name: string | undefined) {
   return (name ?? "")
@@ -32,11 +34,15 @@ type Props = {
 }
 
 export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [nameRu, setNameRu] = useState("")
   const [nameRo, setNameRo] = useState("")
   const [slug, setSlug] = useState("")
   const [sortOrder, setSortOrder] = useState(0)
   const [isActive, setIsActive] = useState(true)
+  const [imageUrl, setImageUrl] = useState("")
+  const [showInUpsell, setShowInUpsell] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [pending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -47,12 +53,16 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
       setSlug(category.slug ?? "")
       setSortOrder(category.sort_order)
       setIsActive(category.is_active)
+      setImageUrl(category.image_url ?? "")
+      setShowInUpsell(category.show_in_upsell ?? false)
     } else {
       setNameRu("")
       setNameRo("")
       setSlug("")
       setSortOrder(0)
       setIsActive(true)
+      setImageUrl("")
+      setShowInUpsell(false)
     }
   }, [open, mode, category])
 
@@ -74,6 +84,8 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
       slug: (slug ?? "").trim() || slugFromName(nameRu),
       sort_order: sortOrder,
       is_active: isActive,
+      image_url: (imageUrl ?? "").trim() || null,
+      show_in_upsell: showInUpsell,
     }
     startTransition(async () => {
       try {
@@ -88,6 +100,30 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
         alert(e instanceof Error ? e.message : "Ошибка сохранения")
       }
     })
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const supabase = createClient()
+      const safeName = file.name.replace(/[^\w.\-]+/g, "_")
+      const path = `categories/${Date.now()}-${safeName}`
+      const { error } = await supabase.storage.from("menu-images").upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+      })
+      if (error) throw error
+      const { data } = supabase.storage.from("menu-images").getPublicUrl(path)
+      setImageUrl(data.publicUrl)
+    } catch (err) {
+      console.error(err)
+      alert(err instanceof Error ? err.message : "Ошибка загрузки")
+    } finally {
+      setUploading(false)
+      e.target.value = ""
+    }
   }
 
   return (
@@ -144,6 +180,52 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
               value={sortOrder}
               onChange={(e) => setSortOrder(Number(e.target.value) || 0)}
             />
+          </div>
+          <div className="grid gap-2">
+            <Label>Фото категории</Label>
+            {imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={imageUrl}
+                alt=""
+                className="mb-2 aspect-square w-full max-w-[200px] rounded-md object-cover"
+              />
+            ) : null}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageUpload}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-4 w-4" />
+              {uploading ? "Загрузка..." : "Загрузить фото"}
+            </Button>
+            <p className="text-muted-foreground text-xs">
+              или вставьте URL ниже
+            </p>
+            <Input
+              value={imageUrl ?? ""}
+              onChange={(e) => setImageUrl(e.target.value)}
+              placeholder="или вставьте URL"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="cat-show-upsell"
+              checked={showInUpsell}
+              onCheckedChange={setShowInUpsell}
+            />
+            <Label htmlFor="cat-show-upsell">
+              Показывать в апсейле корзины
+            </Label>
           </div>
           <div className="flex items-center gap-2">
             <Switch

@@ -192,7 +192,8 @@ export async function addOrderItemsPos({
   lines: Array<{
     menuItemId: string
     name: string
-    size: "s" | "l" | null
+    size: string | null
+    variantId?: string | null
     unitPriceBani: number
     qty: number
     toppings: { name: string; price: number }[]
@@ -211,6 +212,7 @@ export async function addOrderItemsPos({
   const inserts = lines.map((line) => ({
     order_id: orderId,
     menu_item_id: line.menuItemId,
+    variant_id: line.variantId ?? null,
     lunch_set_id: null as string | null,
     item_name: line.name,
     size: line.size,
@@ -270,7 +272,8 @@ export async function replaceOrderItemsPos({
   lines: Array<{
     menuItemId: string
     name: string
-    size: "s" | "l" | null
+    size: string | null
+    variantId?: string | null
     unitPriceBani: number
     qty: number
     toppings: { name: string; price: number }[]
@@ -298,6 +301,7 @@ export async function replaceOrderItemsPos({
     const inserts = lines.map((line) => ({
       order_id: orderId,
       menu_item_id: line.menuItemId,
+      variant_id: line.variantId ?? null,
       lunch_set_id: null as string | null,
       item_name: line.name,
       size: line.size,
@@ -351,6 +355,7 @@ export async function updateOrderItemCompositionPos({
   menuItemId,
   itemName,
   size,
+  variantId,
   quantity,
   unitPriceBani,
   toppings,
@@ -359,7 +364,8 @@ export async function updateOrderItemCompositionPos({
   itemId: string
   menuItemId: string
   itemName: string
-  size: "s" | "l" | null
+  size: string | null
+  variantId?: string | null
   quantity: number
   unitPriceBani: number
   toppings: { name: string; price: number }[]
@@ -387,6 +393,7 @@ export async function updateOrderItemCompositionPos({
     .from("order_items")
     .update({
       menu_item_id: menuItemId,
+      variant_id: variantId ?? null,
       item_name: itemName,
       size,
       quantity: nextQuantity,

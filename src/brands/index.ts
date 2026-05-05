@@ -96,3 +96,6 @@ export function getBrandBySlug(slug: string): BrandConfig {
   const normalized = normalizePosBrandSlug(key)
   return brands.find((b) => b.slug === normalized) ?? brands[0]
 }
+
+/** Slug бренда LOSOS в БД (`brands.slug`) и на витрине. */
+export const LOSOS_BRAND_SLUG = "losos" as const

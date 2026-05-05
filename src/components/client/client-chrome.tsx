@@ -60,7 +60,7 @@ export function ClientChrome({
         <StorefrontHaptics />
         <ProductModalRoot />
         <DeliveryRoot />
-        <CartRoot />
+        <CartRoot brandSlug={brandSlug} />
         {/* <AuthModal /> */}
         <main className="flex-1">{children}</main>
       </>
@@ -77,7 +77,7 @@ export function ClientChrome({
       )}
       <ProductModalRoot />
       <DeliveryRoot />
-      <CartRoot />
+      <CartRoot brandSlug={brandSlug} />
       {/* <AuthModal /> */}
       <main className="flex-1">{children}</main>
     </>

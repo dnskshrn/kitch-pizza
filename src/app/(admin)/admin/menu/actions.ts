@@ -62,13 +62,7 @@ export async function createMenuItem(data: {
   image_url: string
   has_sizes: boolean
   weight_grams: number | null
-  size_s_weight: number | null
-  size_l_weight: number | null
   price: number | null
-  size_s_label: string | null
-  size_l_label: string | null
-  size_s_price: number | null
-  size_l_price: number | null
   is_active: boolean
   sort_order: number
   discount_percent: number | null
@@ -88,13 +82,7 @@ export async function createMenuItem(data: {
       image_url: data.image_url.trim() || null,
       has_sizes: data.has_sizes,
       weight_grams: data.weight_grams,
-      size_s_weight: data.size_s_weight,
-      size_l_weight: data.size_l_weight,
       price: data.price,
-      size_s_label: data.size_s_label,
-      size_l_label: data.size_l_label,
-      size_s_price: data.size_s_price,
-      size_l_price: data.size_l_price,
       is_active: data.is_active,
       sort_order: data.sort_order,
       discount_percent: data.discount_percent,
@@ -119,13 +107,7 @@ export async function updateMenuItem(
     image_url: string
     has_sizes: boolean
     weight_grams: number | null
-    size_s_weight: number | null
-    size_l_weight: number | null
     price: number | null
-    size_s_label: string | null
-    size_l_label: string | null
-    size_s_price: number | null
-    size_l_price: number | null
     is_active: boolean
     sort_order: number
     discount_percent: number | null
@@ -145,13 +127,7 @@ export async function updateMenuItem(
       image_url: data.image_url.trim() || null,
       has_sizes: data.has_sizes,
       weight_grams: data.weight_grams,
-      size_s_weight: data.size_s_weight,
-      size_l_weight: data.size_l_weight,
       price: data.price,
-      size_s_label: data.size_s_label,
-      size_l_label: data.size_l_label,
-      size_s_price: data.size_s_price,
-      size_l_price: data.size_l_price,
       is_active: data.is_active,
       sort_order: data.sort_order,
       discount_percent: data.discount_percent,

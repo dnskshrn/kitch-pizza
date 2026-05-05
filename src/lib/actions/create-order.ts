@@ -50,12 +50,23 @@ function toppingsPayload(cartItem: CartItem, lang: CartLang) {
     .filter((x): x is { name: string; price: number } => x != null)
 }
 
-function sizeForOrderItem(cartItem: CartItem): "s" | "l" | null {
-  if (!cartItem.menuItem.has_sizes) return null
-  if (cartItem.selectedSize === "l" || cartItem.selectedSize === "s") {
-    return cartItem.selectedSize
+function orderItemSizeAndVariantForInsert(ci: CartItem): {
+  size: string | null
+  variant_id: string | null
+} {
+  if (!ci.menuItem.has_sizes) {
+    return { size: null, variant_id: null }
   }
-  return null
+  if (ci.variantId) {
+    return {
+      size: ci.variantNameSnapshot?.trim() || null,
+      variant_id: ci.variantId,
+    }
+  }
+  if (ci.selectedSize === "s" || ci.selectedSize === "l") {
+    return { size: ci.selectedSize, variant_id: null }
+  }
+  return { size: null, variant_id: null }
 }
 
 async function sendTelegramNotification(order: {
@@ -187,13 +198,15 @@ export async function executeCreateOrder(
   const rows = payload.items.map((ci) => {
     const unitBani = getCartItemPrice(ci)
     const lineTotalBani = unitBani * ci.quantity
+    const { size, variant_id } = orderItemSizeAndVariantForInsert(ci)
     return {
       order_id: orderId,
       menu_item_id: ci.menuItem.id,
       lunch_set_id: null as string | null,
+      variant_id,
       item_name:
         lang === "RO" ? ci.menuItem.name_ro : ci.menuItem.name_ru,
-      size: sizeForOrderItem(ci),
+      size,
       quantity: ci.quantity,
       toppings: toppingsPayload(ci, lang),
       price: lineTotalBani,
@@ -204,6 +217,7 @@ export async function executeCreateOrder(
     order_id: orderId,
     menu_item_id: line.menu_item_id,
     lunch_set_id: null as string | null,
+    variant_id: null as string | null,
     item_name: line.item_name,
     size: null as null,
     quantity: line.quantity,
@@ -247,19 +261,22 @@ export async function executeCreateOrder(
     comment: payload.comment?.trim() ?? null,
     items: payload.items.map((ci) => {
       const unitBani = getCartItemPrice(ci)
-      const sz = sizeForOrderItem(ci)
-      const sizeLabel =
-        sz === "s"
-          ? ci.menuItem.size_s_label?.trim() || "S"
-          : sz === "l"
-            ? ci.menuItem.size_l_label?.trim() || "L"
-            : undefined
+      const { size } = orderItemSizeAndVariantForInsert(ci)
+      let sizeTelegram: string | undefined
+      if (typeof size === "string" && size.length > 0) {
+        const lower = size.toLowerCase()
+        if (lower === "s" || lower === "l") {
+          sizeTelegram = lower === "s" ? "S" : "L"
+        } else {
+          sizeTelegram = size
+        }
+      }
       return {
         item_name:
           lang === "RO" ? ci.menuItem.name_ro : ci.menuItem.name_ru,
         quantity: ci.quantity,
         price: unitBani,
-        ...(sizeLabel ? { size: sizeLabel } : {}),
+        ...(sizeTelegram ? { size: sizeTelegram } : {}),
       }
     }),
   }).catch(() => {})

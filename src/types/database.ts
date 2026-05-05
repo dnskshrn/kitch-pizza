@@ -6,6 +6,19 @@ export type Category = {
   sort_order: number
   is_active: boolean
   created_at: string
+  image_url: string | null
+  show_in_upsell: boolean
+}
+
+export type MenuItemVariant = {
+  id: string
+  menu_item_id: string
+  name_ru: string
+  name_ro: string
+  price: number
+  weight_grams: number | null
+  sort_order: number
+  created_at: string
 }
 
 export type MenuItem = {
@@ -20,17 +33,7 @@ export type MenuItem = {
   has_sizes: boolean
   /** Вес в граммах для позиции без размеров (has_sizes = false). */
   weight_grams: number | null
-  /** Вес S (30 см), граммы. */
-  size_s_weight: number | null
-  /** Вес L (33 см), граммы. */
-  size_l_weight: number | null
   price: number | null
-  /** Подпись варианта S (напр. «30см», «6шт.»). */
-  size_s_label: string | null
-  /** Подпись варианта L (напр. «33см», «9шт.»). */
-  size_l_label: string | null
-  size_s_price: number | null
-  size_l_price: number | null
   is_active: boolean
   sort_order: number
   created_at: string
@@ -41,6 +44,7 @@ export type MenuItem = {
   /** Позиции, входящие в заказ (соусы, приборы и т.п.). */
   included_items?: { name_ru: string; name_ro: string }[] | null
   category?: Category
+  variants?: MenuItemVariant[]
 }
 
 export type ToppingGroup = {
@@ -212,6 +216,7 @@ export interface OrderItem {
   order_id: string
   menu_item_id: string | null
   lunch_set_id: string | null
+  variant_id: string | null
   item_name: string
   size: string | null
   quantity: number

@@ -1,53 +1,58 @@
 "use client"
 
-import type { MenuItem } from "@/types/database"
+import type { Lang } from "@/lib/i18n/storefront"
+import type { MenuItemVariant } from "@/types/database"
 import { cn } from "@/lib/utils"
 
+/** Исторический тип для строк корзины до вариантов. */
 export type PizzaSize = "l" | "s"
 
-export type SizeSelectorProps = {
-  selectedSize: PizzaSize
-  onSizeChange: (size: PizzaSize) => void
-  item: MenuItem
+export function pickVariantLabel(
+  variant: MenuItemVariant,
+  lang: Lang,
+): string {
+  if (lang === "RO") {
+    return variant.name_ro?.trim() || variant.name_ru.trim()
+  }
+  return variant.name_ru.trim() || variant.name_ro?.trim() || ""
 }
 
-/** Подпись варианта для витрины; пусто в БД → «S» / «L». */
-export function getItemSizeLabel(item: MenuItem, size: PizzaSize): string {
-  const raw = size === "l" ? item.size_l_label : item.size_s_label
-  const t = raw?.trim()
-  return t && t.length > 0 ? t : size === "l" ? "L" : "S"
+export type VariantSelectorProps = {
+  variants: MenuItemVariant[]
+  selectedVariantId: string | null
+  onVariantChange: (variantId: string) => void
+  lang: Lang
 }
 
-export function SizeSelector({ selectedSize, onSizeChange, item }: SizeSelectorProps) {
-  const labelS = getItemSizeLabel(item, "s")
-  const labelL = getItemSizeLabel(item, "l")
+export function VariantSelector({
+  variants,
+  selectedVariantId,
+  onVariantChange,
+  lang,
+}: VariantSelectorProps) {
+  if (variants.length === 0) return null
 
   return (
-    <div className="storefront-modal-field flex w-full gap-1 rounded-full p-1 transition-all duration-200">
-      <button
-        type="button"
-        onClick={() => onSizeChange("s")}
-        className={cn(
-          "flex-1 cursor-pointer rounded-full py-2 text-center text-[16px] transition-all duration-200",
-          selectedSize === "s"
-            ? "storefront-modal-mode-active font-bold shadow-sm hover:shadow-md"
-            : "font-medium text-[rgba(36,36,36,0.5)] hover:bg-white/50 hover:text-[#242424]",
-        )}
-      >
-        {labelS}
-      </button>
-      <button
-        type="button"
-        onClick={() => onSizeChange("l")}
-        className={cn(
-          "flex-1 cursor-pointer rounded-full py-2 text-center text-[16px] transition-all duration-200",
-          selectedSize === "l"
-            ? "storefront-modal-mode-active font-bold shadow-sm hover:shadow-md"
-            : "font-medium text-[rgba(36,36,36,0.5)] hover:bg-white/50 hover:text-[#242424]",
-        )}
-      >
-        {labelL}
-      </button>
+    <div className="storefront-modal-field flex w-full flex-wrap gap-2 rounded-[12px] p-1 transition-all duration-200">
+      {variants.map((v) => {
+        const label = pickVariantLabel(v, lang)
+        const sel = selectedVariantId === v.id
+        return (
+          <button
+            key={v.id}
+            type="button"
+            onClick={() => onVariantChange(v.id)}
+            className={cn(
+              "min-h-11 min-w-0 flex-1 cursor-pointer rounded-full px-2 py-2 text-center text-[15px] transition-all duration-200 md:text-[16px]",
+              sel
+                ? "storefront-modal-mode-active font-bold shadow-sm hover:shadow-md"
+                : "font-medium text-[rgba(36,36,36,0.5)] hover:bg-white/50 hover:text-[#242424]",
+            )}
+          >
+            {label}
+          </button>
+        )
+      })}
     </div>
   )
 }

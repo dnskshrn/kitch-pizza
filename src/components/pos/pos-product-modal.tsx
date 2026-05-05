@@ -10,29 +10,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import type { MenuItem } from "@/types/database"
+import type { MenuItem, MenuItemVariant } from "@/types/database"
 import type { PosCartItem } from "@/types/pos"
 import { createBrowserClient } from "@supabase/ssr"
 import { Loader2, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { nextSelectedByGroupWithCap } from "@/lib/topping-max-selection"
 import Image from "next/image"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 /** Поля меню, нужные для модалки POS (совместимо с выборкой из `menu_items`). */
 export type PosProductModalMenuItem = Pick<
   MenuItem,
-  | "id"
-  | "name_ru"
-  | "description_ru"
-  | "image_url"
-  | "has_sizes"
-  | "price"
-  | "size_s_price"
-  | "size_l_price"
-  | "size_s_label"
-  | "size_l_label"
->
+  "id" | "name_ru" | "description_ru" | "image_url" | "has_sizes" | "price"
+> & {
+  variants?: MenuItemVariant[] | null
+}
 
 type UiTopping = {
   id: string
@@ -61,11 +54,42 @@ function normalizeOne<T>(v: T | T[] | null | undefined): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v
 }
 
+function sortVariantsPos(list: MenuItemVariant[]): MenuItemVariant[] {
+  return [...list].sort(
+    (a, b) =>
+      a.sort_order - b.sort_order || a.name_ru.localeCompare(b.name_ru),
+  )
+}
+
+/** Выбор варианта по данным строки заказа / корзины. */
+function resolvePosVariantSelection(
+  rows: MenuItemVariant[],
+  variantId: string | null | undefined,
+  sizeSnap: string | null | undefined,
+): string | null {
+  if (rows.length === 0) return null
+  if (variantId && rows.some((v) => v.id === variantId)) return variantId
+  const s = sizeSnap?.toLowerCase()?.trim()
+  if (s === "s") return rows[0]!.id
+  if (s === "l") return rows[Math.min(1, rows.length - 1)]!.id
+  const raw = sizeSnap?.trim()
+  if (raw) {
+    const byName = rows.find(
+      (v) =>
+        v.name_ru.trim() === raw ||
+        v.name_ro.trim() === raw,
+    )
+    if (byName) return byName.id
+  }
+  return rows[0]!.id
+}
+
 /** Предзаполнение при редактировании уже сохранённой строки заказа в POS. */
 export type PosProductModalEditDraft = {
   orderItemId: string
   qty: number
-  size: "s" | "l" | null
+  size: string | null
+  variantId: string | null
   toppings: { name: string; price: number }[]
 }
 
@@ -73,7 +97,8 @@ export type PosProductModalEditDraft = {
 export type PosProductModalCartEditDraft = {
   cartIndex: number
   qty: number
-  size: "s" | "l" | null
+  size: string | null
+  variantId: string | null
   toppings: { name: string; price: number }[]
 }
 
@@ -103,7 +128,10 @@ export function PosProductModal({
   onCartEditSave,
 }: PosProductModalProps) {
   const [qty, setQty] = useState(1)
-  const [selectedSize, setSelectedSize] = useState<"s" | "l" | null>(null)
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
+    null,
+  )
+  const [variantRows, setVariantRows] = useState<MenuItemVariant[]>([])
   const [selectedByGroup, setSelectedByGroup] = useState<Record<string, string[]>>(
     {},
   )
@@ -113,33 +141,88 @@ export function PosProductModal({
   const [editSaving, setEditSaving] = useState(false)
   const [editSaveError, setEditSaveError] = useState<string | null>(null)
 
+  const sortedVariants = useMemo(
+    () => sortVariantsPos(variantRows),
+    [variantRows],
+  )
+
   const isOrderLineEdit = Boolean(editDraft && onEditSave)
   const isCartEdit = Boolean(cartEditDraft && onCartEditSave)
   const isEditMode = isOrderLineEdit || isCartEdit
 
-  const resetForItem = useCallback((next: PosProductModalMenuItem) => {
-    setQty(1)
-    setSelectedSize(next.has_sizes ? "s" : null)
-    setSelectedByGroup({})
-    setGroups([])
-    setGroupsError(null)
-  }, [])
-
   useEffect(() => {
     setEditSaveError(null)
     if (!item) return
+
+    let fromItem = sortVariantsPos(item.variants ?? [])
+
     if (editDraft && isOrderLineEdit) {
       setQty(editDraft.qty)
-      setSelectedSize(item.has_sizes ? (editDraft.size ?? "s") : null)
+      if (fromItem.length > 0) {
+        setSelectedVariantId(
+          resolvePosVariantSelection(
+            fromItem,
+            editDraft.variantId,
+            editDraft.size,
+          ),
+        )
+      }
       setSelectedByGroup({})
     } else if (cartEditDraft && isCartEdit) {
       setQty(cartEditDraft.qty)
-      setSelectedSize(item.has_sizes ? (cartEditDraft.size ?? "s") : null)
+      if (fromItem.length > 0) {
+        setSelectedVariantId(
+          resolvePosVariantSelection(
+            fromItem,
+            cartEditDraft.variantId,
+            cartEditDraft.size,
+          ),
+        )
+      }
       setSelectedByGroup({})
     } else {
-      resetForItem(item)
+      setQty(1)
+      if (fromItem.length > 0) {
+        setSelectedVariantId(fromItem[0]!.id)
+      } else setSelectedVariantId(null)
+      setSelectedByGroup({})
+      setGroups([])
+      setGroupsError(null)
     }
-  }, [item, editDraft, cartEditDraft, isOrderLineEdit, isCartEdit, resetForItem])
+  }, [item, editDraft, cartEditDraft, isOrderLineEdit, isCartEdit])
+
+  /** Когда строки заказа пришли с сервера без embed вариантов — подстройка после fetch. */
+  useEffect(() => {
+    if (!item?.has_sizes || sortedVariants.length === 0) return
+    if (!(editDraft && isOrderLineEdit) && !(cartEditDraft && isCartEdit))
+      return
+    if (editDraft && isOrderLineEdit) {
+      setSelectedVariantId(
+        resolvePosVariantSelection(
+          sortedVariants,
+          editDraft.variantId,
+          editDraft.size,
+        ),
+      )
+      return
+    }
+    if (cartEditDraft && isCartEdit) {
+      setSelectedVariantId(
+        resolvePosVariantSelection(
+          sortedVariants,
+          cartEditDraft.variantId,
+          cartEditDraft.size,
+        ),
+      )
+    }
+  }, [
+    item?.has_sizes,
+    sortedVariants,
+    editDraft,
+    cartEditDraft,
+    isOrderLineEdit,
+    isCartEdit,
+  ])
 
   useEffect(() => {
     if (!item) return
@@ -174,6 +257,7 @@ export function PosProductModal({
   useEffect(() => {
     if (!item) {
       setGroups([])
+      setVariantRows([])
       setGroupsLoading(false)
       return
     }
@@ -182,29 +266,46 @@ export function PosProductModal({
     setGroupsLoading(true)
     setGroupsError(null)
 
+    setVariantRows(
+      item.variants?.length ? sortVariantsPos(item.variants) : [],
+    )
+
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     )
 
     void (async () => {
-      const { data, error } = await supabase
-        .from("menu_item_topping_groups")
-        .select(
-          "topping_groups(id, name_ru, sort_order, max_selections, toppings(id, name_ru, price, image_url, is_active, sort_order))",
-        )
-        .eq("menu_item_id", item.id)
+      const [vRes, toppingsRes] = await Promise.all([
+        supabase
+          .from("menu_item_variants")
+          .select("*")
+          .eq("menu_item_id", item.id)
+          .order("sort_order", { ascending: true }),
+        supabase
+          .from("menu_item_topping_groups")
+          .select(
+            "topping_groups(id, name_ru, sort_order, max_selections, toppings(id, name_ru, price, image_url, is_active, sort_order))",
+          )
+          .eq("menu_item_id", item.id),
+      ])
 
       if (cancelled) return
       setGroupsLoading(false)
 
-      if (error) {
-        setGroupsError(error.message)
+      if (!vRes.error && Array.isArray(vRes.data) && vRes.data.length > 0) {
+        setVariantRows(vRes.data as MenuItemVariant[])
+      } else if (!item.variants?.length) {
+        setVariantRows([])
+      }
+
+      if (toppingsRes.error) {
+        setGroupsError(toppingsRes.error.message)
         setGroups([])
         return
       }
 
-      const rows = (data ?? []) as Array<{
+      const rows = (toppingsRes.data ?? []) as Array<{
         topping_groups:
           | {
               id: string
@@ -279,11 +380,13 @@ export function PosProductModal({
 
   const sizeUnitBani = useMemo(() => {
     if (!item) return 0
-    if (!item.has_sizes) return item.price ?? 0
-    if (selectedSize === "l") return item.size_l_price ?? item.price ?? 0
-    if (selectedSize === "s") return item.size_s_price ?? item.price ?? 0
-    return 0
-  }, [item, selectedSize])
+    if (!item.has_sizes || sortedVariants.length === 0) {
+      return item.price ?? 0
+    }
+    if (!selectedVariantId) return 0
+    const v = sortedVariants.find((x) => x.id === selectedVariantId)
+    return v?.price ?? item.price ?? 0
+  }, [item, sortedVariants, selectedVariantId])
 
   const toppingMetaById = useMemo(() => {
     const m = new Map<string, UiTopping>()
@@ -327,15 +430,25 @@ export function PosProductModal({
 
   const canAdd =
     item &&
-    (!item.has_sizes || selectedSize !== null) &&
+    (!item.has_sizes ||
+      sortedVariants.length === 0 ||
+      selectedVariantId !== null) &&
     unitTotalBani > 0
 
   const handlePrimaryAction = async () => {
     if (!item || !canAdd || editSaving) return
+    let sizeSnap: string | null = null
+    let vid: string | null = null
+    if (item.has_sizes && sortedVariants.length > 0 && selectedVariantId) {
+      const vsel = sortedVariants.find((x) => x.id === selectedVariantId)
+      vid = selectedVariantId
+      sizeSnap = vsel?.name_ru.trim() ?? null
+    }
     const payload: PosCartItem = {
       menuItemId: item.id,
       name: item.name_ru,
-      size: item.has_sizes ? selectedSize : null,
+      size: sizeSnap,
+      variantId: vid,
       price: unitTotalBani,
       qty,
       imageUrl: item.image_url ?? undefined,
@@ -416,34 +529,26 @@ export function PosProductModal({
               <p className="text-muted-foreground mt-2 text-sm">
                 {!item.has_sizes
                   ? `${formatLei(item.price ?? 0)} MDL`
-                  : `от ${formatLei(
-                      Math.min(
-                        item.size_s_price ?? item.price ?? 0,
-                        item.size_l_price ?? item.price ?? 0,
-                      ),
-                    )} MDL`}
+                  : sortedVariants.length === 0
+                    ? `${formatLei(item.price ?? 0)} MDL`
+                    : `от ${formatLei(
+                        Math.min(...sortedVariants.map((v) => v.price)),
+                      )} MDL`}
               </p>
 
-              {item.has_sizes ? (
+              {item.has_sizes && sortedVariants.length > 0 ? (
                 <div className="mt-4 flex flex-col gap-3 min-[380px]:grid min-[380px]:grid-cols-2 min-[380px]:gap-4">
-                  <Button
-                    type="button"
-                    variant={selectedSize === "s" ? "default" : "outline"}
-                    className="h-auto min-h-14 w-full min-w-0 justify-center whitespace-normal px-3 py-3 text-center text-sm leading-snug sm:min-h-[3.25rem] sm:text-base"
-                    onClick={() => setSelectedSize("s")}
-                  >
-                    {item.size_s_label || "S"} —{" "}
-                    {((item.size_s_price ?? item.price ?? 0) / 100).toFixed(2)} MDL
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={selectedSize === "l" ? "default" : "outline"}
-                    className="h-auto min-h-14 w-full min-w-0 justify-center whitespace-normal px-3 py-3 text-center text-sm leading-snug sm:min-h-[3.25rem] sm:text-base"
-                    onClick={() => setSelectedSize("l")}
-                  >
-                    {item.size_l_label || "L"} —{" "}
-                    {((item.size_l_price ?? item.price ?? 0) / 100).toFixed(2)} MDL
-                  </Button>
+                  {sortedVariants.map((v) => (
+                    <Button
+                      key={v.id}
+                      type="button"
+                      variant={selectedVariantId === v.id ? "default" : "outline"}
+                      className="h-auto min-h-14 w-full min-w-0 justify-center whitespace-normal px-3 py-3 text-center text-sm leading-snug sm:min-h-[3.25rem] sm:text-base"
+                      onClick={() => setSelectedVariantId(v.id)}
+                    >
+                      {v.name_ru} — {(v.price / 100).toFixed(2)} MDL
+                    </Button>
+                  ))}
                 </div>
               ) : null}
 

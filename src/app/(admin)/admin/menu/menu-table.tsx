@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
+import type { LegacyMenuSizeColumns } from "../legacy-menu-sizes"
 import type { MenuItem, ToppingGroup } from "@/types/database"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -33,12 +34,21 @@ import {
 } from "@/components/ui/dialog"
 import { deleteMenuItem } from "./actions"
 
-type MenuItemRow = MenuItem & {
-  category: { id: string; name_ru: string; name_ro: string } | null
-}
+type MenuItemRow = MenuItem &
+  LegacyMenuSizeColumns & {
+    category: { id: string; name_ru: string; name_ro: string } | null
+  }
 
 function formatPrice(item: MenuItemRow) {
   if (item.has_sizes) {
+    const vv = item.variants
+    if (vv?.length) {
+      const cents = vv.map((v) => v.price)
+      const min = Math.min(...cents)
+      const max = Math.max(...cents)
+      const fmt = (bani: number) => bani / 100
+      return min === max ? `${fmt(min)} лей` : `${fmt(min)}–${fmt(max)} лей`
+    }
     const s = item.size_s_price
     const l = item.size_l_price
     if (s === null || s === undefined || l === null || l === undefined)

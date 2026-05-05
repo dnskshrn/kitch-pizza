@@ -302,10 +302,11 @@ export function CheckoutSuccessView({
             unoptimized
           />
           <a
-            href="mailto:feedback@kitch.md"
+            href={brandPhoneHref}
             className="text-[14px] font-normal text-[#808080] hover:underline"
+            aria-label={brandCallLabel}
           >
-            feedback@kitch.md
+            {brandPhone}
           </a>
         </ClientContainer>
       </footer>

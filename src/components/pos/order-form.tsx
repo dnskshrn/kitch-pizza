@@ -57,7 +57,13 @@ import { validatePromoCode } from "@/lib/actions/validate-promo-code"
 import { calcPromoDiscount } from "@/lib/discount"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
-import type { MenuItem } from "@/types/database"
+import { orderItemSizeDisplayLabel } from "@/lib/order-item-size-display"
+import {
+  POS_MENU_ITEM_FOR_MODAL_SELECT,
+  posMenuRowForModal,
+  posVariantsFromMenuEmbed,
+} from "@/lib/pos/menu-item-modal-row"
+import type { MenuItem, MenuItemVariant } from "@/types/database"
 import type { PosCartItem, PosOrder, PosWizardBrandOption } from "@/types/pos"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
@@ -96,12 +102,9 @@ type MenuItemRow = Pick<
   | "category_id"
   | "price"
   | "has_sizes"
-  | "size_s_price"
-  | "size_l_price"
-  | "size_s_label"
-  | "size_l_label"
   | "image_url"
 > & {
+  menu_item_variants?: MenuItemVariant[] | null
   menu_item_topping_groups?: { id: string }[] | null
 }
 
@@ -157,7 +160,7 @@ function cartFingerprint(lines: PosCartItem[]): string {
   return lines
     .map(
       (c, i) =>
-        `${i}:${c.orderItemId ?? ""}:${c.menuItemId}:${c.size ?? ""}:${c.qty}:${c.price}:${c.toppings.map((t) => `${t.name}:${t.price}`).join(";")}`,
+        `${i}:${c.orderItemId ?? ""}:${c.menuItemId}:${c.variantId ?? ""}:${c.size ?? ""}:${c.qty}:${c.price}:${c.toppings.map((t) => `${t.name}:${t.price}`).join(";")}`,
     )
     .join("|")
 }
@@ -174,13 +177,15 @@ function formatMdl(bani: number): string {
 }
 
 function formatProductCardPrice(item: MenuItemRow): string {
+  const variants = posVariantsFromMenuEmbed(item)
   if (!item.has_sizes) {
     return `от ${formatMdlAmount(item.price ?? 0)} MDL`
   }
-  const minBani = Math.min(
-    item.size_s_price ?? item.price ?? 0,
-    item.size_l_price ?? item.price ?? 0,
-  )
+  const minFromV = variants.length
+    ? Math.min(...variants.map((v) => v.price))
+    : null
+  const fallback = typeof item.price === "number" ? item.price : 0
+  const minBani = minFromV ?? fallback
   return `от ${formatMdlAmount(minBani)} MDL`
 }
 
@@ -214,11 +219,11 @@ function promoErrorRu(
   }
 }
 
-function unitPriceBani(row: MenuItemRow, size: "s" | "l" | null): number {
+function unitPriceBani(row: MenuItemRow): number {
+  const variants = posVariantsFromMenuEmbed(row)
   if (!row.has_sizes) return row.price ?? 0
-  if (size === "l") return row.size_l_price ?? row.price ?? 0
-  if (size === "s") return row.size_s_price ?? row.price ?? 0
-  return row.price ?? 0
+  if (variants.length === 0) return row.price ?? 0
+  return Math.min(...variants.map((v) => v.price))
 }
 
 /* ─── Карточка товара ─────────────────────────────────────────── */
@@ -315,7 +320,9 @@ function CartItemRow({
           <div className="min-w-0 flex-1">
             <p className="line-clamp-2 text-[13px] font-bold leading-tight text-[#242424]">
               {line.name}
-              {line.size ? ` · ${line.size.toUpperCase()}` : ""}
+              {line.size
+                ? ` · ${orderItemSizeDisplayLabel(line.size)}`
+                : ""}
             </p>
             {line.toppings.length > 0 ? (
               <p className="mt-0.5 line-clamp-1 text-[11px] leading-tight text-[#808080]">
@@ -427,7 +434,7 @@ function CartPanel({
                 <CartItemRow
                   key={
                     line.orderItemId ??
-                    `${line.menuItemId}-${line.size ?? "x"}-${idx}`
+                    `${line.menuItemId}-${line.variantId ?? ""}-${line.size ?? "x"}-${idx}`
                   }
                   line={line}
                   idx={idx}
@@ -509,6 +516,7 @@ function posCartFromOrderLine(line: {
   id: string
   item_name: string
   menu_item_id: string | null
+  variant_id?: string | null
   size: string | null
   quantity: number
   price: number
@@ -521,9 +529,6 @@ function posCartFromOrderLine(line: {
   const rawName = line.item_name?.trim() || "—"
   const plus = rawName.indexOf(" + ")
   const baseName = plus >= 0 ? rawName.slice(0, plus).trim() : rawName
-  const sz = line.size?.toLowerCase() ?? ""
-  const size: "s" | "l" | null =
-    sz === "s" ? "s" : sz === "l" ? "l" : null
   const qty = Math.max(1, line.quantity)
   const unit = qty > 0 ? Math.round(line.price / qty) : 0
   const rawTops = Array.isArray(line.toppings) ? line.toppings : []
@@ -544,7 +549,8 @@ function posCartFromOrderLine(line: {
     orderItemId: line.id,
     menuItemId: line.menu_item_id ?? "",
     name: baseName,
-    size,
+    size: line.size,
+    variantId: line.variant_id ?? null,
     price: unit,
     qty,
     imageUrl: embed?.image_url ?? undefined,
@@ -571,6 +577,7 @@ function posLinePayloadFromCartItem(c: PosCartItem) {
         ? `${c.name} + ${c.toppings.map((t) => t.name).join(", ")}`
         : c.name,
     size: c.size,
+    variantId: c.variantId ?? null,
     unitPriceBani: c.price,
     qty: c.qty,
     toppings: c.toppings.map((t) => ({
@@ -834,7 +841,7 @@ export function OrderForm({
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "delivery_fee, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(id, item_name, menu_item_id, size, quantity, price, toppings, menu_items(image_url))",
+          "delivery_fee, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url))",
         )
         .eq("id", posOrderId)
         .maybeSingle()
@@ -1026,9 +1033,7 @@ export function OrderForm({
     const supabase = createClient()
     const { data, error } = await supabase
       .from("menu_items")
-      .select(
-        "id, name_ru, description_ru, category_id, price, has_sizes, size_s_price, size_l_price, size_s_label, size_l_label, image_url, menu_item_topping_groups(id)",
-      )
+      .select(POS_MENU_ITEM_FOR_MODAL_SELECT)
       .eq("brand_id", brandId)
       .eq("category_id", activeCategoryId)
       .eq("is_active", true)
@@ -1059,7 +1064,7 @@ export function OrderForm({
     const { data, error } = await supabase
       .from("orders")
       .select(
-        "order_items(id, item_name, menu_item_id, size, quantity, price, toppings, menu_items(image_url))",
+        "order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url))",
       )
       .eq("id", posOrderId)
       .maybeSingle()
@@ -1075,6 +1080,7 @@ export function OrderForm({
             id: string
             item_name: string
             menu_item_id: string | null
+            variant_id: string | null
             size: string | null
             quantity: number
             price: number
@@ -1134,7 +1140,8 @@ export function OrderForm({
       const idx = cart.findIndex(
         (x) =>
           x.menuItemId === entry.menuItemId &&
-          (x.size ?? null) === (entry.size ?? null) &&
+          (x.variantId ?? null) === (entry.variantId ?? null) &&
+          (x.size ?? "") === (entry.size ?? "") &&
           toppingsSignature(x.toppings) === toppingsSignature(entry.toppings),
       )
       setCartActionBusy(true)
@@ -1187,12 +1194,13 @@ export function OrderForm({
       setCartEditIndex(null)
       const hasToppingGroups = (row.menu_item_topping_groups?.length ?? 0) > 0
       if (!row.has_sizes && !hasToppingGroups) {
-        const price = unitPriceBani(row, null)
+        const price = unitPriceBani(row)
         if (price <= 0) return
         void addCartItem({
           menuItemId: row.id,
           name: row.name_ru,
           size: null,
+          variantId: null,
           price,
           qty: 1,
           imageUrl: row.image_url ?? undefined,
@@ -1200,7 +1208,7 @@ export function OrderForm({
         })
         return
       }
-      setModalItem(row)
+      setModalItem(posMenuRowForModal(row))
     },
     [addCartItem, cartInteractionDisabled],
   )
@@ -1290,9 +1298,7 @@ export function OrderForm({
       const supabase = createClient()
       const { data, error } = await supabase
         .from("menu_items")
-        .select(
-          "id, name_ru, description_ru, category_id, price, has_sizes, size_s_price, size_l_price, size_s_label, size_l_label, image_url, menu_item_topping_groups(id)",
-        )
+        .select(POS_MENU_ITEM_FOR_MODAL_SELECT)
         .eq("id", line.menuItemId)
         .maybeSingle()
 
@@ -1301,7 +1307,7 @@ export function OrderForm({
         return
       }
       setCartEditIndex(idx)
-      setModalItem(data as MenuItemRow)
+      setModalItem(posMenuRowForModal(data as MenuItemRow))
     } finally {
       cartModalBusyRef.current = false
     }
@@ -1325,6 +1331,7 @@ export function OrderForm({
           menuItemId: c.menuItemId,
           itemName: linePayload.name,
           size: c.size,
+          variantId: linePayload.variantId ?? null,
           quantity: c.qty,
           unitPriceBani: c.price,
           toppings: c.toppings.map((t) => ({
@@ -1414,6 +1421,7 @@ export function OrderForm({
             ? `${c.name} + ${c.toppings.map((t) => t.name).join(", ")}`
             : c.name,
         size: c.size,
+        variantId: c.variantId ?? null,
         unitPriceBani: c.price,
         qty: c.qty,
         toppings: c.toppings.map((t) => ({
@@ -1999,6 +2007,7 @@ export function OrderForm({
                   cartIndex: cartEditIndex,
                   qty: cart[cartEditIndex]!.qty,
                   size: cart[cartEditIndex]!.size,
+                  variantId: cart[cartEditIndex]!.variantId ?? null,
                   toppings: cart[cartEditIndex]!.toppings.map((t) => ({
                     name: t.name,
                     price: t.price,
@@ -2456,7 +2465,7 @@ export function OrderForm({
                   <CartItemRow
                     key={
                       line.orderItemId ??
-                      `${line.menuItemId}-${line.size ?? "x"}-${idx}`
+                      `${line.menuItemId}-${line.variantId ?? ""}-${line.size ?? "x"}-${idx}`
                     }
                     line={line}
                     idx={idx}
@@ -2518,6 +2527,7 @@ export function OrderForm({
                 cartIndex: cartEditIndex,
                 qty: cart[cartEditIndex]!.qty,
                 size: cart[cartEditIndex]!.size,
+                variantId: cart[cartEditIndex]!.variantId ?? null,
                 toppings: cart[cartEditIndex]!.toppings.map((t) => ({
                   name: t.name,
                   price: t.price,

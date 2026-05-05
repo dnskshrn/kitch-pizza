@@ -29,6 +29,14 @@ import type { CondimentMenuItemRow } from "./types"
 
 function formatPrice(item: CondimentMenuItemRow) {
   if (item.has_sizes) {
+    const vv = item.variants
+    if (vv?.length) {
+      const cents = vv.map((v) => v.price)
+      const min = Math.min(...cents)
+      const max = Math.max(...cents)
+      const fmt = (bani: number) => bani / 100
+      return min === max ? `${fmt(min)} лей` : `${fmt(min)}–${fmt(max)} лей`
+    }
     const s = item.size_s_price
     const l = item.size_l_price
     if (s === null || s === undefined || l === null || l === undefined)

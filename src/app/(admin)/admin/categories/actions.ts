@@ -19,6 +19,8 @@ export async function createCategory(data: {
   slug: string
   sort_order: number
   is_active: boolean
+  image_url: string | null
+  show_in_upsell: boolean
 }) {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
@@ -30,6 +32,8 @@ export async function createCategory(data: {
     sort_order: data.sort_order,
     is_active: data.is_active,
     slug,
+    image_url: data.image_url?.trim() || null,
+    show_in_upsell: data.show_in_upsell,
   })
   if (error) throw new Error(error.message)
   revalidatePath("/admin/categories")
@@ -43,6 +47,8 @@ export async function updateCategory(
     slug: string
     sort_order: number
     is_active: boolean
+    image_url: string | null
+    show_in_upsell: boolean
   }
 ) {
   const brandId = await getAdminBrandId()
@@ -55,6 +61,8 @@ export async function updateCategory(
       slug: data.slug,
       sort_order: data.sort_order,
       is_active: data.is_active,
+      image_url: data.image_url?.trim() || null,
+      show_in_upsell: data.show_in_upsell,
     })
     .eq("id", id)
     .eq("brand_id", brandId)

@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Upload } from "lucide-react"
+import { Trash2, Upload } from "lucide-react"
 
 function leiToBani(lei: number) {
   return Math.round(lei * 100)
@@ -59,22 +59,42 @@ const TAG_OPTIONS: { value: string; label: string }[] = [
   { value: "постное", label: "Постное" },
 ]
 
+type VariantDraft = {
+  id?: string
+  name_ru: string
+  name_ro: string
+  priceLei: string
+  weightStr: string
+}
+
+function parseLei(s: string): number | null {
+  const t = s.trim().replace(",", ".")
+  if (!t) return null
+  const n = Number(t)
+  if (Number.isNaN(n)) return null
+  return n
+}
+
+/** Пустая строка → null; только неотрицательные целые граммы. */
+function parseGrams(s: string): number | null | "invalid" {
+  const t = s.trim()
+  if (!t) return null
+  if (!/^\d+$/.test(t)) return "invalid"
+  const n = Number.parseInt(t, 10)
+  if (!Number.isFinite(n)) return "invalid"
+  return n
+}
+
 function DiscountPreview({
   addDiscount,
   discountPercentStr,
-  hasSizes,
   priceLei,
-  sizeSLei,
-  sizeLLei,
-  parseLei,
+  variants,
 }: {
   addDiscount: boolean
   discountPercentStr: string
-  hasSizes: boolean
   priceLei: string
-  sizeSLei: string
-  sizeLLei: string
-  parseLei: (s: string) => number | null
+  variants: VariantDraft[]
 }) {
   const discountD = Number.parseInt(discountPercentStr.trim(), 10)
   const show =
@@ -85,33 +105,23 @@ function DiscountPreview({
 
   if (!show) return null
 
-  if (hasSizes) {
-    const s = parseLei(sizeSLei)
-    const l = parseLei(sizeLLei)
+  if (variants.length > 0) {
     return (
       <div className="text-muted-foreground space-y-1 text-xs">
-        {s !== null ? (
-          <div>
-            30см: {formatPreviewLeiFromBani(leiToBani(s))} лей →{" "}
-            <span className="line-through text-gray-400">
-              {formatPreviewLeiFromBani(
-                calcCompareAt(leiToBani(s), discountD),
-              )}{" "}
-              лей
-            </span>
-          </div>
-        ) : null}
-        {l !== null ? (
-          <div>
-            33см: {formatPreviewLeiFromBani(leiToBani(l))} лей →{" "}
-            <span className="line-through text-gray-400">
-              {formatPreviewLeiFromBani(
-                calcCompareAt(leiToBani(l), discountD),
-              )}{" "}
-              лей
-            </span>
-          </div>
-        ) : null}
+        {variants.map((v, i) => {
+          const pLei = parseLei(v.priceLei)
+          if (pLei === null) return null
+          const bani = leiToBani(pLei)
+          const label = v.name_ru.trim() || `Вариант ${i + 1}`
+          return (
+            <div key={v.id ?? `draft-${i}`}>
+              {label}: {formatPreviewLeiFromBani(bani)} лей →{" "}
+              <span className="line-through text-gray-400">
+                {formatPreviewLeiFromBani(calcCompareAt(bani, discountD))} лей
+              </span>
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -157,14 +167,10 @@ export function MenuItemDialog({
   const [descriptionRo, setDescriptionRo] = useState("")
   const [imageUrl, setImageUrl] = useState("")
   const [hasSizes, setHasSizes] = useState(false)
+  const [variants, setVariants] = useState<VariantDraft[]>([])
   const [priceLei, setPriceLei] = useState("")
-  const [sizeSLei, setSizeSLei] = useState("")
-  const [sizeLLei, setSizeLLei] = useState("")
   const [weightGramsStr, setWeightGramsStr] = useState("")
-  const [sizeSWeightStr, setSizeSWeightStr] = useState("")
-  const [sizeLWeightStr, setSizeLWeightStr] = useState("")
-  const [sizeSLabelStr, setSizeSLabelStr] = useState("")
-  const [sizeLLabelStr, setSizeLLabelStr] = useState("")
+  const [portionLabelStr, setPortionLabelStr] = useState("")
   const [isActive, setIsActive] = useState(true)
   const [sortOrder, setSortOrder] = useState(0)
   const [uploading, setUploading] = useState(false)
@@ -186,19 +192,10 @@ export function MenuItemDialog({
       setImageUrl(item.image_url ?? "")
       setHasSizes(item.has_sizes)
       setPriceLei(baniToLei(item.price))
-      setSizeSLei(baniToLei(item.size_s_price))
-      setSizeLLei(baniToLei(item.size_l_price))
       setWeightGramsStr(
         item.weight_grams != null ? String(item.weight_grams) : "",
       )
-      setSizeSWeightStr(
-        item.size_s_weight != null ? String(item.size_s_weight) : "",
-      )
-      setSizeLWeightStr(
-        item.size_l_weight != null ? String(item.size_l_weight) : "",
-      )
-      setSizeSLabelStr(item.size_s_label ?? "")
-      setSizeLLabelStr(item.size_l_label ?? "")
+      setPortionLabelStr("")
       setIsActive(item.is_active)
       setSortOrder(item.sort_order)
       setAddDiscount(
@@ -219,14 +216,10 @@ export function MenuItemDialog({
       setDescriptionRo("")
       setImageUrl("")
       setHasSizes(false)
+      setVariants([])
       setPriceLei("")
-      setSizeSLei("")
-      setSizeLLei("")
       setWeightGramsStr("")
-      setSizeSWeightStr("")
-      setSizeLWeightStr("")
-      setSizeSLabelStr("")
-      setSizeLLabelStr("")
+      setPortionLabelStr("")
       setIsActive(true)
       setSortOrder(0)
       setSelectedGroupIds([])
@@ -239,14 +232,39 @@ export function MenuItemDialog({
   useEffect(() => {
     if (!open || mode !== "edit" || !itemId) return
     let cancelled = false
-    getMenuItemToppingGroups(itemId)
-      .then((ids) => {
-        if (!cancelled) setSelectedGroupIds(ids)
+    const supabase = createClient()
+    void Promise.all([
+      getMenuItemToppingGroups(itemId),
+      supabase
+        .from("menu_item_variants")
+        .select("*")
+        .eq("menu_item_id", itemId)
+        .order("sort_order", { ascending: true }),
+    ])
+      .then(([ids, variantsRes]) => {
+        if (cancelled) return
+        const { data, error } = variantsRes
+        if (error) throw new Error(error.message)
+        setSelectedGroupIds(ids)
+        setVariants(
+          data?.map((v) => ({
+            id: v.id as string,
+            name_ru: v.name_ru as string,
+            name_ro: (v.name_ro as string) ?? "",
+            priceLei: String((v.price as number) / 100),
+            weightStr:
+              v.weight_grams != null ? String(v.weight_grams as number) : "",
+          })) ?? [],
+        )
       })
       .catch((e) => {
         console.error(e)
         if (!cancelled) {
-          alert(e instanceof Error ? e.message : "Не удалось загрузить группы топпингов")
+          alert(
+            e instanceof Error
+              ? e.message
+              : "Не удалось загрузить данные топпингов или вариантов",
+          )
         }
       })
     return () => {
@@ -258,8 +276,30 @@ export function MenuItemDialog({
     setSelectedGroupIds((prev) =>
       prev.includes(groupId)
         ? prev.filter((id) => id !== groupId)
-        : [...prev, groupId]
+        : [...prev, groupId],
     )
+  }
+
+  function patchVariant(index: number, patch: Partial<VariantDraft>) {
+    setVariants((prev) =>
+      prev.map((v, i) => (i === index ? { ...v, ...patch } : v)),
+    )
+  }
+
+  function appendVariant() {
+    setVariants((prev) => [
+      ...prev,
+      {
+        name_ru: "",
+        name_ro: "",
+        priceLei: "",
+        weightStr: "",
+      },
+    ])
+  }
+
+  function removeVariant(index: number) {
+    setVariants((prev) => prev.filter((_, i) => i !== index))
   }
 
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -286,23 +326,67 @@ export function MenuItemDialog({
     }
   }
 
-function parseLei(s: string): number | null {
-  const t = s.trim().replace(",", ".")
-  if (!t) return null
-  const n = Number(t)
-  if (Number.isNaN(n)) return null
-  return n
-}
 
-/** Пустая строка → null; только неотрицательные целые граммы. */
-function parseGrams(s: string): number | null | "invalid" {
-  const t = s.trim()
-  if (!t) return null
-  if (!/^\d+$/.test(t)) return "invalid"
-  const n = Number.parseInt(t, 10)
-  if (!Number.isFinite(n)) return "invalid"
-  return n
-}
+
+  async function persistMenuItemVariants(menuItemId: string, drafts: VariantDraft[]) {
+    const supabase = createClient()
+    const parsed = drafts.map((v, idx) => {
+      const price = parseLei(v.priceLei)
+      if (price === null) throw new Error("invalid_price_row")
+      const w = parseGrams(v.weightStr)
+      if (w === "invalid") throw new Error("invalid_weight_row")
+      return {
+        id: v.id as string | undefined,
+        name_ru: v.name_ru.trim(),
+        name_ro: v.name_ro.trim(),
+        price: leiToBani(price),
+        weight_grams: w === null ? null : w,
+        sort_order: idx,
+      }
+    })
+
+    const keepIds = new Set(
+      parsed.map((r) => r.id).filter((id): id is string => Boolean(id)),
+    )
+    const { data: existingRows, error: selErr } = await supabase
+      .from("menu_item_variants")
+      .select("id")
+      .eq("menu_item_id", menuItemId)
+    if (selErr) throw new Error(selErr.message)
+    const toDelete = (existingRows ?? [])
+      .map((row) => row.id as string)
+      .filter((id) => !keepIds.has(id))
+    if (toDelete.length > 0) {
+      const { error: delErr } = await supabase
+        .from("menu_item_variants")
+        .delete()
+        .in("id", toDelete)
+      if (delErr) throw new Error(delErr.message)
+    }
+
+    for (let i = 0; i < parsed.length; i++) {
+      const row = parsed[i]
+      const base = {
+        name_ru: row.name_ru,
+        name_ro: row.name_ro,
+        price: row.price,
+        weight_grams: row.weight_grams,
+        sort_order: row.sort_order,
+      }
+      if (row.id) {
+        const { error: upErr } = await supabase
+          .from("menu_item_variants")
+          .update(base)
+          .eq("id", row.id)
+        if (upErr) throw new Error(upErr.message)
+      } else {
+        const { error: insErr } = await supabase
+          .from("menu_item_variants")
+          .insert({ ...base, menu_item_id: menuItemId })
+        if (insErr) throw new Error(insErr.message)
+      }
+    }
+  }
 
   function handleSave() {
     const cat = categoryId
@@ -326,17 +410,25 @@ function parseGrams(s: string): number | null | "invalid" {
     let payload: Parameters<typeof createMenuItem>[0]
 
     if (hasSizes) {
-      const s = parseLei(sizeSLei)
-      const l = parseLei(sizeLLei)
-      if (s === null || l === null) {
-        alert("Укажите цены для 30см и 33см в леях")
+      if (variants.length === 0) {
+        alert("Добавьте хотя бы один вариант")
         return
       }
-      const wS = parseGrams(sizeSWeightStr)
-      const wL = parseGrams(sizeLWeightStr)
-      if (wS === "invalid" || wL === "invalid") {
-        alert("Вес укажите целым числом граммов или оставьте поле пустым")
-        return
+      for (const v of variants) {
+        if (!v.name_ru.trim()) {
+          alert("Укажите название (RU) для каждого варианта")
+          return
+        }
+        const price = parseLei(v.priceLei)
+        if (price === null) {
+          alert("Укажите корректную цену в леях для каждого варианта")
+          return
+        }
+        const w = parseGrams(v.weightStr)
+        if (w === "invalid") {
+          alert("Вес укажите целым числом граммов или оставьте поле пустым")
+          return
+        }
       }
       payload = {
         category_id: cat,
@@ -347,13 +439,7 @@ function parseGrams(s: string): number | null | "invalid" {
         image_url: imageUrl,
         has_sizes: true,
         weight_grams: null,
-        size_s_weight: wS,
-        size_l_weight: wL,
         price: null,
-        size_s_label: sizeSLabelStr.trim() || null,
-        size_l_label: sizeLLabelStr.trim() || null,
-        size_s_price: leiToBani(s),
-        size_l_price: leiToBani(l),
         is_active: isActive,
         sort_order: sortOrder,
         discount_percent,
@@ -379,13 +465,7 @@ function parseGrams(s: string): number | null | "invalid" {
         image_url: imageUrl,
         has_sizes: false,
         weight_grams: wG,
-        size_s_weight: null,
-        size_l_weight: null,
         price: leiToBani(p),
-        size_s_label: null,
-        size_l_label: sizeLLabelStr.trim() || null,
-        size_s_price: null,
-        size_l_price: null,
         is_active: isActive,
         sort_order: sortOrder,
         discount_percent,
@@ -395,17 +475,37 @@ function parseGrams(s: string): number | null | "invalid" {
 
     startTransition(async () => {
       try {
+        const supabase = createClient()
+        let resolvedId: string | undefined
         if (mode === "create") {
-          const newId = await createMenuItem(payload)
-          await setMenuItemToppingGroups(newId, selectedGroupIds)
+          resolvedId = await createMenuItem(payload)
+          await setMenuItemToppingGroups(resolvedId, selectedGroupIds)
         } else if (item) {
           await updateMenuItem(item.id, payload)
+          resolvedId = item.id
           await setMenuItemToppingGroups(item.id, selectedGroupIds)
+        }
+        if (resolvedId) {
+          if (hasSizes) {
+            await persistMenuItemVariants(resolvedId, variants)
+          } else {
+            const { error: clearErr } = await supabase
+              .from("menu_item_variants")
+              .delete()
+              .eq("menu_item_id", resolvedId)
+            if (clearErr) throw new Error(clearErr.message)
+          }
         }
         onOpenChange(false)
       } catch (e) {
         console.error(e)
-        alert(e instanceof Error ? e.message : "Ошибка сохранения")
+        if (e instanceof Error && e.message === "invalid_price_row") {
+          alert("Укажите корректную цену в леях для каждого варианта")
+        } else if (e instanceof Error && e.message === "invalid_weight_row") {
+          alert("Вес укажите целым числом граммов или оставьте поле пустым")
+        } else {
+          alert(e instanceof Error ? e.message : "Ошибка сохранения")
+        }
       }
     })
   }
@@ -510,81 +610,100 @@ function parseGrams(s: string): number | null | "invalid" {
             <Switch
               id="mi-sizes"
               checked={hasSizes}
-              onCheckedChange={setHasSizes}
+              onCheckedChange={(v) => {
+                setHasSizes(v)
+                if (!v) setVariants([])
+              }}
             />
             <Label htmlFor="mi-sizes">Есть размеры?</Label>
           </div>
           {hasSizes ? (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="mi-s">Цена S (лей)</Label>
-                  <Input
-                    id="mi-s"
-                    type="text"
-                    inputMode="decimal"
-                    value={sizeSLei}
-                    onChange={(e) => setSizeSLei(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="mi-l">Цена L (лей)</Label>
-                  <Input
-                    id="mi-l"
-                    type="text"
-                    inputMode="decimal"
-                    value={sizeLLei}
-                    onChange={(e) => setSizeLLei(e.target.value)}
-                  />
-                </div>
+            <div className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Label className="font-medium">Варианты</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => appendVariant()}
+                >
+                  Добавить вариант
+                </Button>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="mi-label-s">Название S</Label>
-                  <Input
-                    id="mi-label-s"
-                    type="text"
-                    value={sizeSLabelStr}
-                    onChange={(e) => setSizeSLabelStr(e.target.value)}
-                    placeholder="напр. 30см или 6шт."
-                  />
+              {variants.map((v, i) => (
+                <div
+                  key={v.id ?? `new-${i}`}
+                  className="space-y-2 rounded-lg border bg-muted/30 p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-muted-foreground text-xs">
+                      Вариант {i + 1}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 shrink-0 text-destructive"
+                      onClick={() => removeVariant(i)}
+                      aria-label="Удалить вариант"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-1.5">
+                      <Label htmlFor={`mi-var-ru-${i}`}>Название (RU)</Label>
+                      <Input
+                        id={`mi-var-ru-${i}`}
+                        value={v.name_ru}
+                        onChange={(e) =>
+                          patchVariant(i, { name_ru: e.target.value })
+                        }
+                        placeholder="напр. 30 см"
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor={`mi-var-ro-${i}`}>Название (RO)</Label>
+                      <Input
+                        id={`mi-var-ro-${i}`}
+                        value={v.name_ro}
+                        onChange={(e) =>
+                          patchVariant(i, { name_ro: e.target.value })
+                        }
+                        placeholder="ex. 30 cm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
+                    <div className="grid gap-1.5">
+                      <Label htmlFor={`mi-var-price-${i}`}>Цена (лей)</Label>
+                      <Input
+                        id={`mi-var-price-${i}`}
+                        type="text"
+                        inputMode="decimal"
+                        value={v.priceLei}
+                        onChange={(e) =>
+                          patchVariant(i, { priceLei: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor={`mi-var-w-${i}`}>Вес (гр)</Label>
+                      <Input
+                        id={`mi-var-w-${i}`}
+                        type="text"
+                        inputMode="numeric"
+                        value={v.weightStr}
+                        onChange={(e) =>
+                          patchVariant(i, { weightStr: e.target.value })
+                        }
+                        placeholder="Необязательно"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="mi-label-l">Название L</Label>
-                  <Input
-                    id="mi-label-l"
-                    type="text"
-                    value={sizeLLabelStr}
-                    onChange={(e) => setSizeLLabelStr(e.target.value)}
-                    placeholder="напр. 33см или 9шт."
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="mi-w-s">Вес S (гр)</Label>
-                  <Input
-                    id="mi-w-s"
-                    type="text"
-                    inputMode="numeric"
-                    value={sizeSWeightStr}
-                    onChange={(e) => setSizeSWeightStr(e.target.value)}
-                    placeholder="Необязательно"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="mi-w-l">Вес L (гр)</Label>
-                  <Input
-                    id="mi-w-l"
-                    type="text"
-                    inputMode="numeric"
-                    value={sizeLWeightStr}
-                    onChange={(e) => setSizeLWeightStr(e.target.value)}
-                    placeholder="Необязательно"
-                  />
-                </div>
-              </div>
-            </>
+              ))}
+            </div>
           ) : (
             <>
               <div className="grid gap-2">
@@ -613,8 +732,8 @@ function parseGrams(s: string): number | null | "invalid" {
                 <Input
                   id="mi-portion-label"
                   type="text"
-                  value={sizeLLabelStr}
-                  onChange={(e) => setSizeLLabelStr(e.target.value)}
+                  value={portionLabelStr}
+                  onChange={(e) => setPortionLabelStr(e.target.value)}
                   placeholder="напр. стандарт"
                 />
               </div>
@@ -686,11 +805,8 @@ function parseGrams(s: string): number | null | "invalid" {
                 <DiscountPreview
                   addDiscount={addDiscount}
                   discountPercentStr={discountPercentStr}
-                  hasSizes={hasSizes}
                   priceLei={priceLei}
-                  sizeSLei={sizeSLei}
-                  sizeLLei={sizeLLei}
-                  parseLei={parseLei}
+                  variants={hasSizes ? variants : []}
                 />
               </div>
             ) : null}

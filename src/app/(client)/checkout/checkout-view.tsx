@@ -17,6 +17,11 @@ import {
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
 import { useLanguage } from "@/lib/store/language-store"
+import {
+  getBrandCallLabel,
+  getBrandPhone,
+  getBrandPhoneHref,
+} from "@/lib/brand-phone"
 import { cn } from "@/lib/utils"
 import {
   Select,
@@ -202,6 +207,9 @@ export function CheckoutView({
   const router = useRouter()
   const hasBoutiqueLayout = hasBoutiqueCheckout(brandSlug)
   const checkoutLogoSize = getCheckoutLogoSize(brandSlug)
+  const brandPhone = getBrandPhone(brandSlug)
+  const brandPhoneHref = getBrandPhoneHref(brandPhone)
+  const brandCallLabel = getBrandCallLabel(brandPhone, lang)
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const openCart = useCartStore((s) => s.openCart)
 
@@ -1061,10 +1069,11 @@ export function CheckoutView({
             unoptimized
           />
           <a
-            href="mailto:feedback@kitch.md"
+            href={brandPhoneHref}
             className="text-[20px] font-medium text-[#808080] hover:underline"
+            aria-label={brandCallLabel}
           >
-            feedback@kitch.md
+            {brandPhone}
           </a>
         </ClientContainer>
       </footer>

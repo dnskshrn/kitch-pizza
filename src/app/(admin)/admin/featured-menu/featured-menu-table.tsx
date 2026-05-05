@@ -38,11 +38,13 @@ type FeaturedMenuTableProps = {
 
 function formatPrice(item: MenuItem) {
   if (item.has_sizes) {
-    const prices = [item.price, item.size_s_price, item.size_l_price].filter(
-      (value): value is number => typeof value === "number",
-    )
-    if (prices.length === 0) return "—"
-    return `от ${Math.min(...prices) / 100} MDL`
+    const fromVariants = item.variants?.length
+      ? Math.min(...item.variants.map((v) => v.price))
+      : null
+    const fallback = typeof item.price === "number" ? item.price : null
+    const minBani = fromVariants ?? fallback
+    if (minBani == null) return "—"
+    return `от ${minBani / 100} MDL`
   }
 
   return typeof item.price === "number" ? `${item.price / 100} MDL` : "—"

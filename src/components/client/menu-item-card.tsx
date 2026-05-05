@@ -25,11 +25,11 @@ function hasTheSpotCard(brandSlug: string): boolean {
 
 function getDisplayPriceBani(item: MenuItem): number | null {
   if (item.has_sizes) {
-    const candidates = [item.price, item.size_s_price, item.size_l_price].filter(
-      (v): v is number => typeof v === "number",
-    )
-    if (candidates.length === 0) return null
-    return Math.min(...candidates)
+    if (item.variants?.length) {
+      return Math.min(...item.variants.map((v) => v.price))
+    }
+    if (item.price != null) return item.price
+    return null
   }
   if (item.price == null) return null
   return item.price

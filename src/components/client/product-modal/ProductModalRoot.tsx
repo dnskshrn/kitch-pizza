@@ -4,6 +4,7 @@ import {
   fetchStorefrontMenuItemToppingGroups,
   type StorefrontMenuItemToppingGroup,
 } from "@/lib/data/storefront-item-toppings"
+import { fetchStorefrontMenuItemVariants } from "@/lib/data/storefront-item-variants"
 import {
   formatMoney,
   formatWeightGrams,
@@ -15,36 +16,42 @@ import { useCartStore } from "@/lib/store/cart-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
 import { nextSelectedToppingIdsWithGroupCap } from "@/lib/topping-max-selection"
-import type { MenuItem, Topping } from "@/types/database"
+import type { MenuItem, MenuItemVariant, Topping } from "@/types/database"
 import { cn } from "@/lib/utils"
 import { X } from "lucide-react"
 import Image from "next/image"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Drawer } from "vaul"
-import {
-  getItemSizeLabel,
-  SizeSelector,
-  type PizzaSize,
-} from "./SizeSelector"
+import { pickVariantLabel, VariantSelector } from "./SizeSelector"
 import { ToppingCard } from "./ToppingCard"
 
 const DESKTOP_EXIT_MS = 300
 
-function getBasePriceBani(item: MenuItem, size: PizzaSize): number {
-  if (item.has_sizes) {
-    const p = size === "l" ? item.size_l_price : item.size_s_price
-    return p ?? 0
+function sortVariants(list: MenuItemVariant[]): MenuItemVariant[] {
+  return [...list].sort((a, b) => a.sort_order - b.sort_order || a.name_ru.localeCompare(b.name_ru))
+}
+
+function getBasePriceBani(
+  item: MenuItem,
+  variantsEffective: MenuItemVariant[],
+  selectedVariantId: string | null,
+): number {
+  if (!item.has_sizes || variantsEffective.length === 0) {
+    return item.price ?? 0
   }
-  return item.price ?? 0
+  if (!selectedVariantId) return item.price ?? 0
+  const v = variantsEffective.find((x) => x.id === selectedVariantId)
+  return v?.price ?? item.price ?? 0
 }
 
 function totalBani(
   item: MenuItem,
-  size: PizzaSize,
+  variantsEffective: MenuItemVariant[],
+  selectedVariantId: string | null,
   toppings: Topping[],
   selectedIds: string[],
 ): number {
-  let sum = getBasePriceBani(item, size)
+  let sum = getBasePriceBani(item, variantsEffective, selectedVariantId)
   for (const id of selectedIds) {
     const t = toppings.find((x) => x.id === id)
     if (t) sum += t.price
@@ -55,22 +62,23 @@ function totalBani(
 /** Плашка «размер + вес» для шапки модалки; null — не показывать. */
 function getWeightPillLabel(
   item: MenuItem,
-  selectedSize: PizzaSize,
+  variantsEffective: MenuItemVariant[],
+  selectedVariantId: string | null,
   lang: Lang,
 ): string | null {
   if (!item.has_sizes) {
     if (item.weight_grams == null) return null
-    const portion = item.size_l_label?.trim()
-    if (portion) return `${portion}, ${formatWeightGrams(item.weight_grams, lang)}`
     return formatWeightGrams(item.weight_grams, lang)
   }
-  const sw = item.size_s_weight
-  const lw = item.size_l_weight
-  if (sw == null && lw == null) return null
-  const activeLabel = getItemSizeLabel(item, selectedSize)
-  const active = selectedSize === "l" ? lw : sw
-  if (active != null) return `${activeLabel}, ${formatWeightGrams(active, lang)}`
-  return activeLabel
+  const v =
+    variantsEffective.find((x) => x.id === selectedVariantId) ??
+    variantsEffective[0]
+  if (!v) return null
+  const label = pickVariantLabel(v, lang)
+  if (v.weight_grams != null) {
+    return `${label}, ${formatWeightGrams(v.weight_grams, lang)}`
+  }
+  return label
 }
 
 function includedItemDotColor(entry: {
@@ -152,6 +160,22 @@ function DesktopModalShell({
   )
 }
 
+function resolveInitialVariantId(
+  variantsSorted: MenuItemVariant[],
+  initialVariantId: string | undefined | null,
+  legacySize: "s" | "l" | null | undefined,
+): string | null {
+  if (variantsSorted.length === 0) return null
+  if (initialVariantId && variantsSorted.some((v) => v.id === initialVariantId)) {
+    return initialVariantId
+  }
+  if (legacySize === "s") return variantsSorted[0]!.id
+  if (legacySize === "l") {
+    return variantsSorted[Math.min(1, variantsSorted.length - 1)]!.id
+  }
+  return variantsSorted[0]!.id
+}
+
 export function ProductModalRoot() {
   const storeItem = useProductModalStore((s) => s.item)
   const isOpen = useProductModalStore((s) => s.isOpen)
@@ -171,8 +195,14 @@ export function ProductModalRoot() {
     () => toppingSections.flatMap((s) => s.toppings),
     [toppingSections],
   )
-  const [selectedSize, setSelectedSize] = useState<PizzaSize>("l")
+  const [variants, setVariants] = useState<MenuItemVariant[]>([])
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
   const [selectedToppingIds, setSelectedToppingIds] = useState<string[]>([])
+
+  const variantsEffective = useMemo(() => {
+    const fromState = variants.length ? variants : (modalItem?.variants ?? [])
+    return sortVariants(fromState)
+  }, [variants, modalItem?.variants])
 
   useEffect(() => {
     if (isOpen && storeItem) {
@@ -191,6 +221,8 @@ export function ProductModalRoot() {
       const timer = setTimeout(() => {
         setRendered(false)
         setModalItem(null)
+        setVariants([])
+        setSelectedVariantId(null)
       }, DESKTOP_EXIT_MS)
       return () => clearTimeout(timer)
     }
@@ -199,22 +231,40 @@ export function ProductModalRoot() {
   useEffect(() => {
     if (!isOpen || !storeItem) return
     let cancelled = false
-    ;(async () => {
+    void (async () => {
+      const pm = useProductModalStore.getState()
+      let loadedVariants =
+        storeItem.variants?.length ?? 0 ? sortVariants(storeItem.variants ?? []) : []
+
+      if (loadedVariants.length === 0) {
+        const fetched = await fetchStorefrontMenuItemVariants(storeItem.id)
+        if (cancelled) return
+        loadedVariants = sortVariants(fetched ?? [])
+      } else if (!cancelled) {
+        void 0
+      }
+
       const groups = await fetchStorefrontMenuItemToppingGroups(storeItem.id)
       if (cancelled) return
       setToppingSections(groups)
-      const pm = useProductModalStore.getState()
+      setVariants(loadedVariants)
+
+      const initVid = pm.initialVariantId
+      const initSize = pm.initialSize
+      if (storeItem.has_sizes && loadedVariants.length > 0) {
+        const id = resolveInitialVariantId(loadedVariants, initVid, initSize)
+        setSelectedVariantId(id)
+      } else {
+        setSelectedVariantId(null)
+      }
+
       if (pm.editingCartItemId) {
-        if (storeItem.has_sizes) {
-          const iz = pm.initialSize
-          setSelectedSize(iz === "s" || iz === "l" ? iz : "l")
-        }
         setSelectedToppingIds(pm.initialToppingIds ?? [])
       } else {
-        setSelectedSize("l")
         setSelectedToppingIds([])
       }
     })()
+
     return () => {
       cancelled = true
     }
@@ -243,7 +293,8 @@ export function ProductModalRoot() {
 
   const handleAddToCart = useCallback(() => {
     if (!panelItem) return
-    const cartSize = panelItem.has_sizes ? selectedSize : null
+    const showVariants =
+      panelItem.has_sizes && variantsEffective.length > 0
     const pm = useProductModalStore.getState()
     const shouldReopenCart = pm.returnToCart
     const reopenCartAfterSave =
@@ -253,14 +304,42 @@ export function ProductModalRoot() {
     if (pm.editingCartItemId) {
       useCartStore.getState().removeItem(pm.editingCartItemId)
     }
-    useCartStore.getState().addItem(panelItem, cartSize, selectedToppingIds, toppings)
+
+    const chosenVariant =
+      showVariants && selectedVariantId
+        ? variantsEffective.find((v) => v.id === selectedVariantId)
+        : undefined
+    const snap = chosenVariant ? pickVariantLabel(chosenVariant, lang) : null
+
+    const itemForCart: MenuItem =
+      variantsEffective.length > 0 && showVariants
+        ? { ...panelItem, variants: variantsEffective }
+        : panelItem
+
+    useCartStore.getState().addItem(
+      itemForCart,
+      null,
+      selectedToppingIds,
+      toppings,
+      showVariants && selectedVariantId && chosenVariant
+        ? { variantId: selectedVariantId, variantNameSnapshot: snap }
+        : { variantId: null, variantNameSnapshot: null },
+    )
     close()
     if (reopenCartAfterSave) {
       window.setTimeout(() => {
         useCartStore.getState().openCart()
       }, 50)
     }
-  }, [close, panelItem, selectedSize, selectedToppingIds, toppings])
+  }, [
+    close,
+    lang,
+    panelItem,
+    selectedToppingIds,
+    selectedVariantId,
+    toppings,
+    variantsEffective,
+  ])
 
   const addToCartLabel = t.product.addToCart
   const closeLabel = t.product.close
@@ -268,23 +347,32 @@ export function ProductModalRoot() {
   const totalLabel = useMemo(() => {
     if (!panelItem) return ""
     return formatMoney(
-      totalBani(panelItem, selectedSize, toppings, selectedToppingIds),
+      totalBani(
+        panelItem,
+        variantsEffective,
+        selectedVariantId,
+        toppings,
+        selectedToppingIds,
+      ),
       lang,
     )
-  }, [panelItem, selectedSize, toppings, selectedToppingIds, lang])
+  }, [
+    panelItem,
+    selectedVariantId,
+    toppings,
+    selectedToppingIds,
+    lang,
+    variantsEffective,
+  ])
 
   const weightPillLabel = useMemo(() => {
     if (!panelItem) return null
-    return getWeightPillLabel(panelItem, selectedSize, lang)
-  }, [panelItem, selectedSize, lang])
+    return getWeightPillLabel(panelItem, variantsEffective, selectedVariantId, lang)
+  }, [panelItem, variantsEffective, selectedVariantId, lang])
 
-  const titleName = panelItem
-    ? pickLocalizedName(panelItem, lang)
-    : ""
+  const titleName = panelItem ? pickLocalizedName(panelItem, lang) : ""
 
-  const descriptionText = panelItem
-    ? pickLocalizedDescription(panelItem, lang)
-    : null
+  const descriptionText = panelItem ? pickLocalizedDescription(panelItem, lang) : null
 
   const includedItems = (panelItem?.included_items ?? []).filter(
     (e) => e.name_ru.trim() || e.name_ro.trim(),
@@ -339,9 +427,7 @@ export function ProductModalRoot() {
             ) : null}
           </div>
           {descriptionText ? (
-            <p className="mt-2 text-sm leading-relaxed text-zinc-600">
-              {descriptionText}
-            </p>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-600">{descriptionText}</p>
           ) : null}
         </div>
         {includedItems.length > 0 ? (
@@ -368,11 +454,12 @@ export function ProductModalRoot() {
             </div>
           </div>
         ) : null}
-        {panelItem.has_sizes ? (
-          <SizeSelector
-            selectedSize={selectedSize}
-            onSizeChange={setSelectedSize}
-            item={panelItem}
+        {panelItem.has_sizes && variantsEffective.length > 0 ? (
+          <VariantSelector
+            variants={variantsEffective}
+            selectedVariantId={selectedVariantId}
+            onVariantChange={setSelectedVariantId}
+            lang={lang}
           />
         ) : null}
         {toppingSections.length > 0 ? (

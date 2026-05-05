@@ -184,8 +184,8 @@ export function CondimentItemDialog({
       setImageUrl(item.image_url ?? "")
       setHasSizes(item.has_sizes)
       setPriceLei(baniToLei(item.price))
-      setSizeSLei(baniToLei(item.size_s_price))
-      setSizeLLei(baniToLei(item.size_l_price))
+      setSizeSLei(baniToLei(item.size_s_price ?? null))
+      setSizeLLei(baniToLei(item.size_l_price ?? null))
       setWeightGramsStr(
         item.weight_grams != null ? String(item.weight_grams) : "",
       )

@@ -1,12 +1,12 @@
-const BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/`
+const BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_COURIER_BOT_TOKEN}/`
 
 export async function sendMessage(
   chatId: number | string,
   text: string,
   replyMarkup?: object,
 ): Promise<void> {
-  if (!process.env.TELEGRAM_BOT_TOKEN?.trim()) {
-    throw new Error("TELEGRAM_BOT_TOKEN is not set")
+  if (!process.env.TELEGRAM_COURIER_BOT_TOKEN?.trim()) {
+    throw new Error("TELEGRAM_COURIER_BOT_TOKEN is not set")
   }
   const payload: Record<string, unknown> = { chat_id: chatId, text }
   if (replyMarkup !== undefined) {

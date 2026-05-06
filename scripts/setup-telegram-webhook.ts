@@ -3,7 +3,7 @@ import * as dotenv from "dotenv"
 dotenv.config({ path: ".env.local" })
 
 const token = process.env.TELEGRAM_BOT_TOKEN!
-const secret = process.env.TELEGRAM_WEBHOOK_SECRET!
+const secret = process.env.TELEGRAM_COURIER_WEBHOOK_SECRET!
 const appUrl = process.env.NEXT_PUBLIC_APP_URL! // e.g. https://yourdomain.com
 
 async function setup() {

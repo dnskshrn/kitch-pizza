@@ -40,7 +40,7 @@ function json200(body: object) {
 }
 
 export async function POST(request: Request) {
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim()
+  const secret = process.env.TELEGRAM_COURIER_WEBHOOK_SECRET?.trim()
   const header =
     request.headers.get("x-telegram-bot-api-secret-token") ??
     request.headers.get("X-Telegram-Bot-Api-Secret-Token")

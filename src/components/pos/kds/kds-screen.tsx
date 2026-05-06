@@ -15,10 +15,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { brands as staticBrands, getBrandBySlug, normalizePosBrandSlug } from "@/brands/index"
-import {
-  fetchKdsCookingOrdersPos,
-  fetchKdsOrderByIdPos,
-} from "@/lib/actions/pos/fetch-kds-orders"
+import { fetchKdsOrderByIdPos } from "@/lib/actions/pos/fetch-kds-orders"
 import {
   readPosBrandSlugFromCookie,
   writePosBrandSlugCookie,
@@ -265,31 +262,31 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     osc.stop(now + 0.45)
   }, [])
 
-  const reloadCookingForBrand = useCallback(async () => {
-    if (!brandId) {
-      setOrders([])
+  const reloadCookingOrders = useCallback(async () => {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from("orders")
+      .select(
+        "id, order_number, brand_id, status, scheduled_time, updated_at, cooking_started_at, brands(slug), order_items(id, item_name, quantity, price, size, toppings)",
+      )
+      .eq("status", "cooking")
+      .order("updated_at", { ascending: true })
+    if (error) {
+      console.error("[kds] load orders", error.message)
       return
     }
-    const res = await fetchKdsCookingOrdersPos(brandId)
-    if (!res.success) {
-      console.error("[kds] load orders", res.error)
-      return
-    }
-    const rows = res.orders
+    const rows = (data ?? [])
       .map(normalizeOrderRow)
       .filter((x): x is KdsOrderRow => x != null)
-      .filter((x) => x.status === "cooking")
     setOrders(sortKdsOrders(rows))
     knownOrderIdsRef.current = new Set(rows.map((r) => r.id))
-  }, [brandId])
+  }, [])
 
   useEffect(() => {
-    void reloadCookingForBrand()
-  }, [reloadCookingForBrand])
+    void reloadCookingOrders()
+  }, [reloadCookingOrders])
 
   useEffect(() => {
-    if (!brandId) return
-
     const supabase = createClient()
 
     const upsertCookingOrder = (id: string) => {
@@ -309,7 +306,7 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     }
 
     const channel = supabase
-      .channel(`kds-orders-${brandId}`)
+      .channel("kds-orders")
       .on(
         "postgres_changes",
         {
@@ -342,15 +339,6 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
             typeof idRaw === "string" ? idRaw : idRaw != null ? String(idRaw) : ""
           if (!id) return
 
-          const bidRaw = row.brand_id
-          const bid =
-            typeof bidRaw === "string"
-              ? bidRaw
-              : bidRaw != null
-                ? String(bidRaw)
-                : ""
-          if (bid !== brandId) return
-
           const status = String(row.status ?? "")
           const oldRow = p.old
           const oldStatus =
@@ -382,7 +370,7 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [brandId, fetchOrderFull, scheduleRemoveOrder, playNewOrderBeep])
+  }, [fetchOrderFull, scheduleRemoveOrder, playNewOrderBeep])
 
   const handleMarkReady = useCallback((orderId: string) => {
     setUndoExpiresByOrderId((prev) => ({

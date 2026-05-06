@@ -17,7 +17,6 @@ type PosAppShellProps = {
   staffId: string
   shiftStart: string
   shiftLogId: string
-  hasCashSession: boolean
   cashSessionId: string | null
 }
 
@@ -28,7 +27,6 @@ export function PosAppShell({
   staffId,
   shiftStart,
   shiftLogId,
-  hasCashSession: _hasCashSession,
   cashSessionId,
 }: PosAppShellProps) {
   const [sessionId, setSessionId] = useState<string | null>(cashSessionId)

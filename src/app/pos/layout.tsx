@@ -32,7 +32,8 @@ export default async function PosLayout({
   const { id: shiftLogId, clock_in } = await ensureActiveShift()
 
   const supabase = await createClient()
-  const { data: cashSession } = await (supabase.from("cash_sessions") as any)
+  const { data: cashSession } = await supabase
+    .from("cash_sessions")
     .select("id, status")
     .eq("shift_log_id", shiftLogId)
     .eq("status", "open")
@@ -44,7 +45,6 @@ export default async function PosLayout({
       staffId={staff!.id}
       shiftStart={clock_in}
       shiftLogId={shiftLogId}
-      hasCashSession={!!cashSession}
       cashSessionId={cashSession?.id ?? null}
     >
       {children}

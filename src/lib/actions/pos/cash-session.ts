@@ -61,7 +61,7 @@ export async function openCashSession(
   }
 
   const { data: existing, error: existingErr } = await (
-    supabase.from("cash_sessions") as any
+    supabase.from("cash_sessions")
   )
     .select("id")
     .eq("shift_log_id", input.shiftLogId)
@@ -78,7 +78,7 @@ export async function openCashSession(
   const openedAt = new Date().toISOString()
 
   const { data: session, error: sessionErr } = await (
-    supabase.from("cash_sessions") as any
+    supabase.from("cash_sessions")
   )
     .insert({
       shift_log_id: input.shiftLogId,
@@ -99,7 +99,7 @@ export async function openCashSession(
 
   const row = session as CashSessionRow
 
-  const { error: txErr } = await (supabase.from("cash_transactions") as any).insert({
+  const { error: txErr } = await (supabase.from("cash_transactions")).insert({
     cash_session_id: row.id,
     type: "opening",
     direction: "in",
@@ -110,7 +110,7 @@ export async function openCashSession(
 
   if (txErr) {
     console.error("[openCashSession] insert tx", txErr.message)
-    await (supabase.from("cash_sessions") as any).delete().eq("id", row.id)
+    await (supabase.from("cash_sessions")).delete().eq("id", row.id)
     return { data: null, error: txErr.message }
   }
 
@@ -143,7 +143,7 @@ export async function getCashSession(
   }
 
   const { data: sessionRow, error: sessionErr } = await (
-    supabase.from("cash_sessions") as any
+    supabase.from("cash_sessions")
   )
     .select("*")
     .eq("shift_log_id", input.shiftLogId)
@@ -160,7 +160,7 @@ export async function getCashSession(
   const session = sessionRow as CashSessionRow
 
   const { data: txRows, error: txErr } = await (
-    supabase.from("cash_transactions") as any
+    supabase.from("cash_transactions")
   )
     .select("*")
     .eq("cash_session_id", session.id)
@@ -287,7 +287,7 @@ export async function createCashTransaction(
   }
 
   const { data: sessionRow, error: sessErr } = await (
-    supabase.from("cash_sessions") as any
+    supabase.from("cash_sessions")
   )
     .select("*")
     .eq("id", input.cashSessionId)
@@ -306,7 +306,7 @@ export async function createCashTransaction(
   }
 
   const { data: inserted, error: insErr } = await (
-    supabase.from("cash_transactions") as any
+    supabase.from("cash_transactions")
   )
     .insert({
       cash_session_id: input.cashSessionId,
@@ -353,7 +353,7 @@ export async function closeCashSession(
   }
 
   const { data: sessionRow, error: sessionErr } = await (
-    supabase.from("cash_sessions") as any
+    supabase.from("cash_sessions")
   )
     .select("*")
     .eq("id", input.cashSessionId)
@@ -373,7 +373,7 @@ export async function closeCashSession(
   }
 
   const { data: txRows, error: txErr } = await (
-    supabase.from("cash_transactions") as any
+    supabase.from("cash_transactions")
   )
     .select("*")
     .eq("cash_session_id", input.cashSessionId)
@@ -393,7 +393,7 @@ export async function closeCashSession(
   const closedAt = new Date().toISOString()
 
   const { data: updated, error: updErr } = await (
-    supabase.from("cash_sessions") as any
+    supabase.from("cash_sessions")
   )
     .update({
       status: "closed",
@@ -470,7 +470,7 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
   }
 
   const { data: sessRow, error: sessErr } = await (
-    supabase.from("cash_sessions") as any
+    supabase.from("cash_sessions")
   )
     .select("*")
     .eq("id", input.cashSessionId)
@@ -511,7 +511,7 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
   const updatedOrder = updatedOrders as OrderPayRow
 
   const { data: txIns, error: txErr } = await (
-    supabase.from("cash_transactions") as any
+    supabase.from("cash_transactions")
   )
     .insert({
       cash_session_id: input.cashSessionId,

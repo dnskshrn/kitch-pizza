@@ -233,10 +233,17 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
 
   const unlockAudio = useCallback(() => {
     if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext ?? (window as any).webkitAudioContext)()
+      const win = window as typeof window & {
+        webkitAudioContext?: typeof AudioContext
+      }
+      const Ctor = window.AudioContext ?? win.webkitAudioContext
+      if (Ctor) {
+        audioCtxRef.current = new Ctor()
+      }
     }
-    if (audioCtxRef.current.state === 'suspended') {
-      void audioCtxRef.current.resume()
+    const ctx = audioCtxRef.current
+    if (ctx?.state === "suspended") {
+      void ctx.resume()
     }
   }, [])
 

@@ -44,7 +44,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
 import type { DeliveryZoneCheckResultPos } from "@/lib/actions/pos/check-delivery-zone-pos"
 import { cancelOrderPos } from "@/lib/actions/pos/cancel-order-pos"
-import { createDraftOrderPos } from "@/lib/actions/pos/create-draft-order"
 import { sendPosDraftToKitchen } from "@/lib/actions/pos/send-pos-draft-to-kitchen"
 import { updateOrderDetailsPos } from "@/lib/actions/pos/update-order-details-pos"
 import { updateOrderBrandPos } from "@/lib/actions/pos/update-order-brand-pos"
@@ -585,8 +584,6 @@ type OrderFormProps = {
   listOrder: PosOrder | null
   onClose: () => void
   ordersPanelRef?: RefObject<OrdersPanelHandle | null>
-  /** После успешного «бегунка»: новый черновик и сброс мастера на шаг 1. */
-  onContinueWizardWithNewDraft: (newOrderId: string) => void
 }
 
 function posLinePayloadFromCartItem(c: PosCartItem) {
@@ -613,7 +610,6 @@ export function OrderForm({
   listOrder,
   onClose,
   ordersPanelRef,
-  onContinueWizardWithNewDraft,
 }: OrderFormProps) {
   const updateOrderLocalState = useCallback(
     (orderId: string, patch: Partial<PosOrder>) => {
@@ -1717,7 +1713,6 @@ export function OrderForm({
     setRunnerBusy(true)
     setExtendError(null)
 
-    let finishedOk = false
     try {
       const brandOk = await persistBrandOrError()
       if (!brandOk) return
@@ -1732,7 +1727,6 @@ export function OrderForm({
       }
       await refetchOrdersPanel()
       toast.success(`Заказ №${res.orderNumber} отправлен на кухню`)
-      finishedOk = true
     } finally {
       setRunnerBusy(false)
       runnerKitchenLockedRef.current = false
@@ -1761,7 +1755,6 @@ export function OrderForm({
     runnerKitchenLockedRef.current = true
     setSubmitting(true)
 
-    let finishedOk = false
     try {
       const cartOk = await persistCartToServer()
       if (!cartOk) {
@@ -1785,7 +1778,6 @@ export function OrderForm({
 
       await refetchOrdersPanel()
       toast.success(`Заказ №${res.orderNumber} отправлен на кухню`)
-      finishedOk = true
     } finally {
       setRunnerBusy(false)
       setSubmitting(false)

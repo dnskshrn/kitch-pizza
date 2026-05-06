@@ -165,9 +165,6 @@ export default function PosHomePage() {
                 listOrder={wizardListOrder}
                 onClose={handleClosePanel}
                 ordersPanelRef={ordersPanelRef}
-                onContinueWizardWithNewDraft={(newOrderId) => {
-                  setPanel({ mode: "wizard", orderId: newOrderId })
-                }}
               />
             </div>
           ) : null}

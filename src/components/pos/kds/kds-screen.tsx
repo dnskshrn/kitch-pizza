@@ -316,7 +316,6 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
           event: "*",
           schema: "public",
           table: "orders",
-          filter: `brand_id=eq.${brandId}`,
         },
         (payload) => {
           const p = payload as {

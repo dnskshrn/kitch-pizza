@@ -2171,7 +2171,7 @@ export function OrderForm({
             orderNumber={orderNumber}
             isOpen={courierModalOpen}
             onClose={() => setCourierModalOpen(false)}
-            onAssigned={(_courierId) => {
+            onAssigned={() => {
               updateOrderLocalState(posOrderId, {
                 status: "delivery",
                 updated_at: new Date().toISOString(),

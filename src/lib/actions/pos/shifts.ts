@@ -3,7 +3,10 @@
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
-export async function ensureActiveShift(): Promise<{ clock_in: string }> {
+export async function ensureActiveShift(): Promise<{
+  id: string
+  clock_in: string
+}> {
   const staff = await getCurrentStaff()
   if (!staff) {
     throw new Error("Unauthorized")
@@ -27,23 +30,26 @@ export async function ensureActiveShift(): Promise<{ clock_in: string }> {
 
   const open = openRows?.[0] ?? null
 
-  if (open?.clock_in) {
-    return { clock_in: open.clock_in as string }
+  if (open?.id && open?.clock_in) {
+    return { id: open.id as string, clock_in: open.clock_in as string }
   }
 
   const now = new Date().toISOString()
   const { data: inserted, error: insErr } = await supabase
     .from("shift_logs")
     .insert({ staff_id: staff.id, clock_in: now })
-    .select("clock_in")
+    .select("id, clock_in")
     .single()
 
-  if (insErr || !inserted?.clock_in) {
+  if (insErr || !inserted?.id || !inserted?.clock_in) {
     console.error("[ensureActiveShift] insert", insErr?.message)
     throw new Error(insErr?.message ?? "insert failed")
   }
 
-  return { clock_in: inserted.clock_in as string }
+  return {
+    id: inserted.id as string,
+    clock_in: inserted.clock_in as string,
+  }
 }
 
 export async function closeShift(): Promise<void> {

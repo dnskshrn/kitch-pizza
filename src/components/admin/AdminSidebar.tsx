@@ -24,6 +24,7 @@ import {
   Warehouse,
   ChevronRight,
   Users,
+  Clock,
 } from "lucide-react"
 import { brands } from "@/brands"
 import { BrandSwitcher } from "@/components/admin/brand-switcher"
@@ -149,7 +150,10 @@ const generalNavGroups: NavGroup[] = [
     id: "staff",
     label: "Персонал",
     icon: Users,
-    items: [{ href: "/admin/staff", label: "Персонал", icon: Users }],
+    items: [
+      { href: "/admin/staff", label: "Сотрудники", icon: Users },
+      { href: "/admin/staff/shifts", label: "Смены", icon: Clock },
+    ],
   },
 ]
 

@@ -87,9 +87,9 @@ export async function updateStaff(id: string, data: UpdateStaffInput) {
 export async function generateTelegramLink(
   staffId: string,
 ): Promise<{ link: string }> {
-  const bot = process.env.TELEGRAM_BOT_USERNAME?.trim()
+  const bot = process.env.TELEGRAM_COURIER_BOT_USERNAME?.trim()
   if (!bot) {
-    throw new Error("TELEGRAM_BOT_USERNAME не задан")
+    throw new Error("TELEGRAM_COURIER_BOT_USERNAME не задан")
   }
   const supabase = createServiceRoleClient()
   const token = randomUUID()

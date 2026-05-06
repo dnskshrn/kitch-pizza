@@ -2,6 +2,9 @@
 
 import { normalizePosBrandSlug, type BrandConfig } from "@/brands/index"
 import type { OrdersPanelHandle } from "@/components/pos/orders-panel"
+import { AssignCourierModal } from "@/components/pos/AssignCourierModal"
+import { PayOrderModal } from "@/components/pos/pay-order-modal"
+import { useCashSession } from "@/components/pos/cash-session-context"
 import {
   PosHeaderIconButton,
   posHeaderCloseButtonClassName,
@@ -390,6 +393,9 @@ function CartPanel({
   errorBanner,
   cartInteractionDisabled,
   onRunnerSend,
+  onCourierAssign,
+  onPayOrder,
+  payOrderDisabled,
   runnerDisabled,
   runnerBusy,
   runnerAlreadySent,
@@ -403,6 +409,9 @@ function CartPanel({
   errorBanner?: string | null
   cartInteractionDisabled: boolean
   onRunnerSend?: () => void | Promise<void>
+  onCourierAssign?: () => void
+  onPayOrder?: () => void
+  payOrderDisabled?: boolean
   runnerDisabled?: boolean
   runnerBusy?: boolean
   /** Заказ уже ушёл на кухню (не черновик) — только подпись, без повторной отправки */
@@ -465,7 +474,24 @@ function CartPanel({
               {formatMdlAmount(subtotalBani)} лей
             </span>
           </div>
-          {onRunnerSend ? (
+          {onCourierAssign ? (
+            <button
+              type="button"
+              onClick={onCourierAssign}
+              className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
+            >
+              🛵 Выбрать курьера
+            </button>
+          ) : onPayOrder ? (
+            <button
+              type="button"
+              disabled={payOrderDisabled}
+              onClick={onPayOrder}
+              className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
+            >
+              Принять оплату
+            </button>
+          ) : onRunnerSend ? (
             <button
               type="button"
               disabled={runnerAlreadySent || runnerDisabled || runnerBusy}
@@ -672,7 +698,13 @@ export function OrderForm({
   const [runnerBusy, setRunnerBusy] = useState(false)
   /** Защита от двойного нажатия «Отправить бегунок» до смены черновика */
   const runnerKitchenLockedRef = useRef(false)
+  const [courierModalOpen, setCourierModalOpen] = useState(false)
+  const cashSession = useCashSession()
+  const [payModalOpen, setPayModalOpen] = useState(false)
   const runnerAlreadySent = listOrder?.status === "cooking"
+  const readyForCourierAssign =
+    listOrder?.status === "ready" && listOrder?.delivery_mode === "delivery"
+  const showPayOrderCta = listOrder?.status === "delivery"
   const [clearCartBusy, setClearCartBusy] = useState(false)
   const cartInteractionDisabled =
     cartActionBusy || extendSubmitting || clearCartBusy || runnerBusy
@@ -2086,7 +2118,18 @@ export function OrderForm({
               onOpenLine={(idx) => void openCartLineModal(idx)}
               errorBanner={extendError}
               cartInteractionDisabled={cartInteractionDisabled}
-              onRunnerSend={handleRunnerFromStep2}
+              onCourierAssign={
+                readyForCourierAssign ? () => setCourierModalOpen(true) : undefined
+              }
+              onPayOrder={
+                showPayOrderCta ? () => setPayModalOpen(true) : undefined
+              }
+              payOrderDisabled={!cashSession}
+              onRunnerSend={
+                listOrder?.status === "draft"
+                  ? handleRunnerFromStep2
+                  : undefined
+              }
               runnerDisabled={
                 runnerAlreadySent ||
                 cart.length === 0 ||
@@ -2122,6 +2165,36 @@ export function OrderForm({
           }
           onCartEditSave={saveCartLineFromModal}
         />
+        {orderNumber != null && (
+          <AssignCourierModal
+            orderId={posOrderId}
+            orderNumber={orderNumber}
+            isOpen={courierModalOpen}
+            onClose={() => setCourierModalOpen(false)}
+            onAssigned={(_courierId) => {
+              updateOrderLocalState(posOrderId, {
+                status: "delivery",
+                updated_at: new Date().toISOString(),
+              })
+              void refetchOrdersPanel()
+            }}
+          />
+        )}
+        {cashSession && listOrder ? (
+          <PayOrderModal
+            open={payModalOpen}
+            orderId={posOrderId}
+            orderTotal={listOrder.total}
+            paymentMethod={listOrder.payment_method}
+            cashSessionId={cashSession.cashSessionId}
+            staffId={cashSession.staffId}
+            onClose={() => setPayModalOpen(false)}
+            onSuccess={() => {
+              setPayModalOpen(false)
+              void refetchOrdersPanel()
+            }}
+          />
+        ) : null}
         {closeOrderDialog}
       </>
     )
@@ -2595,23 +2668,34 @@ export function OrderForm({
                   </dd>
                 </div>
               </dl>
-              <button
-                type="submit"
-                form="pos-wizard-details-form"
-                disabled={runnerAlreadySent || submitting}
-                className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
-              >
-                {runnerAlreadySent ? (
-                  "Бегунок отправлен"
-                ) : submitting ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="size-4 shrink-0 animate-spin" />
-                    Отправка…
-                  </span>
-                ) : (
-                  "Отправить бегунок"
-                )}
-              </button>
+              {showPayOrderCta ? (
+                <button
+                  type="button"
+                  disabled={!cashSession}
+                  onClick={() => setPayModalOpen(true)}
+                  className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
+                >
+                  Принять оплату
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  form="pos-wizard-details-form"
+                  disabled={runnerAlreadySent || submitting}
+                  className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
+                >
+                  {runnerAlreadySent ? (
+                    "Бегунок отправлен"
+                  ) : submitting ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="size-4 shrink-0 animate-spin" />
+                      Отправка…
+                    </span>
+                  ) : (
+                    "Отправить бегунок"
+                  )}
+                </button>
+              )}
             </div>
           </aside>
         </div>
@@ -2641,6 +2725,21 @@ export function OrderForm({
         }
         onCartEditSave={saveCartLineFromModal}
       />
+      {cashSession && listOrder ? (
+        <PayOrderModal
+          open={payModalOpen}
+          orderId={posOrderId}
+          orderTotal={listOrder.total}
+          paymentMethod={listOrder.payment_method}
+          cashSessionId={cashSession.cashSessionId}
+          staffId={cashSession.staffId}
+          onClose={() => setPayModalOpen(false)}
+          onSuccess={() => {
+            setPayModalOpen(false)
+            void refetchOrdersPanel()
+          }}
+        />
+      ) : null}
       {closeOrderDialog}
     </>
   )

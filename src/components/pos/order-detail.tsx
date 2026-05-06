@@ -2,6 +2,8 @@
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { useCashSession } from "@/components/pos/cash-session-context"
+import { PayOrderModal } from "@/components/pos/pay-order-modal"
 import { PosBrandMark } from "@/components/pos/pos-brand-mark"
 import { PosProductModal } from "@/components/pos/pos-product-modal"
 import { WebsiteNewActions } from "@/components/pos/order-card"
@@ -345,6 +347,8 @@ export function OrderDetail({
   interactionMode = "default",
 }: OrderDetailProps) {
   const isReadOnly = interactionMode === "readonly"
+  const cashSession = useCashSession()
+  const [payModalOpen, setPayModalOpen] = useState(false)
 
   const [order, setOrder] = useState<OrderDetailRow | null>(null)
   const [operatorName, setOperatorName] = useState<string | null>(null)
@@ -445,10 +449,9 @@ export function OrderDetail({
     if (!order) return
 
     const allowed =
-      (next === "delivery" &&
-        order.status === "ready" &&
-        order.delivery_mode === "delivery") ||
-      (next === "done" && order.status === "delivery")
+      next === "delivery" &&
+      order.status === "ready" &&
+      order.delivery_mode === "delivery"
 
     if (!allowed) return
 
@@ -946,6 +949,22 @@ export function OrderDetail({
         onClose={() => setProductEditModal(null)}
       />
 
+      {cashSession ? (
+        <PayOrderModal
+          open={payModalOpen}
+          orderId={order.id}
+          orderTotal={order.total}
+          paymentMethod={order.payment_method}
+          cashSessionId={cashSession.cashSessionId}
+          staffId={cashSession.staffId}
+          onClose={() => setPayModalOpen(false)}
+          onSuccess={() => {
+            setPayModalOpen(false)
+            void loadOrder()
+          }}
+        />
+      ) : null}
+
       {!isReadOnly ? (
         <div className="mt-auto shrink-0 space-y-2 border-t border-[#e8e8e8] bg-white p-3">
           {order.status === "done" || order.status === "cancelled" ? (
@@ -979,11 +998,11 @@ export function OrderDetail({
             <Button
               type="button"
               variant="default"
-              className="w-full"
-              disabled={statusBusy}
-              onClick={() => void handleStatus("done")}
+              className="w-full bg-[#ccff00] text-[#242424] hover:bg-[#b8f000] font-bold"
+              disabled={statusBusy || !cashSession}
+              onClick={() => setPayModalOpen(true)}
             >
-              Выдан
+              Принять оплату
             </Button>
           ) : null}
         </div>

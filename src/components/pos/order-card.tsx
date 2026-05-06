@@ -242,22 +242,6 @@ function ActionButtons({
       )
     }
   }
-  if (
-    order.status === "ready" &&
-    order.delivery_mode === "delivery"
-  ) {
-    return (
-      <div className="pt-1">
-        <button
-          type="button"
-          onClick={() => onStatusChange(order.id, "delivery")}
-          className="rounded-full bg-[#242424] px-3.5 py-1.5 text-[12px] font-bold text-white transition-colors hover:bg-[#3a3a3a]"
-        >
-          Передать курьеру
-        </button>
-      </div>
-    )
-  }
   if (order.status === "delivery") {
     return (
       <div className="pt-1">

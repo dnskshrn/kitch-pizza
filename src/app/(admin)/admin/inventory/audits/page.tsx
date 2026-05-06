@@ -1,4 +1,3 @@
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { StockAudit } from "@/types/database"
 import { AuditsTable, type AuditListRow } from "./audits-table"
@@ -19,13 +18,11 @@ function itemCountFromRow(row: RawAuditRow): number {
 }
 
 export default async function AdminInventoryAuditsPage() {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { data, error } = await supabase
     .from("stock_audits")
     .select("*, stock_audit_items(id)")
-    .eq("brand_id", brandId)
     .order("created_at", { ascending: false })
 
   if (error) {

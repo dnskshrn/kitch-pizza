@@ -81,12 +81,10 @@ export default async function AdminTechCardsPage() {
     supabase
       .from("ingredients")
       .select("id, name, unit")
-      .eq("brand_id", brandId)
       .order("name"),
     supabase
       .from("semi_finished")
       .select("id, name, yield_unit")
-      .eq("brand_id", brandId)
       .order("name"),
   ])
 

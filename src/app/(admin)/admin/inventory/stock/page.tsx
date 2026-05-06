@@ -1,4 +1,3 @@
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { Ingredient, IngredientStock, IngredientWithStock } from "@/types/database"
 import { displayUnit, toDisplayPrice } from "@/lib/inventory-units"
@@ -68,13 +67,11 @@ function maxStockUpdatedAt(rows: IngredientWithStock[]): string | null {
 }
 
 export default async function AdminInventoryStockPage() {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { data, error } = await supabase
     .from("ingredients")
     .select("*, ingredient_stock(*)")
-    .eq("brand_id", brandId)
     .order("name")
 
   if (error) {

@@ -1,6 +1,5 @@
 "use server"
 
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
@@ -23,7 +22,6 @@ function round4(value: number): number {
 }
 
 export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const supplierId = (payload.supplier_id ?? "").trim()
@@ -40,7 +38,6 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
     .from("suppliers")
     .select("id")
     .eq("id", supplierId)
-    .eq("brand_id", brandId)
     .eq("is_active", true)
     .maybeSingle()
 
@@ -82,7 +79,6 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
   const { data: ingRows, error: ingError } = await supabase
     .from("ingredients")
     .select("id")
-    .eq("brand_id", brandId)
     .in("id", ingredientIds)
 
   if (ingError) throw new Error(ingError.message)
@@ -101,7 +97,6 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
   const { data: orderRow, error: orderError } = await supabase
     .from("supply_orders")
     .insert({
-      brand_id: brandId,
       supplier_id: supplierId,
       delivery_date: payload.delivery_date,
       note,

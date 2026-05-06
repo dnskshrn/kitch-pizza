@@ -1,4 +1,3 @@
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { SemiFinishedItem } from "@/types/database"
 import type { IngredientSelectOption, SemiFinishedWithItems } from "./types"
@@ -31,20 +30,14 @@ function normalizeSemiFinished(row: Record<string, unknown>): SemiFinishedWithIt
 }
 
 export default async function AdminSemiFinishedPage() {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const [semiRes, ingRes] = await Promise.all([
     supabase
       .from("semi_finished")
       .select("*, semi_finished_items(*, ingredients(name, unit))")
-      .eq("brand_id", brandId)
       .order("name"),
-    supabase
-      .from("ingredients")
-      .select("id, name, unit")
-      .eq("brand_id", brandId)
-      .order("name"),
+    supabase.from("ingredients").select("id, name, unit").order("name"),
   ])
 
   if (semiRes.error) {

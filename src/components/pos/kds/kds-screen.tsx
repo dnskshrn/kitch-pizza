@@ -9,11 +9,6 @@ import {
   type KdsOrderRow,
 } from "@/components/pos/kds/types"
 import { Button } from "@/components/ui/button"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { brands as staticBrands, getBrandBySlug, normalizePosBrandSlug } from "@/brands/index"
 import { fetchKdsOrderByIdPos } from "@/lib/actions/pos/fetch-kds-orders"
 import {
@@ -62,7 +57,7 @@ function KdsClock() {
   return (
     <time
       dateTime={now.toISOString()}
-      className="font-mono text-[28px] font-bold tabular-nums tracking-tight text-white sm:text-[32px]"
+      className="font-mono text-[18px] font-bold tabular-nums tracking-tight text-white"
     >
       {txt}
     </time>
@@ -425,62 +420,32 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
       onClick={unlockAudio}
       onTouchStart={unlockAudio}
     >
-      <div className="shrink-0 p-5 pb-0">
+      <div className="shrink-0 px-4 pt-2 pb-0 sm:px-5 sm:pt-2.5">
         <nav
-          className="flex items-center gap-4 rounded-[16px] bg-[#242424] px-5 py-4"
+          className="flex items-center gap-2 py-1 sm:gap-3 sm:py-1.5"
           aria-label="KDS"
         >
           <div className="flex min-w-0 flex-1 items-center justify-start">
-            <PosFoodServiceLogo className="h-8 brightness-0 invert sm:h-9" />
+            <PosFoodServiceLogo className="h-6 w-auto brightness-0 invert sm:h-7" />
           </div>
           <div className="flex flex-none justify-center">
             <KdsClock />
           </div>
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
-            <Popover>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="truncate text-right text-[18px] font-bold text-white underline-offset-4 hover:underline"
-                >
-                  {activeBrandConfig.name}
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-56 p-2">
-                <p className="mb-2 px-2 text-xs font-medium text-muted-foreground">
-                  Бренд экрана кухни
-                </p>
-                <div className="flex flex-col gap-1">
-                  {staticBrands.map((b) => (
-                    <Button
-                      key={b.slug}
-                      type="button"
-                      variant={brandSlug === b.slug ? "secondary" : "ghost"}
-                      className="justify-start font-semibold"
-                      size="sm"
-                      onClick={() => setBrandSlug(b.slug)}
-                    >
-                      {b.name}
-                    </Button>
-                  ))}
-                </div>
-              </PopoverContent>
-            </Popover>
-
+          <div className="flex min-w-0 flex-1 items-center justify-end">
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="size-10 shrink-0 rounded-lg text-white hover:bg-white/10 hover:text-white"
+              className="size-9 shrink-0 rounded-lg text-white hover:bg-white/10 hover:text-white sm:size-10"
               aria-label="Меню"
             >
-              <MoreVertical className="size-6" />
+              <MoreVertical className="size-5 sm:size-6" />
             </Button>
           </div>
         </nav>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 pt-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 pt-2 sm:pt-3">
         {!brandId ? (
           <p className="px-6 text-sm text-white/70">
             Ожидание UUID бренда… проверьте slug в cookie{" "}
@@ -489,7 +454,7 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
           </p>
         ) : null}
 
-        <div className="flex min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-5 pb-5 [-webkit-overflow-scrolling:touch]">
+        <div className="flex min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 [-webkit-overflow-scrolling:touch] sm:px-5 sm:pb-5">
           <div className="flex h-full min-h-0 items-stretch gap-5">
             {orders.map((order) => (
               <KdsOrderCard

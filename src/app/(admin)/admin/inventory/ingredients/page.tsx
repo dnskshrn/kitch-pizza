@@ -1,4 +1,3 @@
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { IngredientStock, IngredientWithStock } from "@/types/database"
 import { IngredientsTable } from "./ingredients-table"
@@ -35,12 +34,10 @@ function normalizeIngredientStock(
 }
 
 export default async function AdminIngredientsPage() {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("ingredients")
     .select("*, ingredient_stock(*)")
-    .eq("brand_id", brandId)
     .order("name")
 
   if (error) {

@@ -217,26 +217,34 @@ export function KdsOrderCard({
       className="flex h-full min-h-0 w-[min(360px,85vw)] shrink-0 flex-col overflow-hidden rounded-[12px] bg-white"
       style={{ borderWidth: 5, borderStyle: "solid", borderColor }}
     >
-      <div className="flex shrink-0 flex-col gap-3 px-4 pt-4">
-        <header className="flex items-center justify-between gap-2">
-          <PosBrandMark brandSlug={brandSlug} size="md" />
-          <span className="font-mono text-[18px] font-bold tabular-nums text-[#111]/60">
-            #{order.order_number}
-          </span>
-        </header>
-
-        {!scheduledOnly ? (
+      <header className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4">
+        <PosBrandMark brandSlug={brandSlug} size="md" />
+        <div className="flex min-w-0 flex-1 justify-center">
           <div
-            className="flex items-center gap-2 rounded-[8px] px-3 py-2.5"
+            className="inline-flex items-center gap-2 rounded-full px-3 py-1.5"
             style={{ backgroundColor: palette.bg, color: palette.fg }}
           >
-            <Timer className="size-5 shrink-0 opacity-70" strokeWidth={2.5} />
-            <span className="font-mono text-[22px] font-bold tabular-nums">
-              {formatElapsedMmSs(elapsedSec)}
-            </span>
+            {scheduledOnly ? (
+              <>
+                <Clock className="size-4 shrink-0 opacity-70" strokeWidth={2.5} />
+                <span className="font-mono text-[18px] font-bold tabular-nums">
+                  {scheduledLabel}
+                </span>
+              </>
+            ) : (
+              <>
+                <Timer className="size-4 shrink-0 opacity-70" strokeWidth={2.5} />
+                <span className="font-mono text-[18px] font-bold tabular-nums">
+                  {formatElapsedMmSs(elapsedSec)}
+                </span>
+              </>
+            )}
           </div>
-        ) : null}
-      </div>
+        </div>
+        <span className="shrink-0 font-mono text-[18px] font-bold tabular-nums text-[#111]/60">
+          #{order.order_number}
+        </span>
+      </header>
 
       <div
         className="relative min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4"

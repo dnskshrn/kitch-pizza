@@ -1,6 +1,5 @@
 "use server"
 
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
@@ -37,13 +36,11 @@ export async function createSemiFinished(
 ) {
   const cleaned = items.filter((i) => i.ingredient_id.trim() !== "")
   assertValidItems(cleaned)
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { data: row, error } = await supabase
     .from("semi_finished")
     .insert({
-      brand_id: brandId,
       name: payload.name.trim(),
       yield_qty: payload.yield_qty,
       yield_unit: payload.yield_unit,
@@ -74,7 +71,6 @@ export async function updateSemiFinished(
 ) {
   const cleaned = items.filter((i) => i.ingredient_id.trim() !== "")
   assertValidItems(cleaned)
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { error: upError } = await supabase
@@ -85,7 +81,6 @@ export async function updateSemiFinished(
       yield_unit: payload.yield_unit,
     })
     .eq("id", id)
-    .eq("brand_id", brandId)
 
   if (upError) throw new Error(upError.message)
 
@@ -111,13 +106,11 @@ export async function updateSemiFinished(
 }
 
 export async function deleteSemiFinished(id: string) {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase
     .from("semi_finished")
     .delete()
     .eq("id", id)
-    .eq("brand_id", brandId)
 
   if (error) throw new Error(error.message)
   revalidatePath("/admin/inventory/semi-finished")

@@ -210,6 +210,11 @@ export interface Order {
   address_floor?: string | null
   address_apartment?: string | null
   address_intercom?: string | null
+  courier_id: string | null
+  courier_assigned_at: string | null
+  delivered_at: string | null
+  delivery_lat: number | null
+  delivery_lng: number | null
 }
 
 export interface OrderItem {
@@ -227,6 +232,15 @@ export interface OrderItem {
 
 export interface OrderWithItems extends Order {
   order_items: OrderItem[]
+}
+
+export type CourierLocation = {
+  staff_id: string
+  lat: number
+  lng: number
+  accuracy: number | null
+  is_on_shift: boolean
+  updated_at: string
 }
 
 export type Ingredient = {
@@ -279,6 +293,12 @@ export type ProductRecipeMeta = {
   variant_id: string | null
   output_qty: number
   output_unit: "g" | "ml" | "pcs"
+}
+
+export type Staff = {
+  tg_chat_id: number | null
+  tg_link_token: string | null
+  tg_link_token_expires_at: string | null
 }
 
 export type Supplier = {

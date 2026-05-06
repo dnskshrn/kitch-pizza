@@ -40,6 +40,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -47,6 +48,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  SidebarSeparator,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 
@@ -82,7 +84,7 @@ function buildInitialOpenState(pathname: string, groups: NavGroup[]) {
   return state
 }
 
-const navGroups: NavGroup[] = [
+const brandNavGroups: NavGroup[] = [
   {
     id: "orders",
     label: "Заказы",
@@ -110,6 +112,9 @@ const navGroups: NavGroup[] = [
       { href: "/admin/delivery-zones", label: "Зоны доставки", icon: Truck },
     ],
   },
+]
+
+const generalNavGroups: NavGroup[] = [
   {
     id: "inventory",
     label: "Склад",
@@ -141,12 +146,83 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    id: "settings",
-    label: "Настройки",
+    id: "staff",
+    label: "Персонал",
     icon: Users,
     items: [{ href: "/admin/staff", label: "Персонал", icon: Users }],
   },
 ]
+
+const allNavGroups: NavGroup[] = [...brandNavGroups, ...generalNavGroups]
+
+function renderSidebarNavGroups(
+  groups: NavGroup[],
+  pathname: string,
+  groupOpen: Record<string, boolean>,
+  setGroupOpen: React.Dispatch<
+    React.SetStateAction<Record<string, boolean>>
+  >,
+) {
+  return groups.map((group) => {
+    if (group.items.length === 1) {
+      const { href, label, icon: Icon } = group.items[0]
+      return (
+        <SidebarMenuItem key={group.id}>
+          <SidebarMenuButton
+            asChild
+            isActive={isPathActive(pathname, href)}
+            tooltip={label}
+          >
+            <Link href={href}>
+              <Icon />
+              <span>{label}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      )
+    }
+
+    const GroupIcon = group.icon
+    return (
+      <SidebarMenuItem key={group.id}>
+        <Collapsible
+          open={groupOpen[group.id]}
+          onOpenChange={(open) =>
+            setGroupOpen((s) => ({ ...s, [group.id]: open }))
+          }
+          className="group/collapsible w-full"
+        >
+          <CollapsibleTrigger asChild>
+            <SidebarMenuButton
+              tooltip={group.label}
+              isActive={groupHasActive(pathname, group)}
+            >
+              <GroupIcon />
+              <span>{group.label}</span>
+              <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+            </SidebarMenuButton>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <SidebarMenuSub>
+              {group.items.map(({ href, label }) => (
+                <SidebarMenuSubItem key={href}>
+                  <SidebarMenuSubButton
+                    asChild
+                    isActive={isPathActive(pathname, href)}
+                  >
+                    <Link href={href}>
+                      <span>{label}</span>
+                    </Link>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              ))}
+            </SidebarMenuSub>
+          </CollapsibleContent>
+        </Collapsible>
+      </SidebarMenuItem>
+    )
+  })
+}
 
 type AdminBrand = {
   id: string
@@ -168,14 +244,14 @@ export default function AdminSidebar({
   const brand = brands.find((b) => b.slug === currentSlug) ?? brands[0]
 
   const [groupOpen, setGroupOpen] = React.useState<Record<string, boolean>>(
-    () => buildInitialOpenState(pathname, navGroups)
+    () => buildInitialOpenState(pathname, allNavGroups)
   )
 
   React.useEffect(() => {
     setGroupOpen((prev) => {
       let next = prev
       let changed = false
-      for (const g of navGroups) {
+      for (const g of allNavGroups) {
         if (g.items.length <= 1) continue
         if (groupHasActive(pathname, g) && prev[g.id] !== true) {
           if (next === prev) next = { ...prev }
@@ -216,67 +292,29 @@ export default function AdminSidebar({
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
+          <SidebarGroupLabel>Бренд</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navGroups.map((group) => {
-                if (group.items.length === 1) {
-                  const { href, label, icon: Icon } = group.items[0]
-                  return (
-                    <SidebarMenuItem key={group.id}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isPathActive(pathname, href)}
-                        tooltip={label}
-                      >
-                        <Link href={href}>
-                          <Icon />
-                          <span>{label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )
-                }
-
-                const GroupIcon = group.icon
-                return (
-                  <SidebarMenuItem key={group.id}>
-                    <Collapsible
-                      open={groupOpen[group.id]}
-                      onOpenChange={(open) =>
-                        setGroupOpen((s) => ({ ...s, [group.id]: open }))
-                      }
-                      className="group/collapsible w-full"
-                    >
-                      <CollapsibleTrigger asChild>
-                        <SidebarMenuButton
-                          tooltip={group.label}
-                          isActive={groupHasActive(pathname, group)}
-                        >
-                          <GroupIcon />
-                          <span>{group.label}</span>
-                          <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                        </SidebarMenuButton>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <SidebarMenuSub>
-                          {group.items.map(({ href, label }) => (
-                            <SidebarMenuSubItem key={href}>
-                              <SidebarMenuSubButton
-                                asChild
-                                isActive={isPathActive(pathname, href)}
-                              >
-                                <Link href={href}>
-                                  <span>{label}</span>
-                                </Link>
-                              </SidebarMenuSubButton>
-                            </SidebarMenuSubItem>
-                          ))}
-                        </SidebarMenuSub>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  </SidebarMenuItem>
-                )
-              })}
+              {renderSidebarNavGroups(
+                brandNavGroups,
+                pathname,
+                groupOpen,
+                setGroupOpen,
+              )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarSeparator className="my-1" />
+        <SidebarGroup>
+          <SidebarGroupLabel>Общее</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {renderSidebarNavGroups(
+                generalNavGroups,
+                pathname,
+                groupOpen,
+                setGroupOpen,
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

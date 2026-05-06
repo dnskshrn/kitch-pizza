@@ -1,6 +1,5 @@
 "use server"
 
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
@@ -13,10 +12,8 @@ export type SupplierPayload = {
 }
 
 export async function createSupplier(payload: SupplierPayload) {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase.from("suppliers").insert({
-    brand_id: brandId,
     name: payload.name.trim(),
     contact_person: payload.contact_person?.trim() || null,
     phone: payload.phone?.trim() || null,
@@ -28,7 +25,6 @@ export async function createSupplier(payload: SupplierPayload) {
 }
 
 export async function updateSupplier(id: string, payload: SupplierPayload) {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
   const { error } = await supabase
     .from("suppliers")
@@ -40,13 +36,11 @@ export async function updateSupplier(id: string, payload: SupplierPayload) {
       is_active: payload.is_active,
     })
     .eq("id", id)
-    .eq("brand_id", brandId)
   if (error) throw new Error(error.message)
   revalidatePath("/admin/inventory/suppliers")
 }
 
 export async function deleteSupplier(id: string) {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { count, error: countError } = await supabase
@@ -65,7 +59,6 @@ export async function deleteSupplier(id: string) {
     .from("suppliers")
     .delete()
     .eq("id", id)
-    .eq("brand_id", brandId)
 
   if (error) throw new Error(error.message)
   revalidatePath("/admin/inventory/suppliers")

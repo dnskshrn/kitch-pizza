@@ -1,6 +1,5 @@
 "use server"
 
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { Ingredient, StockAudit, StockAuditItem } from "@/types/database"
@@ -26,7 +25,6 @@ function firstRelation<T extends Record<string, unknown>>(rel: unknown): T | nul
 
 async function loadAuditDetail(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  brandId: string,
   auditId: string
 ): Promise<AuditDetail> {
   const { data, error } = await supabase
@@ -50,7 +48,6 @@ async function loadAuditDetail(
     `
     )
     .eq("id", auditId)
-    .eq("brand_id", brandId)
     .single()
 
   if (error) throw new Error(error.message)
@@ -109,13 +106,11 @@ async function loadAuditDetail(
 }
 
 export async function createAudit(): Promise<AuditDetail> {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { data: auditRow, error: auditError } = await supabase
     .from("stock_audits")
     .insert({
-      brand_id: brandId,
       note: null,
       confirmed_at: null,
     })
@@ -130,7 +125,6 @@ export async function createAudit(): Promise<AuditDetail> {
   const { data: ingredients, error: ingError } = await supabase
     .from("ingredients")
     .select("id, ingredient_stock(quantity)")
-    .eq("brand_id", brandId)
     .order("name")
 
   if (ingError) {
@@ -164,20 +158,18 @@ export async function createAudit(): Promise<AuditDetail> {
   }
 
   revalidatePath("/admin/inventory/audits")
-  return loadAuditDetail(supabase, brandId, auditId)
+  return loadAuditDetail(supabase, auditId)
 }
 
 export async function getAuditDetail(auditId: string): Promise<AuditDetail> {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  return loadAuditDetail(supabase, brandId, auditId)
+  return loadAuditDetail(supabase, auditId)
 }
 
 export async function updateAuditItemActualQty(
   itemId: string,
   actualQty: number | null
 ): Promise<{ actual_qty: number | null; diff: number | null }> {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { data: item, error: itemErr } = await supabase
@@ -191,13 +183,13 @@ export async function updateAuditItemActualQty(
 
   const { data: audit, error: auditErr } = await supabase
     .from("stock_audits")
-    .select("brand_id, confirmed_at")
+    .select("confirmed_at")
     .eq("id", item.audit_id)
     .maybeSingle()
 
   if (auditErr) throw new Error(auditErr.message)
-  if (!audit || audit.brand_id !== brandId) {
-    throw new Error("Нет доступа к инвентаризации")
+  if (!audit) {
+    throw new Error("Инвентаризация не найдена")
   }
   if (audit.confirmed_at != null) {
     throw new Error("Инвентаризация уже подтверждена")
@@ -232,14 +224,12 @@ export async function updateAuditItemActualQty(
 }
 
 export async function confirmAudit(auditId: string) {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { data: audit, error: auditErr } = await supabase
     .from("stock_audits")
     .select("id, confirmed_at")
     .eq("id", auditId)
-    .eq("brand_id", brandId)
     .maybeSingle()
 
   if (auditErr) throw new Error(auditErr.message)
@@ -286,7 +276,6 @@ export async function confirmAudit(auditId: string) {
     .from("stock_audits")
     .update({ confirmed_at: ts })
     .eq("id", auditId)
-    .eq("brand_id", brandId)
 
   if (finErr) throw new Error(finErr.message)
 

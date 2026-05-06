@@ -1,4 +1,3 @@
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import type { Ingredient, Supplier } from "@/types/database"
 import { SuppliesTable } from "./supplies-table"
@@ -67,7 +66,6 @@ function toSupplyOrderViewModel(row: RawSupplyOrderRow): SupplyOrderViewModel {
 }
 
 export default async function AdminInventorySuppliesPage() {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const [ordersRes, suppliersRes, ingredientsRes] = await Promise.all([
@@ -93,14 +91,9 @@ export default async function AdminInventorySuppliesPage() {
         )
       `
       )
-      .eq("brand_id", brandId)
       .order("created_at", { ascending: false }),
-    supabase.from("suppliers").select("*").eq("brand_id", brandId).order("name"),
-    supabase
-      .from("ingredients")
-      .select("*")
-      .eq("brand_id", brandId)
-      .order("name"),
+    supabase.from("suppliers").select("*").order("name"),
+    supabase.from("ingredients").select("*").order("name"),
   ])
 
   if (ordersRes.error) {

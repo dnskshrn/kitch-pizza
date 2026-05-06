@@ -1,6 +1,5 @@
 "use server"
 
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
@@ -10,13 +9,11 @@ export type IngredientPayload = {
 }
 
 export async function createIngredient(payload: IngredientPayload) {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { data: row, error } = await supabase
     .from("ingredients")
     .insert({
-      brand_id: brandId,
       name: payload.name.trim(),
       unit: payload.unit,
     })
@@ -38,7 +35,6 @@ export async function createIngredient(payload: IngredientPayload) {
 }
 
 export async function updateIngredient(id: string, payload: IngredientPayload) {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
   const { error } = await supabase
@@ -48,7 +44,6 @@ export async function updateIngredient(id: string, payload: IngredientPayload) {
       unit: payload.unit,
     })
     .eq("id", id)
-    .eq("brand_id", brandId)
 
   if (error) throw new Error(error.message)
 

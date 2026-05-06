@@ -12,9 +12,11 @@ import {
   selectCartDiscount,
   useCartStore,
 } from "@/lib/store/cart-store"
+import { getStorefrontDeliveryLineDisplay } from "@/lib/storefront-delivery-display"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { createClient } from "@/lib/supabase/client"
+import { cn } from "@/lib/utils"
 import type { CartItem } from "@/types/cart"
 import type { Category } from "@/types/database"
 import { getBrandBySlug } from "@/brands"
@@ -203,6 +205,9 @@ export function CartContent({
   const applyCondimentDefaults = useCartStore((s) => s.applyCondimentDefaults)
   const condimentQuantities = useCartStore((s) => s.condimentQuantities)
   const setCondimentQty = useCartStore((s) => s.setCondimentQty)
+  const deliveryMode = useDeliveryStore((s) => s.mode)
+  const selectedZone = useDeliveryStore((s) => s.selectedZone)
+  const outOfZone = useDeliveryStore((s) => s.outOfZone)
   const deliveryFeeBani = useDeliveryStore((s) =>
     s.getDeliveryFeeBani(subtotal),
   )
@@ -307,6 +312,25 @@ export function CartContent({
   const grandTotalBani = goodsBani + deliveryFeeBani
   const totalLei = formatMoney(grandTotalBani, lang)
   const isCartEmpty = items.length === 0
+  const deliveryLine = useMemo(
+    () =>
+      getStorefrontDeliveryLineDisplay({
+        lang,
+        mode: deliveryMode,
+        selectedZone,
+        deliveryFeeBani,
+        freeLabel: t.common.free,
+        outOfZone,
+      }),
+    [
+      lang,
+      deliveryMode,
+      selectedZone,
+      deliveryFeeBani,
+      t.common.free,
+      outOfZone,
+    ],
+  )
 
   async function handleApplyPromo() {
     await applyPromo(codeInput)
@@ -496,15 +520,36 @@ export function CartContent({
                   </span>
                 </div>
               ) : null}
-              <div className="flex items-center justify-between text-sm">
-                <span className="inline-flex items-center gap-1 text-[rgba(36,36,36,0.55)]">
-                  {t.cart.delivery}
-                  <Info className="size-[14px] shrink-0" strokeWidth={2} aria-hidden />
-                  {/* TODO: расчёт доставки */}
-                </span>
-                <span className="tabular-nums text-[rgba(36,36,36,0.45)]">
-                  -- {lang === "RO" ? "lei" : "лей"}
-                </span>
+              <div className="space-y-1">
+                <div className="flex items-start justify-between gap-3 text-sm">
+                  <span className="inline-flex min-w-0 items-center gap-1 text-[rgba(36,36,36,0.55)]">
+                    {t.cart.delivery}
+                    <Info className="size-[14px] shrink-0" strokeWidth={2} aria-hidden />
+                  </span>
+                  <span
+                    className={cn(
+                      "shrink-0 text-right tabular-nums",
+                      deliveryLine.amountLine.includes("--")
+                        ? "text-[rgba(36,36,36,0.45)]"
+                        : "font-medium text-[#242424]",
+                    )}
+                  >
+                    {deliveryLine.amountLine}
+                  </span>
+                </div>
+                {deliveryLine.sublineKind === "addressCost" ? (
+                  <p className="text-[11px] leading-snug text-[rgba(36,36,36,0.45)]">
+                    {t.cart.deliveryCostAddressHint}
+                  </p>
+                ) : null}
+                {deliveryLine.sublineKind === "outOfZone" ? (
+                  <p
+                    className="text-[11px] leading-snug text-red-600"
+                    role="alert"
+                  >
+                    {t.cart.deliveryOutsideZoneHint}
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>

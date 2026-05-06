@@ -2,14 +2,17 @@
 
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
+import type { OrderStatus } from "@/types/database"
 
 export type CreateOrderPosItem = {
   menuItemId: string
   name: string
-  size: "s" | "l" | null
+  /** Текст размера / снимок варианта для `order_items.size` */
+  size: string | null
   price: number
   qty: number
   toppings?: { name: string; price: number }[]
+  variantId?: string | null
 }
 
 export type CreateOrderPosInput = {
@@ -19,6 +22,10 @@ export type CreateOrderPosInput = {
   userPhone: string
   deliveryMode: "delivery" | "pickup"
   deliveryAddress?: string
+  addressEntrance?: string | null
+  addressFloor?: string | null
+  addressApartment?: string | null
+  addressIntercom?: string | null
   paymentMethod: "cash" | "card"
   /** Сдача с (бани), только при оплате наличными */
   changeFrom?: number
@@ -28,10 +35,12 @@ export type CreateOrderPosInput = {
   discount?: number
   /** Доставка в бани */
   deliveryFee?: number
+  /** Стартовый статус заказа. По умолчанию `new`. */
+  initialStatus?: OrderStatus
 }
 
 export type CreateOrderPosResult =
-  | { success: true; orderId: string }
+  | { success: true; orderId: string; orderNumber: number }
   | { success: false; error: string }
 
 async function getBrandIdBySlug(slug: string): Promise<string | null> {
@@ -66,6 +75,8 @@ export async function createOrderPos(
     return { success: false, error: "Добавьте позиции в заказ" }
   }
 
+  const effectiveDeliveryMode = input.deliveryMode
+
   const name = input.userName.trim()
   const phone = input.userPhone.trim()
   if (!name) return { success: false, error: "Укажите имя" }
@@ -83,13 +94,15 @@ export async function createOrderPos(
   }
 
   const deliveryAddress =
-    input.deliveryMode === "pickup"
+    effectiveDeliveryMode === "pickup"
       ? "Самовывоз — bd. Dacia 27"
       : (input.deliveryAddress?.trim() ?? "")
 
-  if (input.deliveryMode === "delivery" && !deliveryAddress) {
+  if (effectiveDeliveryMode === "delivery" && !deliveryAddress) {
     return { success: false, error: "Укажите адрес доставки" }
   }
+
+  const initialStatus: OrderStatus = input.initialStatus ?? "new"
 
   const changeFromBani =
     input.paymentMethod === "cash" && input.changeFrom != null
@@ -103,14 +116,17 @@ export async function createOrderPos(
     return { success: false, error: "Сервер временно недоступен" }
   }
 
+  const cookingStartedAtIso =
+    initialStatus === "cooking" ? new Date().toISOString() : null
+
   const insertRow: Record<string, unknown> = {
     brand_id: brandId,
     operator_id: staff.id,
     source: "pos",
     user_name: name,
     user_phone: phone,
-    status: "new",
-    delivery_mode: input.deliveryMode,
+    status: initialStatus,
+    delivery_mode: effectiveDeliveryMode,
     delivery_address: deliveryAddress,
     payment_method: input.paymentMethod,
     change_from: changeFromBani,
@@ -120,12 +136,29 @@ export async function createOrderPos(
     promo_code: input.promoCode?.trim() || null,
     scheduled_time: "asap",
     comment: input.comment?.trim() || null,
+    address_entrance:
+      input.addressEntrance != null
+        ? String(input.addressEntrance).trim() || null
+        : null,
+    address_floor:
+      input.addressFloor != null ? String(input.addressFloor).trim() || null : null,
+    address_apartment:
+      input.addressApartment != null
+        ? String(input.addressApartment).trim() || null
+        : null,
+    address_intercom:
+      input.addressIntercom != null
+        ? String(input.addressIntercom).trim() || null
+        : null,
+    ...(cookingStartedAtIso != null
+      ? { cooking_started_at: cookingStartedAtIso }
+      : {}),
   }
 
   const { data: orderRow, error: orderError } = await supabase
     .from("orders")
     .insert(insertRow)
-    .select("id")
+    .select("id, order_number")
     .single()
 
   if (orderError || !orderRow) {
@@ -134,11 +167,13 @@ export async function createOrderPos(
   }
 
   const orderId = (orderRow as { id: string }).id
+  const orderNumber = Number((orderRow as { order_number: number }).order_number)
 
   const itemRows = input.items.map((it) => ({
     order_id: orderId,
     menu_item_id: it.menuItemId,
     lunch_set_id: null as string | null,
+    variant_id: it.variantId ?? null,
     item_name: it.name,
     size: it.size,
     quantity: it.qty,
@@ -154,5 +189,5 @@ export async function createOrderPos(
     return { success: false, error: "Не удалось сохранить состав заказа" }
   }
 
-  return { success: true, orderId }
+  return { success: true, orderId, orderNumber }
 }

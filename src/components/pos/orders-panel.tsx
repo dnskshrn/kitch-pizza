@@ -133,7 +133,18 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
 
     const handleStatusChange = useCallback(
       async (orderId: string, newStatus: string) => {
+        const order = mainOrders.find((o) => o.id === orderId)
+        if (!order) return
+
         const next = newStatus
+        const allowed =
+          (next === "delivery" &&
+            order.status === "ready" &&
+            order.delivery_mode === "delivery") ||
+          (next === "done" && order.status === "delivery")
+
+        if (!allowed) return
+
         const updatedAt = new Date().toISOString()
         const supabase = createClient()
         const { error } = await supabase
@@ -146,7 +157,7 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
         }
         await reloadOrders()
       },
-      [reloadOrders],
+      [mainOrders, reloadOrders],
     )
 
     const handleWebsiteAccept = useCallback(

@@ -165,6 +165,10 @@ export const messages = {
       subtotal: "Товары",
       discount: "Скидка",
       delivery: "Доставка",
+      deliveryCostAddressHint:
+        "Выберите адрес доставки для уточнения её стоимости",
+      deliveryOutsideZoneHint:
+        "Указанный адрес не в зоне доставки",
       total: "Итого",
       checkout: "К оформлению",
       closeCart: "Закрыть корзину",
@@ -365,6 +369,10 @@ export const messages = {
       subtotal: "Produse",
       discount: "Reducere",
       delivery: "Livrare",
+      deliveryCostAddressHint:
+        "Selectați adresa de livrare pentru a preciza costul acesteia.",
+      deliveryOutsideZoneHint:
+        "Adresa indicată nu se află în zona de livrare.",
       total: "Total",
       checkout: "Spre checkout",
       closeCart: "Închide coșul",

@@ -1,17 +1,7 @@
 "use client"
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { AuthButton } from "@/components/client/auth/auth-button"
 import { ClientContainer } from "@/components/client/client-container"
 import { useLanguage } from "@/lib/store/language-store"
-
-export const NAV_LINKS = [
-  { href: "#", labelKey: "work" },
-  { href: "#", labelKey: "about" },
-  { href: "#", labelKey: "contacts" },
-  { href: "#", labelKey: "cashback" },
-  { href: "#", labelKey: "review" },
-] as const
 
 export function TopNav() {
   const { lang, setLang, t } = useLanguage()
@@ -51,31 +41,10 @@ export function TopNav() {
     </div>
   )
 
-  const linkClass =
-    "text-foreground cursor-pointer transition-all duration-200 hover:text-foreground/80"
-
   return (
     <header className="bg-white hidden md:block">
-      <ClientContainer className="flex h-11 items-center justify-end text-[12px] md:justify-between">
-        <nav className="hidden min-w-0 flex-1 flex-wrap items-center gap-x-5 md:flex">
-            {NAV_LINKS.map((link) => (
-              <a key={link.labelKey} href={link.href} className={linkClass}>
-                {t.nav[link.labelKey]}
-              </a>
-            ))}
-            <span className="text-muted-foreground" aria-hidden>
-              ·
-            </span>
-            <a
-              href="#"
-              className="cursor-pointer rounded-full bg-[#ECFFA1] px-3 py-1 font-semibold text-[#5F7600] transition-all duration-200 hover:bg-[#dff090] active:scale-[0.97]"
-            >
-              {t.common.promotions}
-            </a>
-        </nav>
-
-        <div className="hidden flex-1 items-center justify-end gap-6 md:flex">
-          {/* <AuthButton /> */}
+      <ClientContainer className="flex h-11 items-center justify-end text-[12px]">
+        <div className="hidden w-full items-center justify-end gap-6 md:flex">
           {scheduleBlock}
           {langBlock}
         </div>

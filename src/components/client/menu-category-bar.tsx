@@ -180,6 +180,7 @@ export function MenuCategoryBar({
   const itemCount = useCartStore(selectCartItemCount)
   const subtotal = useCartStore(selectCartSubtotal)
   const openCart = useCartStore((s) => s.openCart)
+  const cartButtonPulseKey = useCartStore((s) => s.cartButtonPulseKey)
   const isBoutiqueMenu = hasBoutiqueMenu(brandSlug)
 
   useEffect(() => {
@@ -270,7 +271,13 @@ export function MenuCategoryBar({
 
   if (categories.length === 0) {
     if (isBoutiqueMenu) {
-      return <TheSpotFloatingCart lang={lang} t={t} subtotal={subtotal} onOpen={openCart} />
+      return <TheSpotFloatingCart
+        lang={lang}
+        t={t}
+        subtotal={subtotal}
+        pulseKey={cartButtonPulseKey}
+        onOpen={openCart}
+      />
     }
 
     return (
@@ -287,12 +294,23 @@ export function MenuCategoryBar({
                 <StickyBarLogo isStuck={isStuck} t={t} />
               </div>
               <div className="hidden md:block">
-                <CartPill count={itemCount} t={t} onOpen={openCart} />
+                <CartPill
+                  count={itemCount}
+                  t={t}
+                  pulseKey={cartButtonPulseKey}
+                  onOpen={openCart}
+                />
               </div>
             </ClientContainer>
           )}
         </StickyCategoryChrome>
-        <KitchFloatingCart lang={lang} t={t} subtotal={subtotal} onOpen={openCart} />
+        <KitchFloatingCart
+          lang={lang}
+          t={t}
+          subtotal={subtotal}
+          pulseKey={cartButtonPulseKey}
+          onOpen={openCart}
+        />
       </>
     )
   }
@@ -306,11 +324,18 @@ export function MenuCategoryBar({
           itemCount={itemCount}
           lang={lang}
           t={t}
+          pulseKey={cartButtonPulseKey}
           onOpenCart={openCart}
           onSelect={handleSelectCategory}
           setButtonRef={setCategoryButtonRef}
         />
-        <TheSpotFloatingCart lang={lang} t={t} subtotal={subtotal} onOpen={openCart} />
+        <TheSpotFloatingCart
+          lang={lang}
+          t={t}
+          subtotal={subtotal}
+          pulseKey={cartButtonPulseKey}
+          onOpen={openCart}
+        />
       </>
     )
   }
@@ -323,11 +348,18 @@ export function MenuCategoryBar({
         itemCount={itemCount}
         lang={lang}
         t={t}
+        pulseKey={cartButtonPulseKey}
         onOpenCart={openCart}
         onSelect={handleSelectCategory}
         setButtonRef={setCategoryButtonRef}
       />
-      <KitchFloatingCart lang={lang} t={t} subtotal={subtotal} onOpen={openCart} />
+      <KitchFloatingCart
+        lang={lang}
+        t={t}
+        subtotal={subtotal}
+        pulseKey={cartButtonPulseKey}
+        onOpen={openCart}
+      />
     </>
   )
 }
@@ -338,6 +370,7 @@ function TheSpotCategoryBar({
   itemCount,
   lang,
   t,
+  pulseKey,
   onOpenCart,
   onSelect,
   setButtonRef,
@@ -347,6 +380,7 @@ function TheSpotCategoryBar({
   itemCount: number
   lang: Lang
   t: StorefrontMessages
+  pulseKey: number
   onOpenCart: () => void
   onSelect: (slug: string) => void
   setButtonRef: (slug: string) => (node: HTMLButtonElement | null) => void
@@ -409,9 +443,13 @@ function TheSpotCategoryBar({
                 })}
               </nav>
               <button
+                key={pulseKey}
                 type="button"
                 onClick={onOpenCart}
-                className="flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[var(--color-accent)] px-4 text-[14px] font-bold text-white transition-all duration-200 hover:brightness-[0.98] active:scale-[0.98]"
+                className={cn(
+                  "flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[var(--color-accent)] px-4 text-[14px] font-bold text-white transition-all duration-200 hover:brightness-[0.98] active:scale-[0.98]",
+                  pulseKey > 0 && "storefront-cart-trigger-pulse",
+                )}
                 aria-label={`${t.cart.checkout}: ${itemCount}`}
               >
                 <ShoppingBasket className="size-5" strokeWidth={2.2} aria-hidden />
@@ -432,6 +470,7 @@ function DefaultCategoryBar({
   itemCount,
   lang,
   t,
+  pulseKey,
   onOpenCart,
   onSelect,
   setButtonRef,
@@ -441,6 +480,7 @@ function DefaultCategoryBar({
   itemCount: number
   lang: Lang
   t: StorefrontMessages
+  pulseKey: number
   onOpenCart: () => void
   onSelect: (slug: string) => void
   setButtonRef: (slug: string) => (node: HTMLButtonElement | null) => void
@@ -482,7 +522,12 @@ function DefaultCategoryBar({
             </nav>
           </div>
           <div className="hidden md:block">
-            <CartPill count={itemCount} t={t} onOpen={onOpenCart} />
+            <CartPill
+              count={itemCount}
+              t={t}
+              pulseKey={pulseKey}
+              onOpen={onOpenCart}
+            />
           </div>
         </ClientContainer>
       )}
@@ -494,11 +539,13 @@ function KitchFloatingCart({
   lang,
   t,
   subtotal,
+  pulseKey,
   onOpen,
 }: {
   lang: Lang
   t: StorefrontMessages
   subtotal: number
+  pulseKey: number
   onOpen: () => void
 }) {
   return (
@@ -510,9 +557,13 @@ function KitchFloatingCart({
         </span>
       </div>
       <button
+        key={pulseKey}
         type="button"
         onClick={onOpen}
-        className="flex h-12 w-full cursor-pointer items-center justify-between rounded-full bg-[#ccff00] px-5 text-[15px] font-bold text-[#242424] transition-all duration-200 active:scale-[0.98]"
+        className={cn(
+          "flex h-12 w-full cursor-pointer items-center justify-between rounded-full bg-[#ccff00] px-5 text-[15px] font-bold text-[#242424] transition-all duration-200 active:scale-[0.98]",
+          pulseKey > 0 && "storefront-cart-trigger-pulse",
+        )}
       >
         <span className="inline-flex items-center gap-2">
           <ShoppingBasket className="size-5" strokeWidth={2.2} />
@@ -530,11 +581,13 @@ function TheSpotFloatingCart({
   lang,
   t,
   subtotal,
+  pulseKey,
   onOpen,
 }: {
   lang: Lang
   t: StorefrontMessages
   subtotal: number
+  pulseKey: number
   onOpen: () => void
 }) {
   return (
@@ -546,9 +599,13 @@ function TheSpotFloatingCart({
         </span>
       </div>
       <button
+        key={pulseKey}
         type="button"
         onClick={onOpen}
-        className="flex h-12 w-full cursor-pointer items-center justify-between rounded-full bg-[var(--color-accent)] px-5 text-[15px] font-bold text-white transition-all duration-200 active:scale-[0.98]"
+        className={cn(
+          "flex h-12 w-full cursor-pointer items-center justify-between rounded-full bg-[var(--color-accent)] px-5 text-[15px] font-bold text-white transition-all duration-200 active:scale-[0.98]",
+          pulseKey > 0 && "storefront-cart-trigger-pulse",
+        )}
       >
         <span className="inline-flex items-center gap-2">
           <ShoppingBasket className="size-5" strokeWidth={2.2} />
@@ -565,17 +622,23 @@ function TheSpotFloatingCart({
 function CartPill({
   count,
   t,
+  pulseKey,
   onOpen,
 }: {
   count: number
   t: StorefrontMessages
+  pulseKey: number
   onOpen: () => void
 }) {
   return (
     <button
+      key={pulseKey}
       type="button"
       onClick={onOpen}
-      className="text-foreground inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[#ccff00] px-4 py-2.5 text-sm font-bold transition-all duration-200 hover:bg-[#b8f000] active:scale-[0.97]"
+      className={cn(
+        "text-foreground inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[#ccff00] px-4 py-2.5 text-sm font-bold transition-all duration-200 hover:bg-[#b8f000] active:scale-[0.97]",
+        pulseKey > 0 && "storefront-cart-trigger-pulse",
+      )}
       aria-label={`${t.cart.total}: ${count}`}
     >
       <ShoppingBasket className="size-5 shrink-0" strokeWidth={2} aria-hidden />

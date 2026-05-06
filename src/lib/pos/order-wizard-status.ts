@@ -3,8 +3,10 @@ export function isWizardOrderStatus(status: string): boolean {
   return (
     status === "draft" ||
     status === "new" ||
-    status === "in_progress" ||
-    status === "delivering"
+    status === "confirmed" ||
+    status === "cooking" ||
+    status === "ready" ||
+    status === "delivery"
   )
 }
 

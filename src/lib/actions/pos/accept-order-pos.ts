@@ -11,7 +11,7 @@ export type AcceptOrderPosResult =
   | { success: true }
   | { success: false; error: string }
 
-/** Принятие входящего заказа с сайта: переход из `new` в `in_progress`. */
+/** Принятие входящего заказа с сайта: переход из `new` в `confirmed`. */
 export async function acceptOrderPos(
   input: AcceptOrderPosInput,
 ): Promise<AcceptOrderPosResult> {
@@ -57,7 +57,7 @@ export async function acceptOrderPos(
   const { error: updError } = await supabase
     .from("orders")
     .update({
-      status: "in_progress",
+      status: "confirmed",
       updated_at: updatedAt,
     })
     .eq("id", input.orderId)

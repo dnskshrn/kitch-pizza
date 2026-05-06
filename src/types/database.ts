@@ -175,8 +175,7 @@ export type OrderStatus =
   | "confirmed"
   | "cooking"
   | "ready"
-  | "in_progress"
-  | "delivering"
+  | "delivery"
   | "done"
   | "cancelled"
   | "rejected"
@@ -200,6 +199,8 @@ export interface Order {
   discount: number
   promo_code: string | null
   scheduled_time: string | null
+  /** Заполняется при переходе в `cooking` (триггер в БД); для таймера KDS */
+  cooking_started_at?: string | null
   comment: string | null
   tg_message_id: string | null
   created_at: string
@@ -226,4 +227,105 @@ export interface OrderItem {
 
 export interface OrderWithItems extends Order {
   order_items: OrderItem[]
+}
+
+export type Ingredient = {
+  id: string
+  brand_id: string
+  name: string
+  unit: "g" | "ml" | "pcs"
+  created_at: string
+}
+
+export type IngredientStock = {
+  ingredient_id: string
+  quantity: number
+  updated_at: string
+  avg_cost: number
+}
+
+export type IngredientWithStock = Ingredient & {
+  ingredient_stock: IngredientStock | null
+}
+
+export type SemiFinished = {
+  id: string
+  brand_id: string
+  name: string
+  yield_qty: number
+  yield_unit: "g" | "ml" | "pcs"
+  created_at: string
+}
+
+export type SemiFinishedItem = {
+  id: string
+  semi_finished_id: string
+  ingredient_id: string
+  quantity: number
+}
+
+export type ProductRecipe = {
+  id: string
+  menu_item_id: string
+  variant_id: string | null
+  ingredient_id: string | null
+  semi_finished_id: string | null
+  quantity: number
+}
+
+export type ProductRecipeMeta = {
+  id: string
+  menu_item_id: string
+  variant_id: string | null
+  output_qty: number
+  output_unit: "g" | "ml" | "pcs"
+}
+
+export type Supplier = {
+  id: string
+  brand_id: string
+  name: string
+  contact_person: string | null
+  phone: string | null
+  note: string | null
+  is_active: boolean
+  created_at: string
+}
+
+export type SupplyOrder = {
+  id: string
+  brand_id: string
+  supplier_id: string | null
+  delivery_date: string
+  note: string | null
+  total_cost_ex_vat: number | null
+  total_cost_inc_vat: number | null
+  created_at: string
+}
+
+export type SupplyOrderItem = {
+  id: string
+  supply_order_id: string
+  ingredient_id: string
+  quantity: number
+  price_per_unit: number
+  vat_rate: number
+  price_per_unit_with_vat: number
+}
+
+export type StockAudit = {
+  id: string
+  brand_id: string
+  note: string | null
+  confirmed_at: string | null
+  created_at: string
+}
+
+export type StockAuditItem = {
+  id: string
+  audit_id: string
+  ingredient_id: string
+  expected_qty: number
+  actual_qty: number | null
+  diff: number | null
 }

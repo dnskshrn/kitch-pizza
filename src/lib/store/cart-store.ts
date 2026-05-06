@@ -72,6 +72,11 @@ type CartState = {
   items: CartItem[]
   condimentQuantities: Record<string, number>
   condimentsMeta: Record<string, CondimentLineMeta>
+  /**
+   * Увеличивается при добавлении товара/кол-ва/кондимента — для анимации кнопки корзины.
+   * Не персистится (см. `partialize`).
+   */
+  cartButtonPulseKey: number
   /** Время последнего сохранения корзины в persist (для срока годности). */
   savedAt: number
   isOpen: boolean
@@ -159,6 +164,7 @@ export const useCartStore = create<CartState>()(
       items: [],
       condimentQuantities: {},
       condimentsMeta: {},
+      cartButtonPulseKey: 0,
       savedAt: Date.now(),
       isOpen: false,
       appliedPromo: null,
@@ -168,6 +174,7 @@ export const useCartStore = create<CartState>()(
       setCondimentQty: (id, qty) =>
         set((s) => {
           const q = Math.max(0, Math.floor(Number(qty)) || 0)
+          const prev = s.condimentQuantities[id] ?? 0
           const nextQty = { ...s.condimentQuantities, [id]: q }
           const patch = ensurePromoMinOrder(
             s.appliedPromo,
@@ -178,6 +185,8 @@ export const useCartStore = create<CartState>()(
           return {
             ...touchSavedAt(),
             condimentQuantities: nextQty,
+            cartButtonPulseKey:
+              q > prev ? s.cartButtonPulseKey + 1 : s.cartButtonPulseKey,
             ...patch,
           }
         }),
@@ -301,6 +310,7 @@ export const useCartStore = create<CartState>()(
           return {
             ...touchSavedAt(),
             items: newItems,
+            cartButtonPulseKey: state.cartButtonPulseKey + 1,
             ...patch,
           }
         })
@@ -344,6 +354,10 @@ export const useCartStore = create<CartState>()(
           return {
             ...touchSavedAt(),
             items: newItems,
+            cartButtonPulseKey:
+              delta === 1
+                ? s.cartButtonPulseKey + 1
+                : s.cartButtonPulseKey,
             ...patch,
           }
         })

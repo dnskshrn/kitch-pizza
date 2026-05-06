@@ -9,6 +9,7 @@ import {
   STOREFRONT_MAP_ATTRIBUTION,
   STOREFRONT_MAP_TILE_URL,
 } from "@/lib/leaflet-storefront-tiles"
+import { STOREFRONT_PICKUP_LATLNG } from "@/lib/storefront-pickup-location"
 import { cn } from "@/lib/utils"
 import L from "leaflet"
 import { Navigation } from "lucide-react"
@@ -17,7 +18,6 @@ import { useEffect, useRef, useState } from "react"
 import "leaflet/dist/leaflet.css"
 
 const CHISINAU: [number, number] = [47.0245, 28.8322]
-const RESTAURANT: [number, number] = [47.0167, 28.8414]
 const FALLBACK_ZONE_COLOR = "#5F7600"
 
 function closeCoord(a: number, b: number, eps = 1e-5) {
@@ -179,7 +179,7 @@ export default function DeliveryMap({
 
     if (mode === "pickup") {
       ignoreNextMoveEndRef.current = true
-      map.setView(RESTAURANT, 15)
+      map.setView(STOREFRONT_PICKUP_LATLNG, 15)
       return
     }
 
@@ -207,21 +207,19 @@ export default function DeliveryMap({
         data-vaul-no-drag
         className="absolute inset-0 z-0 min-h-[240px]"
       />
-      {mode === "delivery" ? (
-        <div
-          className="pointer-events-none absolute left-1/2 top-1/2 z-[5] -translate-x-1/2 -translate-y-full"
-          aria-hidden
-        >
-          <Image
-            src="/Address_Pin_Geo.svg"
-            alt=""
-            width={43}
-            height={61}
-            className="h-[52px] w-auto drop-shadow-md"
-            unoptimized
-          />
-        </div>
-      ) : null}
+      <div
+        className="pointer-events-none absolute left-1/2 top-1/2 z-[5] -translate-x-1/2 -translate-y-full"
+        aria-hidden
+      >
+        <Image
+          src="/Address_Pin_Geo.svg"
+          alt=""
+          width={43}
+          height={61}
+          className="h-[52px] w-auto drop-shadow-md"
+          unoptimized
+        />
+      </div>
       {onLocateMe ? (
         <button
           type="button"

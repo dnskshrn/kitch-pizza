@@ -401,6 +401,34 @@
   }
 }
 
+/* Витрина: короткий «пружинный» акцент на кнопке корзины после добавления позиции */
+@keyframes storefront-cart-pulse {
+  0% {
+    transform: scale(1);
+  }
+  32% {
+    transform: scale(1.06);
+  }
+  58% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.storefront-cart-trigger-pulse {
+  animation: storefront-cart-pulse 0.52s cubic-bezier(0.34, 1.45, 0.64, 1) both;
+  transform-origin: center;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .storefront-cart-trigger-pulse {
+    animation: none;
+  }
+}
+
 @theme inline {
   --font-sans:  var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono:  var(--font-mono), ui-monospace, monospace;

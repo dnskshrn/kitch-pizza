@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
@@ -14,16 +15,38 @@ import {
   Ticket,
   Truck,
   LogOut,
-  Leaf,
+  Package,
+  FlaskConical,
+  Boxes,
+  ClipboardList,
+  Receipt,
+  ClipboardCheck,
+  Warehouse,
+  ChevronRight,
+  Users,
 } from "lucide-react"
 import { brands } from "@/brands"
 import { BrandSwitcher } from "@/components/admin/brand-switcher"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 
@@ -33,33 +56,95 @@ type NavItem = {
   icon: LucideIcon
 }
 
-const navGroups: { label: string; items: NavItem[] }[] = [
+type NavGroup = {
+  id: string
+  label: string
+  /** Иконка секции для свёрнутого сайдбара и collapsible-триггера */
+  icon: LucideIcon
+  items: NavItem[]
+}
+
+function isPathActive(pathname: string, href: string) {
+  if (pathname === href) return true
+  return pathname.startsWith(`${href}/`)
+}
+
+function groupHasActive(pathname: string, group: NavGroup) {
+  return group.items.some((i) => isPathActive(pathname, i.href))
+}
+
+function buildInitialOpenState(pathname: string, groups: NavGroup[]) {
+  const state: Record<string, boolean> = {}
+  for (const g of groups) {
+    if (g.items.length <= 1) continue
+    state[g.id] = groupHasActive(pathname, g)
+  }
+  return state
+}
+
+const navGroups: NavGroup[] = [
   {
-    label: "Аналитика",
+    id: "orders",
+    label: "Заказы",
+    icon: ShoppingBag,
     items: [{ href: "/admin/orders", label: "Заказы", icon: ShoppingBag }],
   },
   {
+    id: "menu",
     label: "Меню",
+    icon: UtensilsCrossed,
     items: [
       { href: "/admin/categories", label: "Категории", icon: LayoutGrid },
-      { href: "/admin/menu", label: "Позиции", icon: UtensilsCrossed },
-      { href: "/admin/featured-menu", label: "Новое и популярное", icon: Star },
+      { href: "/admin/menu", label: "Позиции меню", icon: UtensilsCrossed },
       { href: "/admin/toppings", label: "Топпинги", icon: Layers },
-      { href: "/admin/condiments", label: "Кондименты", icon: Leaf },
-    ],
-  },
-  {
-    label: "Маркетинг",
-    items: [
       { href: "/admin/promotions", label: "Акции", icon: Tag },
       { href: "/admin/promo-codes", label: "Промокоды", icon: Ticket },
+      { href: "/admin/featured-menu", label: "Фичеред", icon: Star },
     ],
   },
   {
+    id: "delivery",
     label: "Доставка",
+    icon: Truck,
     items: [
       { href: "/admin/delivery-zones", label: "Зоны доставки", icon: Truck },
     ],
+  },
+  {
+    id: "inventory",
+    label: "Склад",
+    icon: Warehouse,
+    items: [
+      { href: "/admin/inventory/stock", label: "Остатки", icon: Warehouse },
+      { href: "/admin/inventory/suppliers", label: "Поставщики", icon: Package },
+      {
+        href: "/admin/inventory/ingredients",
+        label: "Ингредиенты",
+        icon: FlaskConical,
+      },
+      {
+        href: "/admin/inventory/semi-finished",
+        label: "Полуфабрикаты",
+        icon: Boxes,
+      },
+      {
+        href: "/admin/inventory/tech-cards",
+        label: "Техкарты",
+        icon: ClipboardList,
+      },
+      { href: "/admin/inventory/supplies", label: "Поставки", icon: Receipt },
+      {
+        href: "/admin/inventory/audits",
+        label: "Инвентаризации",
+        icon: ClipboardCheck,
+      },
+    ],
+  },
+  {
+    id: "settings",
+    label: "Настройки",
+    icon: Users,
+    items: [{ href: "/admin/staff", label: "Персонал", icon: Users }],
   },
 ]
 
@@ -72,14 +157,35 @@ type AdminBrand = {
 export default function AdminSidebar({
   adminBrands,
   currentSlug,
+  userEmail,
 }: {
   adminBrands: AdminBrand[]
   currentSlug: string
+  userEmail: string | null
 }) {
   const pathname = usePathname()
   const router = useRouter()
-  const brand =
-    brands.find((b) => b.slug === currentSlug) ?? brands[0]
+  const brand = brands.find((b) => b.slug === currentSlug) ?? brands[0]
+
+  const [groupOpen, setGroupOpen] = React.useState<Record<string, boolean>>(
+    () => buildInitialOpenState(pathname, navGroups)
+  )
+
+  React.useEffect(() => {
+    setGroupOpen((prev) => {
+      let next = prev
+      let changed = false
+      for (const g of navGroups) {
+        if (g.items.length <= 1) continue
+        if (groupHasActive(pathname, g) && prev[g.id] !== true) {
+          if (next === prev) next = { ...prev }
+          next[g.id] = true
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [pathname])
 
   async function handleLogout() {
     const supabase = createClient()
@@ -89,57 +195,115 @@ export default function AdminSidebar({
   }
 
   return (
-    <aside className="bg-background sticky top-0 flex h-screen w-60 flex-shrink-0 flex-col border-r">
-      <div className="border-b px-6 py-3">
-        <Link
-          href="/admin/categories"
-          className="inline-flex focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
-        >
-          <Image
-            src={brand.logo}
-            alt={brand.name}
-            width={151}
-            height={70}
-            className="h-[45px] w-auto object-contain object-left"
-            priority
-          />
-        </Link>
-      </div>
-      <BrandSwitcher brands={adminBrands} currentSlug={currentSlug} />
-      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
-        {navGroups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarGroupContent className="flex flex-col gap-1">
-              {group.items.map(({ href, label, icon: Icon }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                    pathname === href
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </Link>
-              ))}
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
-      </nav>
-      <div className="border-t p-3">
-        <Button
-          variant="ghost"
-          className="text-muted-foreground w-full justify-start gap-3"
-          onClick={handleLogout}
-        >
-          <LogOut className="h-4 w-4" />
-          Выйти
-        </Button>
-      </div>
-    </aside>
+    <Sidebar collapsible="offcanvas" variant="inset">
+      <SidebarHeader className="border-sidebar-border border-b">
+        <div className="px-2 pt-2 pb-1">
+          <Link
+            href="/admin/categories"
+            className="focus-visible:ring-sidebar-ring inline-flex rounded-sm focus-visible:ring-2 focus-visible:outline-none"
+          >
+            <Image
+              src={brand.logo}
+              alt={brand.name}
+              width={151}
+              height={70}
+              className="h-[40px] w-auto object-contain object-left"
+              priority
+            />
+          </Link>
+        </div>
+        <BrandSwitcher brands={adminBrands} currentSlug={currentSlug} />
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {navGroups.map((group) => {
+                if (group.items.length === 1) {
+                  const { href, label, icon: Icon } = group.items[0]
+                  return (
+                    <SidebarMenuItem key={group.id}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isPathActive(pathname, href)}
+                        tooltip={label}
+                      >
+                        <Link href={href}>
+                          <Icon />
+                          <span>{label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                }
+
+                const GroupIcon = group.icon
+                return (
+                  <SidebarMenuItem key={group.id}>
+                    <Collapsible
+                      open={groupOpen[group.id]}
+                      onOpenChange={(open) =>
+                        setGroupOpen((s) => ({ ...s, [group.id]: open }))
+                      }
+                      className="group/collapsible w-full"
+                    >
+                      <CollapsibleTrigger asChild>
+                        <SidebarMenuButton
+                          tooltip={group.label}
+                          isActive={groupHasActive(pathname, group)}
+                        >
+                          <GroupIcon />
+                          <span>{group.label}</span>
+                          <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                        </SidebarMenuButton>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <SidebarMenuSub>
+                          {group.items.map(({ href, label }) => (
+                            <SidebarMenuSubItem key={href}>
+                              <SidebarMenuSubButton
+                                asChild
+                                isActive={isPathActive(pathname, href)}
+                              >
+                                <Link href={href}>
+                                  <span>{label}</span>
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          ))}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </SidebarMenuItem>
+                )
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+      <SidebarFooter>
+        <div className="bg-sidebar-accent/30 border-sidebar-border space-y-2 rounded-lg border p-3">
+          <p
+            className={cn(
+              "truncate text-xs",
+              userEmail
+                ? "text-sidebar-foreground/80"
+                : "text-sidebar-foreground/50"
+            )}
+          >
+            {userEmail ?? "Нет email"}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full justify-start gap-2"
+            onClick={handleLogout}
+          >
+            <LogOut className="size-4" />
+            Выйти
+          </Button>
+        </div>
+      </SidebarFooter>
+    </Sidebar>
   )
 }

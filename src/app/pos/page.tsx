@@ -159,11 +159,15 @@ export default function PosHomePage() {
           {panel.mode === "wizard" ? (
             <div className="flex h-full min-h-0 flex-col overflow-hidden">
               <OrderForm
+                key={panel.orderId}
                 orderId={panel.orderId}
                 wizardBrands={wizardBrands}
                 listOrder={wizardListOrder}
                 onClose={handleClosePanel}
                 ordersPanelRef={ordersPanelRef}
+                onContinueWizardWithNewDraft={(newOrderId) => {
+                  setPanel({ mode: "wizard", orderId: newOrderId })
+                }}
               />
             </div>
           ) : null}

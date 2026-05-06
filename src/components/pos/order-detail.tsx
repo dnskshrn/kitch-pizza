@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { PosBrandMark } from "@/components/pos/pos-brand-mark"
 import { PosProductModal } from "@/components/pos/pos-product-modal"
+import { WebsiteNewActions } from "@/components/pos/order-card"
 import {
   PosHeaderIconButton,
   posHeaderCloseButtonClassName,
@@ -14,6 +15,8 @@ import {
   updateOrderItemCompositionPos,
   updateOrderItemQuantityPos,
 } from "@/lib/actions/pos/update-order-items"
+import { acceptOrderPos } from "@/lib/actions/pos/accept-order-pos"
+import { rejectOrderPos } from "@/lib/actions/pos/reject-order-pos"
 import { orderItemSizeDisplayLabel } from "@/lib/order-item-size-display"
 import {
   POS_MENU_ITEM_FOR_MODAL_SELECT,
@@ -21,7 +24,7 @@ import {
 } from "@/lib/pos/menu-item-modal-row"
 import { createClient } from "@/lib/supabase/client"
 import type { MenuItem, MenuItemVariant } from "@/types/database"
-import type { PosCartItem, PosOrderSource, PosOrderStatus } from "@/types/pos"
+import type { PosCartItem, PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 import {
   CalendarDays,
   CreditCard,
@@ -78,7 +81,16 @@ function statusBadge(status: PosOrderStatus) {
           Новый
         </Badge>
       )
-    case "in_progress":
+    case "confirmed":
+      return (
+        <Badge
+          className="border-0 bg-sky-500 text-white hover:bg-sky-500/90"
+          variant="default"
+        >
+          Подтверждён
+        </Badge>
+      )
+    case "cooking":
       return (
         <Badge
           className="border-0 bg-blue-600 text-white hover:bg-blue-600/90"
@@ -87,7 +99,16 @@ function statusBadge(status: PosOrderStatus) {
           Готовится
         </Badge>
       )
-    case "delivering":
+    case "ready":
+      return (
+        <Badge
+          className="border-0 bg-amber-600 text-white hover:bg-amber-600/90"
+          variant="default"
+        >
+          Готов
+        </Badge>
+      )
+    case "delivery":
       return (
         <Badge
           className="border-0 bg-orange-500 text-white hover:bg-orange-500/90"
@@ -329,6 +350,7 @@ export function OrderDetail({
   const [operatorName, setOperatorName] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
+  const [websiteActionBusy, setWebsiteActionBusy] = useState(false)
   const [itemBusyId, setItemBusyId] = useState<string | null>(null)
   const [productEditModal, setProductEditModal] = useState<{
     menuRow: EditMenuItemModalRow
@@ -421,6 +443,15 @@ export function OrderDetail({
 
   const handleStatus = async (next: PosOrderStatus) => {
     if (!order) return
+
+    const allowed =
+      (next === "delivery" &&
+        order.status === "ready" &&
+        order.delivery_mode === "delivery") ||
+      (next === "done" && order.status === "delivery")
+
+    if (!allowed) return
+
     setStatusBusy(true)
     const supabase = createClient()
     const updatedAt = new Date().toISOString()
@@ -434,6 +465,37 @@ export function OrderDetail({
     }
     await loadOrder()
     setStatusBusy(false)
+  }
+
+  const handleWebsiteAcceptDetail = async (orderIdParam: string) => {
+    setWebsiteActionBusy(true)
+    try {
+      const res = await acceptOrderPos({ orderId: orderIdParam })
+      if (!res.success) {
+        console.error("[order-detail] accept", res.error)
+        return
+      }
+      await loadOrder()
+    } finally {
+      setWebsiteActionBusy(false)
+    }
+  }
+
+  const handleWebsiteRejectDetail = async (
+    orderIdParam: string,
+    reason: string,
+  ) => {
+    setWebsiteActionBusy(true)
+    try {
+      const res = await rejectOrderPos({ orderId: orderIdParam, reason })
+      if (!res.success) {
+        console.error("[order-detail] reject", res.error)
+        return
+      }
+      await loadOrder()
+    } finally {
+      setWebsiteActionBusy(false)
+    }
   }
 
   const handleQuantityChange = async (item: OrderItemRow, delta: number) => {
@@ -894,50 +956,26 @@ export function OrderDetail({
             </p>
           ) : null}
           {order.status === "new" && parseSource(order.source) === "website" ? (
-            <div className="flex flex-col gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full border-destructive/40 text-destructive hover:bg-destructive/10"
-                disabled={statusBusy}
-                onClick={() => void handleStatus("cancelled")}
-              >
-                Отклонить
-              </Button>
-              <Button
-                type="button"
-                variant="default"
-                className="w-full"
-                disabled={statusBusy}
-                onClick={() => void handleStatus("in_progress")}
-              >
-                Принять
-              </Button>
-            </div>
+            <WebsiteNewActions
+              order={order as unknown as PosOrder}
+              busy={websiteActionBusy}
+              onAccept={handleWebsiteAcceptDetail}
+              onReject={handleWebsiteRejectDetail}
+            />
           ) : null}
-          {order.status === "new" && parseSource(order.source) === "pos" ? (
+          {order.status === "ready" &&
+          order.delivery_mode === "delivery" ? (
             <Button
               type="button"
               variant="default"
               className="w-full"
               disabled={statusBusy}
-              onClick={() => void handleStatus("in_progress")}
+              onClick={() => void handleStatus("delivery")}
             >
-              В работу
+              Передать курьеру
             </Button>
           ) : null}
-          {order.status === "in_progress" ? (
-            <Button
-              type="button"
-              variant="default"
-              className="w-full"
-              disabled={statusBusy}
-              onClick={() => void handleStatus("delivering")}
-            >
-              Готово к выдаче
-            </Button>
-          ) : null}
-          {order.status === "delivering" ? (
+          {order.status === "delivery" ? (
             <Button
               type="button"
               variant="default"

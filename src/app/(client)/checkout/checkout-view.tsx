@@ -1016,6 +1016,7 @@ export function CheckoutView({
               deliveryFeeBani={deliveryFeeBani}
               mode={mode}
               selectedZone={selectedZone}
+              outOfZone={outOfZone}
               grandTotal={grandTotal}
               onCheckout={handleSubmit}
               checkoutSubmitting={orderSubmitting}

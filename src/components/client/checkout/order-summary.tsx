@@ -6,6 +6,7 @@ import {
   type CartLang,
 } from "@/lib/cart-helpers"
 import { formatMoney, goodsPhrase, pickLocalizedName } from "@/lib/i18n/storefront"
+import { getStorefrontDeliveryLineDisplay } from "@/lib/storefront-delivery-display"
 import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
 import type { CartItem } from "@/types/cart"
@@ -26,6 +27,8 @@ export type OrderSummaryProps = {
   deliveryFeeBani: number
   mode: "delivery" | "pickup"
   selectedZone: DeliveryZone | null
+  /** Адрес привязан к точке вне зон доставки. */
+  outOfZone?: boolean
   grandTotal: number
   /** Если не передан — кнопка «Оформить заказ» не показывается (например, страница успеха). */
   onCheckout?: () => void | Promise<void>
@@ -42,19 +45,25 @@ export function OrderSummary({
   deliveryFeeBani,
   mode,
   selectedZone,
+  outOfZone = false,
   grandTotal,
   onCheckout,
   checkoutSubmitting = false,
   checkoutError = null,
 }: OrderSummaryProps) {
   const { t } = useLanguage()
-  const deliveryLabel = useMemo(() => {
-    if (mode === "pickup") return t.common.free
-    if (!selectedZone) return "--"
-    if (selectedZone.delivery_price_bani === 0) return t.common.free
-    if (deliveryFeeBani === 0) return t.common.free
-    return formatMoney(deliveryFeeBani, lang)
-  }, [mode, selectedZone, deliveryFeeBani, lang, t.common.free])
+  const deliveryLine = useMemo(
+    () =>
+      getStorefrontDeliveryLineDisplay({
+        lang,
+        mode,
+        selectedZone,
+        deliveryFeeBani,
+        freeLabel: t.common.free,
+        outOfZone,
+      }),
+    [lang, mode, selectedZone, deliveryFeeBani, t.common.free, outOfZone],
+  )
 
   const showCheckoutCta = typeof onCheckout === "function"
 
@@ -118,12 +127,33 @@ export function OrderSummary({
           <span>{goodsPhrase(itemCount, lang)}</span>
           <span className="tabular-nums">{formatMoney(subtotal, lang)}</span>
         </div>
-        <div className="flex items-center justify-between text-[14px] font-medium text-[rgba(36,36,36,0.5)]">
-          <span className="inline-flex items-center gap-1">
-            {t.checkout.deliveryCost}
-            <Info className="size-[14px] shrink-0 opacity-60" strokeWidth={2} />
-          </span>
-          <span className="tabular-nums text-[#242424]">{deliveryLabel}</span>
+        <div className="space-y-1">
+          <div className="flex items-start justify-between gap-3 text-[14px] font-medium text-[rgba(36,36,36,0.5)]">
+            <span className="inline-flex min-w-0 items-center gap-1">
+              {t.checkout.deliveryCost}
+              <Info className="size-[14px] shrink-0 opacity-60" strokeWidth={2} />
+            </span>
+            <span
+              className={cn(
+                "shrink-0 text-right tabular-nums",
+                deliveryLine.amountLine.includes("--")
+                  ? "text-[rgba(36,36,36,0.45)]"
+                  : "font-medium text-[#242424]",
+              )}
+            >
+              {deliveryLine.amountLine}
+            </span>
+          </div>
+          {deliveryLine.sublineKind === "addressCost" ? (
+            <p className="text-[12px] font-normal leading-snug text-[rgba(36,36,36,0.45)]">
+              {t.cart.deliveryCostAddressHint}
+            </p>
+          ) : null}
+          {deliveryLine.sublineKind === "outOfZone" ? (
+            <p className="text-[12px] font-normal leading-snug text-red-600" role="alert">
+              {t.cart.deliveryOutsideZoneHint}
+            </p>
+          ) : null}
         </div>
         {discount > 0 ? (
           <div className="flex items-center justify-between text-[14px] font-medium">

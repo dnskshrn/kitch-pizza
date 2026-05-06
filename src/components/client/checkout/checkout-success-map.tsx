@@ -5,12 +5,11 @@ import {
   STOREFRONT_MAP_ATTRIBUTION,
   STOREFRONT_MAP_TILE_URL,
 } from "@/lib/leaflet-storefront-tiles"
+import { STOREFRONT_PICKUP_LATLNG } from "@/lib/storefront-pickup-location"
 import { cn } from "@/lib/utils"
 import L from "leaflet"
 import { useEffect, useRef } from "react"
 import "leaflet/dist/leaflet.css"
-
-const RESTAURANT: L.LatLngTuple = [47.0167, 28.8414]
 
 type CheckoutSuccessMapProps = {
   mode: "delivery" | "pickup"
@@ -39,7 +38,7 @@ export function CheckoutSuccessMap({
     const point: L.LatLngTuple =
       mode === "delivery" && lat != null && lng != null
         ? [lat, lng]
-        : RESTAURANT
+        : STOREFRONT_PICKUP_LATLNG
 
     const map = L.map(el, {
       scrollWheelZoom: true,

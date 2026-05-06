@@ -185,8 +185,7 @@ export function FiltersBar() {
             <SelectItem value="confirmed">Подтверждён</SelectItem>
             <SelectItem value="cooking">Готовится</SelectItem>
             <SelectItem value="ready">Готов</SelectItem>
-            <SelectItem value="in_progress">В работе</SelectItem>
-            <SelectItem value="delivering">Доставляется</SelectItem>
+            <SelectItem value="delivery">Доставляется</SelectItem>
             <SelectItem value="done">Выполнен</SelectItem>
             <SelectItem value="cancelled">Отменён</SelectItem>
             <SelectItem value="rejected">Отклонён</SelectItem>

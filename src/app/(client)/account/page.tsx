@@ -29,11 +29,15 @@ function formatDate(value: string) {
 
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
+    draft: "Черновик",
     new: "Новый",
-    in_progress: "Готовится",
-    delivering: "В доставке",
+    confirmed: "Подтверждён",
+    cooking: "Готовится",
+    ready: "Готов",
+    delivery: "Доставляется",
     done: "Выполнен",
     cancelled: "Отменён",
+    rejected: "Отклонён",
   }
 
   return labels[status] ?? status

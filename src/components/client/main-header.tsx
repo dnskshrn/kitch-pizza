@@ -194,12 +194,6 @@ function TheSpotDesktopHeader({
   onLangChange: (lang: Lang) => void
   t: StorefrontMessages
 }) {
-  const navLinks = [
-    { href: "#menu", label: t.common.menu },
-    { href: "#promotions", label: t.common.promotions },
-    { href: "#contacts", label: t.common.contacts },
-  ] as const
-
   return (
     <div className="hidden w-full md:block">
       <div className="flex min-h-[64px] w-full items-center gap-2 rounded-full bg-white p-2 shadow-[0_14px_42px_rgba(36,36,36,0.04)] md:-mx-2 md:w-[calc(100%+1rem)] lg:-mx-4 lg:w-[calc(100%+2rem)] lg:gap-3">
@@ -224,54 +218,41 @@ function TheSpotDesktopHeader({
           </span>
         </button>
 
-        <nav
-          className="hidden min-w-0 flex-1 items-center justify-center gap-2 lg:flex"
-          aria-label={t.header.navigationLabel}
-        >
-          {navLinks.map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              className="rounded-full px-3.5 py-2.5 text-[14px] font-bold text-[var(--color-text)] transition-all duration-200 hover:bg-[var(--color-bg)]"
+        <div className="ml-auto flex shrink-0 items-center gap-2 lg:gap-3">
+          <div className="hidden items-center gap-1 rounded-full bg-[var(--color-bg)] p-1 text-[13px] font-bold lg:flex">
+            <button
+              type="button"
+              onClick={() => onLangChange("RU")}
+              className={
+                overlayLang === "RU"
+                  ? "rounded-full bg-white px-3 py-2 text-[var(--color-text)]"
+                  : "rounded-full px-3 py-2 text-[var(--color-muted)] transition-all duration-200 hover:text-[var(--color-text)]"
+              }
             >
-              {link.label}
-            </a>
-          ))}
-        </nav>
+              RU
+            </button>
+            <button
+              type="button"
+              onClick={() => onLangChange("RO")}
+              className={
+                overlayLang === "RO"
+                  ? "rounded-full bg-white px-3 py-2 text-[var(--color-text)]"
+                  : "rounded-full px-3 py-2 text-[var(--color-muted)] transition-all duration-200 hover:text-[var(--color-text)]"
+              }
+            >
+              RO
+            </button>
+          </div>
 
-        <div className="hidden items-center gap-1 rounded-full bg-[var(--color-bg)] p-1 text-[13px] font-bold lg:flex">
-          <button
-            type="button"
-            onClick={() => onLangChange("RU")}
-            className={
-              overlayLang === "RU"
-                ? "rounded-full bg-white px-3 py-2 text-[var(--color-text)]"
-                : "rounded-full px-3 py-2 text-[var(--color-muted)] transition-all duration-200 hover:text-[var(--color-text)]"
-            }
+          <a
+            href={brandPhoneHref}
+            className="hidden h-11 shrink-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-4 text-[14px] font-bold text-[var(--color-text)] transition-all duration-200 hover:brightness-[0.98] xl:flex"
+            aria-label={brandCallLabel}
           >
-            RU
-          </button>
-          <button
-            type="button"
-            onClick={() => onLangChange("RO")}
-            className={
-              overlayLang === "RO"
-                ? "rounded-full bg-white px-3 py-2 text-[var(--color-text)]"
-                : "rounded-full px-3 py-2 text-[var(--color-muted)] transition-all duration-200 hover:text-[var(--color-text)]"
-            }
-          >
-            RO
-          </button>
+            <PhoneIcon className="size-4" />
+            <span>{brandPhone}</span>
+          </a>
         </div>
-
-        <a
-          href={brandPhoneHref}
-          className="hidden h-11 shrink-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-4 text-[14px] font-bold text-[var(--color-text)] transition-all duration-200 hover:brightness-[0.98] xl:flex"
-          aria-label={brandCallLabel}
-        >
-          <PhoneIcon className="size-4" />
-          <span>{brandPhone}</span>
-        </a>
 
         <button
           type="button"

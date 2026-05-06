@@ -7,17 +7,19 @@ export default async function AdminToppingsPage() {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
-  const { data: groups, error: gErr } = await supabase
-    .from("topping_groups")
-    .select("*")
-    .eq("brand_id", brandId)
-    .order("sort_order", { ascending: true })
-
-  const { data: toppings, error: tErr } = await supabase
-    .from("toppings")
-    .select("*")
-    .eq("brand_id", brandId)
-    .order("sort_order", { ascending: true })
+  const [{ data: groups, error: gErr }, { data: toppings, error: tErr }] =
+    await Promise.all([
+      supabase
+        .from("topping_groups")
+        .select("*")
+        .eq("brand_id", brandId)
+        .order("sort_order", { ascending: true }),
+      supabase
+        .from("toppings")
+        .select("*")
+        .eq("brand_id", brandId)
+        .order("sort_order", { ascending: true }),
+    ])
 
   if (gErr || tErr) {
     return (

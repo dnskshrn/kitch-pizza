@@ -10,8 +10,10 @@ const ORDERS_POS_SELECT =
 export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
   "draft",
   "new",
-  "in_progress",
-  "delivering",
+  "confirmed",
+  "cooking",
+  "ready",
+  "delivery",
 ] as const
 
 type BrandsEmbed = { slug: string } | { slug: string }[] | null

@@ -33,9 +33,7 @@ export function statusLabel(s: OrderStatus): string {
       return "Готовится"
     case "ready":
       return "Готов"
-    case "in_progress":
-      return "В работе"
-    case "delivering":
+    case "delivery":
       return "Доставляется"
     case "done":
       return "Выполнен"
@@ -56,9 +54,8 @@ export function statusBadgeClass(s: OrderStatus): string {
       return "border-transparent bg-sky-100 text-sky-950 dark:bg-sky-950 dark:text-sky-100"
     case "cooking":
     case "ready":
-    case "in_progress":
       return "border-transparent bg-amber-100 text-amber-950 dark:bg-amber-950 dark:text-amber-100"
-    case "delivering":
+    case "delivery":
       return "border-transparent bg-orange-100 text-orange-950 dark:bg-orange-950 dark:text-orange-100"
     case "done":
       return "border-transparent bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100"

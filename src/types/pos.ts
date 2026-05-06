@@ -8,8 +8,10 @@ export type PosWizardBrandOption = BrandConfig & {
 export type PosOrderStatus =
   | "draft"
   | "new"
-  | "in_progress"
-  | "delivering"
+  | "confirmed"
+  | "cooking"
+  | "ready"
+  | "delivery"
   | "done"
   | "cancelled"
   | "rejected"

@@ -44,6 +44,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
 import type { DeliveryZoneCheckResultPos } from "@/lib/actions/pos/check-delivery-zone-pos"
 import { cancelOrderPos } from "@/lib/actions/pos/cancel-order-pos"
+import { createDraftOrderPos } from "@/lib/actions/pos/create-draft-order"
+import { sendPosDraftToKitchen } from "@/lib/actions/pos/send-pos-draft-to-kitchen"
 import { updateOrderDetailsPos } from "@/lib/actions/pos/update-order-details-pos"
 import { updateOrderBrandPos } from "@/lib/actions/pos/update-order-brand-pos"
 import {
@@ -63,6 +65,7 @@ import {
   posMenuRowForModal,
   posVariantsFromMenuEmbed,
 } from "@/lib/pos/menu-item-modal-row"
+import { writePosBrandSlugCookie } from "@/lib/pos/pos-brand-slug-cookie"
 import type { MenuItem, MenuItemVariant } from "@/types/database"
 import type { PosCartItem, PosOrder, PosWizardBrandOption } from "@/types/pos"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -70,7 +73,6 @@ import {
   AlertCircle,
   ArrowLeft,
   Banknote,
-  ChevronRight,
   CreditCard,
   Loader2,
   MapPin,
@@ -375,6 +377,9 @@ function CartItemRow({
   )
 }
 
+const POS_RUNNER_CTA_CLASS =
+  "flex w-full items-center justify-center rounded-lg bg-[#ccff00] px-5 py-3.5 text-[15px] font-bold text-[#242424] transition-colors hover:bg-[#bbee00] active:scale-[0.99] active:bg-[#aadd00] disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+
 /* ─── Правая панель корзины ───────────────────────────────────── */
 function CartPanel({
   cart,
@@ -383,11 +388,12 @@ function CartPanel({
   onUpdateQty,
   onRemove,
   onOpenLine,
-  onNext,
-  nextLabel,
-  nextDisabled,
   errorBanner,
   cartInteractionDisabled,
+  onRunnerSend,
+  runnerDisabled,
+  runnerBusy,
+  runnerAlreadySent,
 }: {
   cart: PosCartItem[]
   cartCount: number
@@ -395,11 +401,13 @@ function CartPanel({
   onUpdateQty: (idx: number, delta: number) => void | Promise<void>
   onRemove: (idx: number) => void | Promise<void>
   onOpenLine: (idx: number) => void
-  onNext: () => void
-  nextLabel: string
-  nextDisabled: boolean
   errorBanner?: string | null
   cartInteractionDisabled: boolean
+  onRunnerSend?: () => void | Promise<void>
+  runnerDisabled?: boolean
+  runnerBusy?: boolean
+  /** Заказ уже ушёл на кухню (не черновик) — только подпись, без повторной отправки */
+  runnerAlreadySent?: boolean
 }) {
   return (
     /* Серая полоса-отступ справа — часть родительского bg-[#f2f2f2] */
@@ -449,7 +457,7 @@ function CartPanel({
         </div>
 
         {/* Футер: подытог + CTA */}
-        <div className="shrink-0 border-t border-border p-5 space-y-3">
+        <div className="shrink-0 border-t border-border p-5">
           <div className="flex items-baseline justify-between">
             <span className="text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
               подытог
@@ -458,15 +466,25 @@ function CartPanel({
               {formatMdlAmount(subtotalBani)} лей
             </span>
           </div>
-          <button
-            type="button"
-            disabled={nextDisabled}
-            onClick={onNext}
-            className="flex w-full items-center justify-between rounded-lg bg-primary px-5 py-3.5 text-[15px] font-bold text-primary-foreground transition-colors hover:bg-[#bbee00] active:scale-[0.99] active:bg-[#aadd00] disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-          >
-            {nextLabel}
-            <ChevronRight className="size-5 shrink-0" />
-          </button>
+          {onRunnerSend ? (
+            <button
+              type="button"
+              disabled={runnerAlreadySent || runnerDisabled || runnerBusy}
+              onClick={() => void onRunnerSend()}
+              className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
+            >
+              {runnerAlreadySent ? (
+                "Бегунок отправлен"
+              ) : runnerBusy ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="size-4 shrink-0 animate-spin" />
+                  Отправка…
+                </span>
+              ) : (
+                "Отправить бегунок"
+              )}
+            </button>
+          ) : null}
         </div>
       </aside>
     </div>
@@ -567,6 +585,8 @@ type OrderFormProps = {
   listOrder: PosOrder | null
   onClose: () => void
   ordersPanelRef?: RefObject<OrdersPanelHandle | null>
+  /** После успешного «бегунка»: новый черновик и сброс мастера на шаг 1. */
+  onContinueWizardWithNewDraft: (newOrderId: string) => void
 }
 
 function posLinePayloadFromCartItem(c: PosCartItem) {
@@ -593,6 +613,7 @@ export function OrderForm({
   listOrder,
   onClose,
   ordersPanelRef,
+  onContinueWizardWithNewDraft,
 }: OrderFormProps) {
   const updateOrderLocalState = useCallback(
     (orderId: string, patch: Partial<PosOrder>) => {
@@ -652,9 +673,13 @@ export function OrderForm({
   })
   const [orderNumber, setOrderNumber] = useState<number | null>(null)
   const [extendSubmitting, setExtendSubmitting] = useState(false)
+  const [runnerBusy, setRunnerBusy] = useState(false)
+  /** Защита от двойного нажатия «Отправить бегунок» до смены черновика */
+  const runnerKitchenLockedRef = useRef(false)
+  const runnerAlreadySent = listOrder?.status === "cooking"
   const [clearCartBusy, setClearCartBusy] = useState(false)
   const cartInteractionDisabled =
-    cartActionBusy || extendSubmitting || clearCartBusy
+    cartActionBusy || extendSubmitting || clearCartBusy || runnerBusy
   const [extendError, setExtendError] = useState<string | null>(null)
   const [editBaselineDeliveryFeeBani, setEditBaselineDeliveryFeeBani] =
     useState<number | null>(null)
@@ -830,6 +855,11 @@ export function OrderForm({
     }
     void resolveBrandId(selectedBrand.slug)
   }, [selectedBrand, wizardBrands, resolveBrandId])
+
+  useEffect(() => {
+    if (!selectedBrand) return
+    writePosBrandSlugCookie(selectedBrand.slug)
+  }, [selectedBrand])
 
   useEffect(() => {
     let cancelled = false
@@ -1548,13 +1578,6 @@ export function OrderForm({
     [posOrderId, updateOrderLocalState, scheduleDebouncedDetailsSave],
   )
 
-  const persistCheckoutValues = async (
-    values: CheckoutFormValues,
-  ): Promise<boolean> => {
-    clearDetailsDebounce()
-    return runDetailsSaveToServer(values, { forSubmit: true })
-  }
-
   const navigateToStep = (target: 1 | 2 | 3) => {
     if (target === step) return
     const from = step
@@ -1677,14 +1700,96 @@ export function OrderForm({
     </Dialog>
   )
 
+  const handleRunnerFromStep2 = async () => {
+    if (runnerAlreadySent) return
+    if (runnerKitchenLockedRef.current) return
+    if (cart.length === 0) {
+      toast.error("Добавьте позиции в заказ")
+      return
+    }
+    if (!selectedBrand) {
+      setExtendError("Выберите бренд")
+      toast.error("Выберите бренд")
+      return
+    }
+
+    runnerKitchenLockedRef.current = true
+    setRunnerBusy(true)
+    setExtendError(null)
+
+    let finishedOk = false
+    try {
+      const brandOk = await persistBrandOrError()
+      if (!brandOk) return
+
+      const cartOk = await persistCartToServer()
+      if (!cartOk) return
+
+      const res = await sendPosDraftToKitchen({ orderId: posOrderId })
+      if (!res.success) {
+        toast.error(res.error)
+        return
+      }
+      await refetchOrdersPanel()
+      toast.success(`Заказ №${res.orderNumber} отправлен на кухню`)
+      finishedOk = true
+    } finally {
+      setRunnerBusy(false)
+      runnerKitchenLockedRef.current = false
+    }
+  }
+
   const submitCheckout = async (values: CheckoutFormValues) => {
     setSubmitError(null)
+
+    if (runnerAlreadySent) return
+    if (runnerKitchenLockedRef.current) return
+
+    if (cart.length === 0) {
+      setSubmitError("Добавьте позиции в заказ")
+      return
+    }
+    if (!selectedBrand) {
+      setSubmitError("Выберите бренд на шаге 1")
+      return
+    }
+    if (!detailsArePersistable(values)) {
+      setSubmitError("Заполните имя, телефон и адрес при доставке")
+      return
+    }
+
+    runnerKitchenLockedRef.current = true
     setSubmitting(true)
+
+    let finishedOk = false
     try {
-      const ok = await persistCheckoutValues(values)
-      if (!ok) return
+      const cartOk = await persistCartToServer()
+      if (!cartOk) {
+        setSubmitError("Не удалось сохранить позиции заказа")
+        return
+      }
+
+      const detailsSaved = await runDetailsSaveToServer(values, {
+        forSubmit: true,
+      })
+      if (!detailsSaved) {
+        return
+      }
+
+      const res = await sendPosDraftToKitchen({ orderId: posOrderId })
+
+      if (!res.success) {
+        setSubmitError(res.error)
+        return
+      }
+
+      await refetchOrdersPanel()
+      toast.success(`Заказ №${res.orderNumber} отправлен на кухню`)
+      finishedOk = true
     } finally {
+      setRunnerBusy(false)
       setSubmitting(false)
+      runnerKitchenLockedRef.current = false
     }
   }
 
@@ -1703,7 +1808,8 @@ export function OrderForm({
           type="button"
           disabled={
             orderPrep.loading ||
-            (step === 2 && n === 3 && cartInteractionDisabled)
+            (step === 2 && n === 3 && cartInteractionDisabled) ||
+            runnerBusy
           }
           onClick={() => navigateToStep(n)}
           className={cn(
@@ -1729,7 +1835,7 @@ export function OrderForm({
         <PosHeaderIconButton
           type="button"
           aria-label="Действия с заказом"
-          disabled={clearCartBusy || extendSubmitting || submitting}
+          disabled={clearCartBusy || extendSubmitting || submitting || runnerBusy}
         >
           <MoreVertical className="size-4" strokeWidth={2} />
         </PosHeaderIconButton>
@@ -1744,6 +1850,7 @@ export function OrderForm({
           disabled={
             clearCartBusy ||
             extendSubmitting ||
+            runnerBusy ||
             cart.length === 0
           }
           onClick={() => {
@@ -1886,7 +1993,7 @@ export function OrderForm({
                 <PosHeaderIconButton
                   aria-label="Назад"
                   onClick={() => navigateToStep(1)}
-                  disabled={extendSubmitting}
+                  disabled={extendSubmitting || runnerBusy}
                 >
                   <ArrowLeft className="size-4" />
                 </PosHeaderIconButton>
@@ -1985,11 +2092,17 @@ export function OrderForm({
               onUpdateQty={updateQty}
               onRemove={removeLine}
               onOpenLine={(idx) => void openCartLineModal(idx)}
-              onNext={() => navigateToStep(3)}
-              nextLabel={extendSubmitting ? "Сохранение…" : "К деталям"}
-              nextDisabled={extendSubmitting}
               errorBanner={extendError}
               cartInteractionDisabled={cartInteractionDisabled}
+              onRunnerSend={handleRunnerFromStep2}
+              runnerDisabled={
+                runnerAlreadySent ||
+                cart.length === 0 ||
+                extendSubmitting ||
+                !selectedBrand
+              }
+              runnerBusy={runnerBusy}
+              runnerAlreadySent={runnerAlreadySent}
             />
           </div>
         </div>
@@ -2060,6 +2173,7 @@ export function OrderForm({
             </p>
             <Form {...form}>
               <form
+                id="pos-wizard-details-form"
                 className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4"
                 onSubmit={onSubmit}
               >
@@ -2421,25 +2535,6 @@ export function OrderForm({
                 {submitError ? (
                   <p className="text-destructive text-sm">{submitError}</p>
                 ) : null}
-
-                {/* CTA */}
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex w-full items-center justify-between rounded-lg bg-primary px-5 py-3.5 text-[15px] font-bold text-primary-foreground transition-colors hover:bg-[#bbee00] active:scale-[0.99] active:bg-[#aadd00] disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                >
-                  {submitting ? (
-                    <span className="flex items-center gap-2">
-                      <Loader2 className="size-4 shrink-0 animate-spin" />
-                      Сохранение…
-                    </span>
-                  ) : (
-                    "Сохранить данные заказа"
-                  )}
-                  {!submitting && (
-                    <ChevronRight className="size-5 shrink-0" />
-                  )}
-                </button>
               </form>
             </Form>
           </div>
@@ -2478,7 +2573,7 @@ export function OrderForm({
               </div>
             </div>
 
-            <div className="shrink-0 border-t border-border p-5 space-y-2">
+            <div className="shrink-0 border-t border-border p-5">
               <dl className="space-y-1 text-xs">
                 <div className="flex justify-between gap-2">
                   <dt className="text-muted-foreground">Подытог</dt>
@@ -2508,6 +2603,23 @@ export function OrderForm({
                   </dd>
                 </div>
               </dl>
+              <button
+                type="submit"
+                form="pos-wizard-details-form"
+                disabled={runnerAlreadySent || submitting}
+                className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
+              >
+                {runnerAlreadySent ? (
+                  "Бегунок отправлен"
+                ) : submitting ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="size-4 shrink-0 animate-spin" />
+                    Отправка…
+                  </span>
+                ) : (
+                  "Отправить бегунок"
+                )}
+              </button>
             </div>
           </aside>
         </div>

@@ -237,7 +237,8 @@ export function ToppingDialog({
     setRecipeLoadError(null)
     ;(async () => {
       const supabase = createClient()
-      const { data, error } = await (supabase.from("topping_recipes") as any)
+      const { data, error } = await supabase
+        .from("topping_recipes")
         .select("id, ingredient_id, semi_finished_id, quantity, quantity_gross")
         .eq("topping_id", topping.id)
       if (cancelled) return

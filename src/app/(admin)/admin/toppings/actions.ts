@@ -97,7 +97,7 @@ export async function createTopping(data: {
 }) {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await (supabase as any).rpc("save_topping_with_recipes", {
+  const { error } = await supabase.rpc("save_topping_with_recipes", {
     p_is_create: true,
     p_topping_id: null,
     p_brand_id: brandId,
@@ -171,9 +171,8 @@ export async function copyToppingToGroup(data: {
 
   if (error) throw new Error(error.message)
 
-  const { data: srcLines, error: srcLinesErr } = await (
-    supabase.from("topping_recipes") as any
-  )
+  const { data: srcLines, error: srcLinesErr } = await supabase
+    .from("topping_recipes")
     .select("ingredient_id, semi_finished_id, quantity, quantity_gross")
     .eq("topping_id", data.topping_id)
 
@@ -187,7 +186,7 @@ export async function copyToppingToGroup(data: {
   }[]
 
   if (rows.length > 0) {
-    const { error: insRecErr } = await (supabase.from("topping_recipes") as any).insert(
+    const { error: insRecErr } = await supabase.from("topping_recipes").insert(
       rows.map((l) => ({
         topping_id: newTopping.id,
         ingredient_id: l.ingredient_id,
@@ -217,7 +216,7 @@ export async function updateTopping(
 ) {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await (supabase as any).rpc("save_topping_with_recipes", {
+  const { error } = await supabase.rpc("save_topping_with_recipes", {
     p_is_create: false,
     p_topping_id: id,
     p_brand_id: brandId,

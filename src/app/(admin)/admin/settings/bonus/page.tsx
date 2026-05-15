@@ -25,7 +25,8 @@ export default async function AdminBonusSettingsPage() {
     )
   }
 
-  const { data, error } = await (supabase.from("bonus_settings") as any)
+  const { data, error } = await supabase
+    .from("bonus_settings")
     .select("is_enabled, accrual_rate, max_redemption_rate")
     .eq("id", 1)
     .maybeSingle()

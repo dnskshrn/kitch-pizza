@@ -12,7 +12,8 @@ export async function GET() {
 
   const supabase = createServiceSupabaseClient()
 
-  const { data: rows, error } = await (supabase.from("orders") as any)
+  const { data: rows, error } = await supabase
+    .from("orders")
     .select("id, order_number, created_at, total, status, brand_id")
     .eq("profile_id", session.profileId)
     .order("created_at", { ascending: false })

@@ -7,7 +7,7 @@ import { getBrandBySlug } from "@/brands"
 import { getStorefrontCategories } from "@/lib/data/storefront-categories"
 import { headers } from "next/headers"
 
-const MAINTENANCE_MODE = false
+const MAINTENANCE_MODE = true
 
 export default async function ClientLayout({
   children,

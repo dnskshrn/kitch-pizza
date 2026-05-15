@@ -149,7 +149,6 @@ export async function processBonusAccrualOnOrderDone(
   profileId: string,
   orderId: string,
   totalBani: number,
-  _bonusesRedeemed: number,
 ): Promise<void> {
   try {
     if (!profileId) return

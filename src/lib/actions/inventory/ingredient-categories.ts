@@ -13,7 +13,8 @@ export async function getIngredientCategories(): Promise<
   { data: IngredientCategory[] } | { error: string }
 > {
   const supabase = createServiceSupabaseClient()
-  const { data, error } = await (supabase.from("ingredient_categories") as any)
+  const { data, error } = await supabase
+    .from("ingredient_categories")
     .select("id, name, sort_order")
     .order("sort_order", { ascending: true })
 
@@ -31,7 +32,7 @@ export async function createIngredientCategory(
   if (!Number.isFinite(order)) return { error: "Некорректный порядок сортировки" }
 
   const supabase = createServiceSupabaseClient()
-  const { error } = await (supabase.from("ingredient_categories") as any).insert({
+  const { error } = await supabase.from("ingredient_categories").insert({
     name: trimmed,
     sort_order: Math.trunc(order),
   })
@@ -52,7 +53,8 @@ export async function updateIngredientCategory(
   if (!Number.isFinite(order)) return { error: "Некорректный порядок сортировки" }
 
   const supabase = createServiceSupabaseClient()
-  const { error } = await (supabase.from("ingredient_categories") as any)
+  const { error } = await supabase
+    .from("ingredient_categories")
     .update({ name: trimmed, sort_order: Math.trunc(order) })
     .eq("id", id)
 
@@ -66,13 +68,15 @@ export async function deleteIngredientCategory(
 ): Promise<{ error?: string }> {
   const supabase = createServiceSupabaseClient()
 
-  const { error: clearError } = await (supabase.from("ingredients") as any)
+  const { error: clearError } = await supabase
+    .from("ingredients")
     .update({ category_id: null })
     .eq("category_id", id)
 
   if (clearError) return { error: clearError.message }
 
-  const { error } = await (supabase.from("ingredient_categories") as any)
+  const { error } = await supabase
+    .from("ingredient_categories")
     .delete()
     .eq("id", id)
 

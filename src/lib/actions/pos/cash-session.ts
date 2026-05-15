@@ -550,7 +550,6 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
       String(accrualOrder.profile_id),
       orderId,
       Number(accrualOrder.total),
-      Number(accrualOrder.bonuses_redeemed) || 0,
     ).catch((e) => console.error("bonus accrual failed", e))
   }
 

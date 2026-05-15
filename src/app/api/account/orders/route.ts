@@ -35,7 +35,7 @@ export async function GET() {
   const list = (rows ?? []) as OrderRow[]
   const brandIds = [...new Set(list.map((r) => r.brand_id).filter(Boolean))]
 
-  let slugById: Record<string, string> = {}
+  const slugById: Record<string, string> = {}
   if (brandIds.length > 0) {
     const { data: brands } = await supabase
       .from("brands")

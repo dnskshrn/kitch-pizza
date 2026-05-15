@@ -14,6 +14,7 @@ import {
 } from "@/lib/store/cart-store"
 import { getStorefrontDeliveryLineDisplay } from "@/lib/storefront-delivery-display"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
+import { useAuthStore } from "@/lib/store/auth-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -32,6 +33,7 @@ import {
 } from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { CartItemCard } from "./CartItemCard"
 import {
@@ -190,9 +192,22 @@ export function CartContent({
   onRemoveItem,
   onQuantityChange,
 }: CartContentProps) {
+  const router = useRouter()
   const { lang, t } = useLanguage()
+  const profile = useAuthStore((s) => s.profile)
+  const openAuth = useAuthStore((s) => s.openAuth)
+  const setOnAuthSuccess = useAuthStore((s) => s.setOnAuthSuccess)
   const [codeInput, setCodeInput] = useState("")
   const [upsellCategory, setUpsellCategory] = useState<Category | null>(null)
+  /** `undefined` — запрос /api/auth/me ещё не завершён; `null` — гость */
+  const [bonusMeProfile, setBonusMeProfile] = useState<{ profileId: string } | null | undefined>(
+    undefined,
+  )
+  const [bonusSettings, setBonusSettings] = useState<{
+    accrualRate: number
+    maxRedemptionRate: number
+    isEnabled: boolean
+  } | null>(null)
 
   const appliedPromo = useCartStore((s) => s.appliedPromo)
   const promoError = useCartStore((s) => s.promoError)
@@ -215,6 +230,69 @@ export function CartContent({
   useEffect(() => {
     if (!isOpen) setUpsellCategory(null)
   }, [isOpen])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const meRes = await fetch("/api/auth/me", { credentials: "include" })
+        const meJson: unknown = await meRes.json()
+        if (cancelled) return
+        const p =
+          meJson &&
+          typeof meJson === "object" &&
+          "profile" in meJson &&
+          meJson.profile &&
+          typeof meJson.profile === "object" &&
+          "profileId" in meJson.profile &&
+          typeof (meJson.profile as { profileId: unknown }).profileId === "string"
+            ? (meJson.profile as { profileId: string })
+            : null
+        if (p == null) {
+          setBonusMeProfile(null)
+          return
+        }
+        setBonusMeProfile({ profileId: p.profileId })
+      } catch {
+        if (!cancelled) setBonusMeProfile(null)
+        return
+      }
+
+      try {
+        const settingsRes = await fetch("/api/bonus/settings", {
+          credentials: "include",
+        })
+        const settingsJson: unknown = await settingsRes.json()
+        if (cancelled) return
+        if (
+          settingsRes.ok &&
+          settingsJson &&
+          typeof settingsJson === "object" &&
+          "accrualRate" in settingsJson &&
+          "maxRedemptionRate" in settingsJson &&
+          "isEnabled" in settingsJson
+        ) {
+          const o = settingsJson as {
+            accrualRate: unknown
+            maxRedemptionRate: unknown
+            isEnabled: unknown
+          }
+          setBonusSettings({
+            accrualRate: Number(o.accrualRate),
+            maxRedemptionRate: Number(o.maxRedemptionRate),
+            isEnabled: Boolean(o.isEnabled),
+          })
+        } else {
+          setBonusSettings(null)
+        }
+      } catch {
+        if (!cancelled) setBonusSettings(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const [condimentItems, setCondimentItems] = useState<CondimentMenuRow[]>([])
 
@@ -311,6 +389,15 @@ export function CartContent({
   const goodsBani = Math.max(0, subtotal - discount)
   const grandTotalBani = goodsBani + deliveryFeeBani
   const totalLei = formatMoney(grandTotalBani, lang)
+  const bonusAccrualEarned =
+    bonusMeProfile != null && bonusSettings != null && bonusSettings.isEnabled
+      ? Math.floor((grandTotalBani / 100) * bonusSettings.accrualRate)
+      : 0
+  const showBonusAccrualRow =
+    bonusMeProfile != null &&
+    bonusSettings != null &&
+    bonusSettings.isEnabled &&
+    bonusAccrualEarned > 0
   const isCartEmpty = items.length === 0
   const deliveryLine = useMemo(
     () =>
@@ -331,6 +418,13 @@ export function CartContent({
       outOfZone,
     ],
   )
+
+  const checkoutPath =
+    brandSlug === "kitch-pizza"
+      ? "/checkout"
+      : brandSlug === "the-spot"
+        ? "/thespot/checkout"
+        : `/${brandSlug}/checkout`
 
   async function handleApplyPromo() {
     await applyPromo(codeInput)
@@ -422,14 +516,14 @@ export function CartContent({
             </div>
             {showEcoCondimentsBanner ? (
               <div
-                className="storefront-modal-card-radius mt-4 flex flex-col gap-3 rounded-[16px] bg-[var(--color-accent-soft)] p-4 text-[var(--color-accent-text)]"
+                className="storefront-modal-card-radius mt-4 flex flex-col gap-3 rounded-[16px] bg-[var(--color-accent-soft)] p-4 text-[var(--color-accent-foreground)]"
                 aria-live="polite"
               >
                 <p className="text-sm font-normal leading-snug">{t.cart.ecoChopsticksHint}</p>
                 <button
                   type="button"
                   onClick={handleDeclineFreeCondiments}
-                  className="w-full rounded-full border border-current/35 bg-transparent px-[14px] py-2 text-sm font-medium text-[var(--color-accent-text)] transition-opacity hover:opacity-90"
+                  className="w-full rounded-full border border-current/35 bg-transparent px-[14px] py-2 text-sm font-medium text-[var(--color-accent-foreground)] transition-opacity hover:opacity-90"
                 >
                   {t.cart.ecoDeclineChopsticks}
                 </button>
@@ -482,7 +576,7 @@ export function CartContent({
                     disabled={promoLoading}
                     onChange={(e) => setCodeInput(e.target.value)}
                     onKeyDown={handlePromoKeyDown}
-                    className="storefront-modal-field min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
+                    className="storefront-input min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
                     aria-label={t.cart.promoAria}
                     autoComplete="off"
                   />
@@ -517,6 +611,16 @@ export function CartContent({
                   <span className="text-[rgba(36,36,36,0.55)]">{t.cart.discount}</span>
                   <span className="storefront-modal-accent font-medium tabular-nums">
                     −{discountLei}
+                  </span>
+                </div>
+              ) : null}
+              {showBonusAccrualRow ? (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-[rgba(36,36,36,0.55)]">
+                    🎁 {t.bonus.earn}
+                  </span>
+                  <span className="font-medium tabular-nums text-[#242424]">
+                    +{bonusAccrualEarned} {t.bonus.points}
                   </span>
                 </div>
               ) : null}
@@ -575,9 +679,24 @@ export function CartContent({
                   {t.cart.checkout}
                   <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
                 </button>
+              ) : profile == null ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOnAuthSuccess(() => {
+                      router.push(checkoutPath)
+                    })
+                    openAuth()
+                    onClose()
+                  }}
+                  className="storefront-modal-cta flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full border-0 py-4 text-[16px] font-bold transition-all hover:brightness-95 active:scale-[0.98]"
+                >
+                  {t.cart.checkout}
+                  <ChevronRight className="size-5 shrink-0" strokeWidth={2.5} />
+                </button>
               ) : (
                 <Link
-                  href="/checkout"
+                  href={checkoutPath}
                   onClick={onClose}
                   className="storefront-modal-cta flex flex-1 cursor-pointer items-center justify-center gap-1 rounded-full py-4 text-[16px] font-bold transition-all hover:brightness-95 active:scale-[0.98]"
                 >

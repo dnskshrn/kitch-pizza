@@ -1,6 +1,7 @@
 "use client"
 
 import { ClientContainer } from "@/components/client/client-container"
+import { STOREFRONT_TOP_BAR_HEIGHT_PX } from "@/components/client/storefront-top-bar"
 import { BRAND_ACCENT } from "@/lib/client-brand"
 import {
   selectCartItemCount,
@@ -31,15 +32,34 @@ function menuCategorySectionId(slug: string): string {
   return `menu-category-${slug}`
 }
 
+/** Мобила: `MainHeader` (`py-3` + капсула `h-[63px]`). */
+const MAIN_HEADER_MOBILE_FLOW_PX = 63 + 12 * 2
+/** md+ остров: `min-h-[64px]` внутри контейнера с `md:py-5`. */
+const MAIN_HEADER_MD_ISLAND_FLOW_PX = 64 + 20 * 2
+
 function hasBoutiqueMenu(brandSlug: string): boolean {
-  return brandSlug === "the-spot" || brandSlug === "losos"
+  return (
+    brandSlug === "the-spot" ||
+    brandSlug === "losos" ||
+    brandSlug === "kitch-pizza"
+  )
 }
 
-function getScrollOffset(brandSlug: string): number {
-  if (typeof window === "undefined") return 120
-  const isMobile = window.matchMedia("(max-width: 767px)").matches
-  if (hasBoutiqueMenu(brandSlug)) return isMobile ? 142 : 156
-  return isMobile ? 84 : 96
+/**
+ * Компенсация верхней витринной хромы для scroll-spy и прокрутки к секции категории
+ * (в синхроне с sticky `top` у полосы категорий: спейсер TopBar только до `lg`).
+ */
+function getScrollOffset(): number {
+  if (typeof window === "undefined") return 160
+  const w = window.innerWidth
+  if (w >= 1024) {
+    return MAIN_HEADER_MD_ISLAND_FLOW_PX
+  }
+  const topBar = STOREFRONT_TOP_BAR_HEIGHT_PX
+  if (w < 768) {
+    return topBar + MAIN_HEADER_MOBILE_FLOW_PX
+  }
+  return topBar + MAIN_HEADER_MD_ISLAND_FLOW_PX
 }
 
 type MenuCategoryBarProps = {
@@ -200,7 +220,7 @@ export function MenuCategoryBar({
     let frame = 0
     const updateActiveCategory = () => {
       frame = 0
-      const threshold = getScrollOffset(brandSlug) + 24
+      const threshold = getScrollOffset() + 24
       let nextSlug = categories[0]?.slug ?? null
 
       for (const category of categories) {
@@ -231,7 +251,7 @@ export function MenuCategoryBar({
       window.removeEventListener("scroll", requestUpdate)
       window.removeEventListener("resize", requestUpdate)
     }
-  }, [brandSlug, categories])
+  }, [categories])
 
   useEffect(() => {
     if (!activeSlug) return
@@ -263,10 +283,10 @@ export function MenuCategoryBar({
       const top =
         section.getBoundingClientRect().top +
         window.scrollY -
-        getScrollOffset(brandSlug)
+        getScrollOffset()
       window.scrollTo({ top: Math.max(0, top), behavior: "smooth" })
     },
-    [brandSlug],
+    [],
   )
 
   if (categories.length === 0) {
@@ -319,6 +339,7 @@ export function MenuCategoryBar({
     return (
       <>
         <TheSpotCategoryBar
+          brandSlug={brandSlug}
           activeSlug={activeSlug}
           categories={categories}
           itemCount={itemCount}
@@ -365,6 +386,7 @@ export function MenuCategoryBar({
 }
 
 function TheSpotCategoryBar({
+  brandSlug,
   activeSlug,
   categories,
   itemCount,
@@ -375,6 +397,7 @@ function TheSpotCategoryBar({
   onSelect,
   setButtonRef,
 }: {
+  brandSlug: string
   activeSlug: string | null
   categories: Category[]
   itemCount: number
@@ -387,7 +410,12 @@ function TheSpotCategoryBar({
 }) {
   return (
     <>
-      <div className="sticky top-[77px] z-30 md:hidden">
+      <div
+        className="sticky z-30 md:hidden"
+        style={{
+          top: `calc(${STOREFRONT_TOP_BAR_HEIGHT_PX}px + env(safe-area-inset-top, 0px) + ${MAIN_HEADER_MOBILE_FLOW_PX}px)`,
+        }}
+      >
         <div className="flex gap-2 overflow-x-auto py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {categories.map((cat) => {
             const isActive = activeSlug === cat.slug
@@ -400,7 +428,7 @@ function TheSpotCategoryBar({
                 className={cn(
                   "flex shrink-0 cursor-pointer items-center justify-center rounded-full px-4 py-3 text-[14px] font-bold transition-all duration-200 active:scale-[0.97]",
                   isActive
-                    ? "bg-[var(--color-accent)] text-white"
+                    ? "bg-[var(--color-accent)] text-[var(--color-accent-text)]"
                     : "bg-white text-[var(--color-text)]",
                 )}
               >
@@ -411,8 +439,9 @@ function TheSpotCategoryBar({
         </div>
       </div>
 
+      {/** `44` = `STOREFRONT_TOP_BAR_HEIGHT_PX`, `104` = `MAIN_HEADER_MD_ISLAND_FLOW_PX` */}
       <StickyCategoryChrome
-        className="md:top-[90px]"
+        className="md:max-lg:top-[calc(env(safe-area-inset-top,0px)+44px+104px)] lg:top-[104px]"
         hasBackdrop={false}
         hasStickyShadow={false}
       >
@@ -433,7 +462,7 @@ function TheSpotCategoryBar({
                       className={cn(
                         "flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full px-4 text-[14px] font-bold transition-all duration-200 active:scale-[0.98]",
                         isActive
-                          ? "bg-[var(--color-accent)] text-white"
+                          ? "bg-[var(--color-accent)] text-[var(--color-accent-text)]"
                           : "bg-white text-[var(--color-text)] hover:bg-[var(--color-accent-soft)]",
                       )}
                     >
@@ -442,12 +471,21 @@ function TheSpotCategoryBar({
                   )
                 })}
               </nav>
+              {brandSlug === "kitch-pizza" ? (
+                <CartPill
+                  count={itemCount}
+                  t={t}
+                  pulseKey={pulseKey}
+                  onOpen={onOpenCart}
+                  className="h-11 shrink-0 px-4 py-0 text-[14px] hover:bg-[#b8f000]"
+                />
+              ) : (
               <button
                 key={pulseKey}
                 type="button"
                 onClick={onOpenCart}
                 className={cn(
-                  "flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[var(--color-accent)] px-4 text-[14px] font-bold text-white transition-all duration-200 hover:brightness-[0.98] active:scale-[0.98]",
+                  "flex h-11 shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[var(--color-accent)] px-4 text-[14px] font-bold text-[var(--color-accent-text)] transition-all duration-200 hover:brightness-[0.98] active:scale-[0.98]",
                   pulseKey > 0 && "storefront-cart-trigger-pulse",
                 )}
                 aria-label={`${t.cart.checkout}: ${itemCount}`}
@@ -456,6 +494,7 @@ function TheSpotCategoryBar({
                 <span>{t.cart.total}</span>
                 <span className="tabular-nums">{itemCount}</span>
               </button>
+              )}
             </div>
           </div>
         )}
@@ -549,9 +588,9 @@ function KitchFloatingCart({
   onOpen: () => void
 }) {
   return (
-    <div className="fixed inset-x-4 bottom-4 z-40 rounded-[28px] border border-white/70 bg-white/85 px-2 pb-2 pt-3 shadow-[0_12px_40px_rgba(36,36,36,0.08)] backdrop-blur-[25px] md:hidden">
-      <div className="mb-2 flex items-center justify-center gap-2 px-3 text-[10px] text-[#242424]">
-        <Pizza className="size-4 shrink-0 text-[#5F7600]" strokeWidth={2.2} />
+    <div className="fixed inset-x-4 bottom-4 z-40 rounded-[28px] border border-white/60 bg-white/80 px-2 pb-2 pt-3 shadow-[0_12px_40px_rgba(36,36,36,0.08)] backdrop-blur-[25px] md:hidden">
+      <div className="mb-2 flex items-center justify-center gap-2 px-3 text-[10px] text-[var(--color-text)]">
+        <Pizza className="size-4 shrink-0" strokeWidth={2.2} />
         <span className="truncate">
           {t.cart.addToOrder}
         </span>
@@ -561,7 +600,7 @@ function KitchFloatingCart({
         type="button"
         onClick={onOpen}
         className={cn(
-          "flex h-12 w-full cursor-pointer items-center justify-between rounded-full bg-[#ccff00] px-5 text-[15px] font-bold text-[#242424] transition-all duration-200 active:scale-[0.98]",
+          "flex h-12 w-full cursor-pointer items-center justify-between rounded-full bg-[var(--color-accent)] px-5 text-[15px] font-bold text-[var(--color-accent-text)] transition-all duration-200 active:scale-[0.98]",
           pulseKey > 0 && "storefront-cart-trigger-pulse",
         )}
       >
@@ -603,7 +642,7 @@ function TheSpotFloatingCart({
         type="button"
         onClick={onOpen}
         className={cn(
-          "flex h-12 w-full cursor-pointer items-center justify-between rounded-full bg-[var(--color-accent)] px-5 text-[15px] font-bold text-white transition-all duration-200 active:scale-[0.98]",
+          "flex h-12 w-full cursor-pointer items-center justify-between rounded-full bg-[var(--color-accent)] px-5 text-[15px] font-bold text-[var(--color-accent-text)] transition-all duration-200 active:scale-[0.98]",
           pulseKey > 0 && "storefront-cart-trigger-pulse",
         )}
       >
@@ -624,11 +663,13 @@ function CartPill({
   t,
   pulseKey,
   onOpen,
+  className,
 }: {
   count: number
   t: StorefrontMessages
   pulseKey: number
   onOpen: () => void
+  className?: string
 }) {
   return (
     <button
@@ -636,14 +677,15 @@ function CartPill({
       type="button"
       onClick={onOpen}
       className={cn(
-        "text-foreground inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[#ccff00] px-4 py-2.5 text-sm font-bold transition-all duration-200 hover:bg-[#b8f000] active:scale-[0.97]",
+        "inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-[var(--color-accent)] px-4 py-2.5 text-sm font-bold text-[var(--color-accent-text)] transition-all duration-200 hover:brightness-[0.96] active:scale-[0.97]",
         pulseKey > 0 && "storefront-cart-trigger-pulse",
+        className,
       )}
       aria-label={`${t.cart.total}: ${count}`}
     >
       <ShoppingBasket className="size-5 shrink-0" strokeWidth={2} aria-hidden />
       <span>{t.cart.total}</span>
-      <span className="text-foreground/40 font-normal" aria-hidden>
+      <span className="font-normal text-[var(--color-accent-text)]/40" aria-hidden>
         |
       </span>
       <span className="tabular-nums">{count}</span>

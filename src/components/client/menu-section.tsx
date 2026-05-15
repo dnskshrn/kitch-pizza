@@ -10,7 +10,11 @@ function menuCategorySectionId(slug: string): string {
 }
 
 function hasBoutiqueMenu(brandSlug: string): boolean {
-  return brandSlug === "the-spot" || brandSlug === "losos"
+  return (
+    brandSlug === "the-spot" ||
+    brandSlug === "losos" ||
+    brandSlug === "kitch-pizza"
+  )
 }
 
 export type MenuSectionProps = {
@@ -23,7 +27,6 @@ export function MenuSection({
   data,
 }: MenuSectionProps) {
   const { lang } = useLanguage()
-  const hasLososStyleCards = brandSlug === "losos" || brandSlug === "the-spot"
   const isBoutiqueMenu = hasBoutiqueMenu(brandSlug)
 
   if (data.length === 0) return null
@@ -32,11 +35,9 @@ export function MenuSection({
     <section
       id="menu"
       className={
-        hasLososStyleCards
+        isBoutiqueMenu
           ? "mt-7 space-y-7 md:mt-9 md:space-y-9"
-          : isBoutiqueMenu
-            ? "mt-8 space-y-8 md:mt-10 md:space-y-10"
-            : "mt-10 space-y-10"
+          : "mt-10 space-y-10"
       }
     >
       {data.map(({ category, items }) => {
@@ -53,22 +54,18 @@ export function MenuSection({
           >
             <h2
               className={
-                hasLososStyleCards
+                isBoutiqueMenu
                   ? "mb-4 text-[28px] font-bold leading-none tracking-[-0.04em] text-[var(--color-text)] md:mb-5 md:text-[32px] lg:text-[36px]"
-                  : isBoutiqueMenu
-                    ? "mb-5 text-[28px] font-bold leading-none tracking-tight text-[var(--color-text)] md:mb-6 md:text-[32px] lg:text-[36px]"
-                    : "mb-4 text-[28px] font-bold tracking-tight md:text-[32px] lg:text-[36px]"
+                  : "mb-4 text-[28px] font-bold tracking-tight md:text-[32px] lg:text-[36px]"
               }
             >
               {title}
             </h2>
             <div
               className={
-                hasLososStyleCards
+                isBoutiqueMenu
                   ? "grid grid-cols-2 gap-4 md:grid-cols-3 md:gap-5 xl:grid-cols-4"
-                  : isBoutiqueMenu
-                    ? "grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-3 md:gap-x-5 md:gap-y-10 xl:grid-cols-4"
-                    : "client-menu-grid"
+                  : "client-menu-grid"
               }
             >
               {items.map((item) => (

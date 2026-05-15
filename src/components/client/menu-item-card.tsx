@@ -19,8 +19,12 @@ export type MenuItemCardProps = {
   lang: Lang
 }
 
-function hasTheSpotCard(brandSlug: string): boolean {
-  return brandSlug === "the-spot"
+function hasBoutiqueStorefrontCard(brandSlug: string): boolean {
+  return (
+    brandSlug === "the-spot" ||
+    brandSlug === "losos" ||
+    brandSlug === "kitch-pizza"
+  )
 }
 
 function getDisplayPriceBani(item: MenuItem): number | null {
@@ -132,9 +136,7 @@ export function MenuItemCard({
   const aria = cardAriaLabel(name, priceMain, t.menu.chooseProduct)
 
   const openModal = () => openProductModal(item)
-  const isTheSpot = hasTheSpotCard(brandSlug)
-  const isLosos = brandSlug === "losos"
-  const hasLososStyleCard = isLosos || isTheSpot
+  const hasLososStyleCard = hasBoutiqueStorefrontCard(brandSlug)
 
   return (
     <div className="h-full md:flex md:flex-col">
@@ -157,7 +159,7 @@ export function MenuItemCard({
               />
             ) : null}
             {item.tag ? (
-              <span className="absolute left-3 top-3 z-10 max-w-[76px] rounded-[10px] bg-[var(--color-accent)] px-2.5 py-1.5 text-center text-[10px] font-semibold leading-[0.98] text-white">
+              <span className="absolute left-3 top-3 z-10 max-w-[76px] rounded-[10px] bg-[var(--color-accent)] px-2.5 py-1.5 text-center text-[10px] font-semibold leading-[0.98] text-[var(--color-accent-text)]">
                 {item.tag.toLowerCase() === "новинка" ? (
                   <>
                     {t.menu.tags.new}
@@ -188,7 +190,7 @@ export function MenuItemCard({
                 ) : null}
               </div>
               <span
-                className="flex h-9 min-w-12 shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] px-4 text-[24px] font-light leading-none text-[#808080] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white"
+                className="flex h-9 min-w-12 shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] px-4 text-[24px] font-light leading-none text-[#808080] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-[var(--color-accent-text)]"
                 aria-hidden
               >
                 +
@@ -284,7 +286,7 @@ export function MenuItemCard({
               </div>
             )}
             {item.tag ? (
-              <span className="absolute left-4 top-4 z-10 max-w-[88px] rounded-[12px] bg-[var(--color-accent)] px-3 py-2 text-center text-[12px] font-semibold leading-[0.98] text-white">
+              <span className="absolute left-4 top-4 z-10 max-w-[88px] rounded-[12px] bg-[var(--color-accent)] px-3 py-2 text-center text-[12px] font-semibold leading-[0.98] text-[var(--color-accent-text)]">
                 {item.tag.toLowerCase() === "новинка" ? (
                   <>
                     {t.menu.tags.new}
@@ -315,7 +317,7 @@ export function MenuItemCard({
                 ) : null}
               </div>
               <span
-                className="flex h-[43px] min-w-[64px] shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] px-6 text-[28px] font-light leading-none text-[#808080] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white"
+                className="flex h-[43px] min-w-[64px] shrink-0 items-center justify-center rounded-full bg-[#f4f4f6] px-6 text-[28px] font-light leading-none text-[#808080] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-[var(--color-accent-text)]"
                 aria-hidden
               >
                 +

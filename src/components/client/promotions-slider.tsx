@@ -35,7 +35,11 @@ function theSpotCardWidthExpr(windowWidth: number): string {
 }
 
 function hasBoutiquePromotions(brandSlug: string): boolean {
-  return brandSlug === "the-spot" || brandSlug === "losos"
+  return (
+    brandSlug === "the-spot" ||
+    brandSlug === "losos" ||
+    brandSlug === "kitch-pizza"
+  )
 }
 
 export type PromotionsSliderProps = {

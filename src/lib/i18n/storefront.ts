@@ -278,6 +278,18 @@ export const messages = {
       phoneHelp: "Вот наш номер телефона, если вдруг возникнут вопросы!",
       backToMenu: "Вернуться в меню",
     },
+    bonus: {
+      balance: "Бонусный баланс",
+      earn: "С этого заказа начислится",
+      points: "бонусов",
+      redeem: "Списать бонусы",
+      redeemed: "Списано бонусов",
+      max: "Максимум",
+      cancel: "Отменить",
+      redeemUnavailable: "На текущую сумму заказа списание недоступно",
+      redeemSummary: (points: number) =>
+        `Списать ${points} бонусов = −${points} MDL`,
+    },
     auth: {
       signIn: "Войти",
       title: "Вход",
@@ -286,6 +298,21 @@ export const messages = {
       sendCode: "Получить код",
       verify: "Подтвердить",
       resend: "Отправить ещё раз",
+      modal: {
+        phoneTitle: "Укажите телефон",
+        subtitle: "Чтобы войти в профиль",
+        phonePlaceholder: "Номер телефона",
+        legalConsent:
+          "Продолжая, вы соглашаетесь с условиями наших юридических документов",
+        continue: "Продолжить",
+        otpTitle: "Введите код из СМС",
+        resend: "Отправить заново",
+        errorSend: "Ошибка отправки",
+        errorWrongCode: "Неверный код",
+        a11yPhoneStep: "Вход по телефону",
+        a11yOtpStep: "Код из СМС",
+        otpDigitAria: (n: number) => `Цифра ${n}`,
+      },
     },
   },
   RO: {
@@ -482,6 +509,19 @@ export const messages = {
       phoneHelp: "Acesta este numărul nostru dacă apar întrebări!",
       backToMenu: "Înapoi la meniu",
     },
+    bonus: {
+      balance: "Sold bonusuri",
+      earn: "De la această comandă vei primi",
+      points: "bonusuri",
+      redeem: "Utilizează bonusuri",
+      redeemed: "Bonusuri utilizate",
+      max: "Maximum",
+      cancel: "Anulează",
+      redeemUnavailable:
+        "Pentru suma curentă a comenzii, bonusurile nu pot fi utilizate",
+      redeemSummary: (points: number) =>
+        `Utilizează ${points} bonusuri = −${points} MDL`,
+    },
     auth: {
       signIn: "Intră",
       title: "Autentificare",
@@ -490,6 +530,21 @@ export const messages = {
       sendCode: "Primește codul",
       verify: "Confirmă",
       resend: "Trimite din nou",
+      modal: {
+        phoneTitle: "Introduceți numărul de telefon",
+        subtitle: "Pentru a intra în cont",
+        phonePlaceholder: "Număr de telefon",
+        legalConsent:
+          "Continuând, acceptați condițiile documentelor noastre juridice",
+        continue: "Continuă",
+        otpTitle: "Introduceți codul din SMS",
+        resend: "Trimite din nou",
+        errorSend: "Eroare la trimitere",
+        errorWrongCode: "Cod incorect",
+        a11yPhoneStep: "Autentificare cu numărul de telefon",
+        a11yOtpStep: "Cod din SMS",
+        otpDigitAria: (n: number) => `Cifra ${n}`,
+      },
     },
   },
 } as const

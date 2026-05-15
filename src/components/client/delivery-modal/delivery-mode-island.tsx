@@ -46,10 +46,7 @@ export function DeliveryModeIsland({
                   ? "font-semibold shadow-md"
                   : "",
               )
-            : cn(
-                "text-black",
-                isFloating ? "bg-transparent" : "storefront-modal-field",
-              ),
+            : "bg-transparent text-[var(--color-text)]",
         )}
       >
         <Bike className="size-[18px] shrink-0" strokeWidth={2} aria-hidden />
@@ -67,10 +64,7 @@ export function DeliveryModeIsland({
                   ? "font-semibold shadow-md"
                   : "",
               )
-            : cn(
-                "text-black",
-                isFloating ? "bg-transparent" : "storefront-modal-field",
-              ),
+            : "bg-transparent text-[var(--color-text)]",
         )}
       >
         <UtensilsCrossed className="size-[18px] shrink-0" strokeWidth={2} aria-hidden />

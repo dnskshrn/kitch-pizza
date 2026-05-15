@@ -76,6 +76,7 @@ export type SupplyOrderViewModel = {
     id: string
     ingredient_id: string
     quantity: number
+    received_qty: number | null
     price_per_unit: number
     vat_rate: number
     price_per_unit_with_vat: number
@@ -97,6 +98,7 @@ type EditableRow = {
   localKey: string
   ingredient_id: string
   quantityStr: string
+  receivedQtyStr: string
   priceStr: string
   vatStr: string
 }
@@ -113,6 +115,7 @@ function emptyRow(): EditableRow {
     localKey: newLocalKey(),
     ingredient_id: "",
     quantityStr: "",
+    receivedQtyStr: "",
     priceStr: "",
     vatStr: "20",
   }
@@ -159,6 +162,10 @@ export function SupplyOrderDialog({
           localKey: it.id,
           ingredient_id: it.ingredient_id,
           quantityStr: String(toDisplayQty(it.quantity, it.ingredient.unit)),
+          receivedQtyStr:
+            it.received_qty != null
+              ? String(toDisplayQty(it.received_qty, it.ingredient.unit))
+              : "",
           priceStr: String(toDisplayPrice(it.price_per_unit, it.ingredient.unit)),
           vatStr: String(it.vat_rate),
         }))
@@ -223,6 +230,7 @@ export function SupplyOrderDialog({
     const payloadItems: {
       ingredient_id: string
       quantity: number
+      received_qty: number | null
       price_per_unit: number
       vat_rate: number
     }[] = []
@@ -242,9 +250,20 @@ export function SupplyOrderDialog({
         alert("Не найден ингредиент")
         return
       }
+      const receivedTrim = (r.receivedQtyStr ?? "").trim()
+      let receivedStorage: number | null = null
+      if (receivedTrim !== "") {
+        const rq = parseDecimal(receivedTrim)
+        if (rq == null || !Number.isFinite(rq) || rq < 0) {
+          alert("Некорректное количество в поле «Получено»")
+          return
+        }
+        receivedStorage = toStorageQty(rq, ing.unit)
+      }
       payloadItems.push({
         ingredient_id: r.ingredient_id.trim(),
         quantity: toStorageQty(r.qty, ing.unit),
+        received_qty: receivedStorage,
         price_per_unit: toStoragePrice(r.price, ing.unit),
         vat_rate: r.vat,
       })
@@ -361,7 +380,8 @@ export function SupplyOrderDialog({
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-[200px]">Ингредиент</TableHead>
-                  <TableHead className="w-36">Кол-во</TableHead>
+                  <TableHead className="w-36">Заказано</TableHead>
+                  <TableHead className="w-36">Получено</TableHead>
                   <TableHead className="min-w-[200px]">
                     Цена за кг / л / шт (без НДС)
                   </TableHead>
@@ -381,6 +401,8 @@ export function SupplyOrderDialog({
                       ? viewItem.ingredient.unit
                       : ing?.unit
                   const displayUnitSfx = ingUnit ? displayUnit(ingUnit) : ""
+                  const viewReceived =
+                    viewItem != null ? viewItem.received_qty : null
 
                   return (
                     <TableRow key={r.localKey}>
@@ -416,6 +438,39 @@ export function SupplyOrderDialog({
                               onChange={(e) =>
                                 updateRow(r.localKey, {
                                   quantityStr: e.target.value,
+                                })
+                              }
+                            />
+                            <span className="text-muted-foreground w-8 shrink-0 text-xs">
+                              {ing ? displayUnit(ing.unit) : ""}
+                            </span>
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {readOnly ? (
+                          <span className="text-sm">
+                            {viewReceived != null && ingUnit ? (
+                              <>
+                                {toDisplayQty(viewReceived, ingUnit)}
+                                {displayUnitSfx ? ` ${displayUnitSfx}` : ""}
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">
+                                = заказано
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              className="min-w-0 flex-1"
+                              inputMode="decimal"
+                              placeholder="= заказано"
+                              value={r.receivedQtyStr}
+                              onChange={(e) =>
+                                updateRow(r.localKey, {
+                                  receivedQtyStr: e.target.value,
                                 })
                               }
                             />

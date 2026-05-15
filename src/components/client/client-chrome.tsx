@@ -1,14 +1,13 @@
 "use client"
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { AuthModal } from "@/components/client/auth/auth-modal"
+import { AuthInitializer } from "@/components/client/auth/auth-initializer"
+import { AuthModal } from "@/components/client/auth/AuthModal"
 import { CartRoot } from "@/components/client/cart/CartRoot"
 import { DeliveryRoot } from "@/components/client/delivery-modal"
 import { MainHeader } from "@/components/client/main-header"
 import { MenuCategoryBar } from "@/components/client/menu-category-bar"
 import { ProductModalRoot } from "@/components/client/product-modal/ProductModalRoot"
 import { StorefrontHaptics } from "@/components/client/storefront-haptics"
-import { TopNav } from "@/components/client/top-nav"
 import type { Category } from "@/types/database"
 import { htmlLang } from "@/lib/i18n/storefront"
 import { useLanguageStore } from "@/lib/store/language-store"
@@ -22,7 +21,11 @@ type ClientChromeProps = {
 }
 
 function hasBoutiqueStorefront(brandSlug: string): boolean {
-  return brandSlug === "the-spot" || brandSlug === "losos"
+  return (
+    brandSlug === "the-spot" ||
+    brandSlug === "losos" ||
+    brandSlug === "kitch-pizza"
+  )
 }
 
 export function ClientChrome({
@@ -31,7 +34,8 @@ export function ClientChrome({
   children,
 }: ClientChromeProps) {
   const pathname = usePathname()
-  const isCheckoutFlow = pathname.startsWith("/checkout")
+  /** Включая `/losos/checkout`, `/thespot/checkout` и вложенные пути (`/checkout/success`). */
+  const isCheckoutFlow = pathname.split("/").includes("checkout")
   const isBoutiqueStorefront = hasBoutiqueStorefront(brandSlug)
 
   useEffect(() => {
@@ -54,32 +58,31 @@ export function ClientChrome({
     }
   }, [brandSlug])
 
-  if (isCheckoutFlow) {
-    return (
-      <>
-        <StorefrontHaptics />
-        <ProductModalRoot />
-        <DeliveryRoot />
-        <CartRoot brandSlug={brandSlug} />
-        {/* <AuthModal /> */}
-        <main className="flex-1">{children}</main>
-      </>
-    )
-  }
-
   return (
     <>
-      <StorefrontHaptics />
-      {isBoutiqueStorefront ? null : <TopNav />}
-      <MainHeader brandSlug={brandSlug} />
-      {isBoutiqueStorefront ? null : (
-        <MenuCategoryBar brandSlug={brandSlug} categories={categories} />
+      <AuthInitializer />
+      <AuthModal />
+      {isCheckoutFlow ? (
+        <>
+          <StorefrontHaptics />
+          <ProductModalRoot />
+          <DeliveryRoot />
+          <CartRoot brandSlug={brandSlug} />
+          <main className="flex-1">{children}</main>
+        </>
+      ) : (
+        <>
+          <StorefrontHaptics />
+          <MainHeader brandSlug={brandSlug} />
+          {isBoutiqueStorefront ? null : (
+            <MenuCategoryBar brandSlug={brandSlug} categories={categories} />
+          )}
+          <ProductModalRoot />
+          <DeliveryRoot />
+          <CartRoot brandSlug={brandSlug} />
+          <main className="flex-1">{children}</main>
+        </>
       )}
-      <ProductModalRoot />
-      <DeliveryRoot />
-      <CartRoot brandSlug={brandSlug} />
-      {/* <AuthModal /> */}
-      <main className="flex-1">{children}</main>
     </>
   )
 }

@@ -1,0 +1,2 @@
+ALTER TABLE orders
+ADD COLUMN IF NOT EXISTS bonuses_redeemed integer NOT NULL DEFAULT 0;

@@ -1,11 +1,13 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import { revalidatePath } from "next/cache"
 
 export type CreateSupplyOrderItemInput = {
   ingredient_id: string
   quantity: number
+  received_qty?: number | null
   price_per_unit: number
   vat_rate: number
 }
@@ -57,6 +59,15 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
     if (!Number.isFinite(qty) || qty <= 0) {
       throw new Error("Количество должно быть больше нуля")
     }
+    let receivedQty: number | null = null
+    if (row.received_qty !== undefined && row.received_qty !== null) {
+      const rq = Number(row.received_qty)
+      if (!Number.isFinite(rq) || rq < 0) {
+        throw new Error("Некорректное количество в поле «Получено»")
+      }
+      receivedQty = rq
+    }
+    const stockQty = receivedQty ?? qty
     if (!Number.isFinite(price) || price < 0) {
       throw new Error("Цена без НДС не может быть отрицательной")
     }
@@ -67,6 +78,8 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
     return {
       ingredient_id: ingredientId,
       quantity: qty,
+      received_qty: receivedQty,
+      stock_qty: stockQty,
       price_per_unit: price,
       vat_rate: vat,
       price_per_unit_with_vat: priceWithVat,
@@ -117,6 +130,7 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
     supply_order_id: orderId,
     ingredient_id: r.ingredient_id,
     quantity: r.quantity,
+    received_qty: r.received_qty,
     price_per_unit: r.price_per_unit,
     vat_rate: r.vat_rate,
     price_per_unit_with_vat: r.price_per_unit_with_vat,
@@ -132,6 +146,7 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
   }
 
   const ts = new Date().toISOString()
+  const serviceSupabase = createServiceRoleClient()
 
   for (const r of normalized) {
     const { data: stock, error: stockReadError } = await supabase
@@ -147,7 +162,7 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
 
     const currentQty = Number(stock.quantity)
     const currentCost = Number(stock.avg_cost ?? 0)
-    const incomingQty = r.quantity
+    const incomingQty = r.stock_qty
     const incomingCost = r.price_per_unit
 
     const newQty = currentQty + incomingQty
@@ -166,6 +181,20 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
       .eq("ingredient_id", r.ingredient_id)
 
     if (stockUpError) throw new Error(stockUpError.message)
+
+    const { error: ledgerError } = await serviceSupabase
+      .from("stock_ledger")
+      .insert({
+        ingredient_id: r.ingredient_id,
+        movement_type: "supply",
+        reference_id: orderId,
+        reference_type: "supply_order",
+        quantity_delta: incomingQty,
+        cost_per_unit: incomingCost,
+        note: null,
+      })
+
+    if (ledgerError) throw new Error(ledgerError.message)
   }
 
   revalidatePath("/admin/inventory/supplies")

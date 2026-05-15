@@ -68,6 +68,7 @@ import {
   posVariantsFromMenuEmbed,
 } from "@/lib/pos/menu-item-modal-row"
 import { writePosBrandSlugCookie } from "@/lib/pos/pos-brand-slug-cookie"
+import { posCheckoutAddressFieldsFromOrder } from "@/lib/pos/split-composite-delivery-address"
 import type { MenuItem, MenuItemVariant } from "@/types/database"
 import type { PosCartItem, PosOrder, PosWizardBrandOption } from "@/types/pos"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -139,18 +140,16 @@ const checkoutSchema = z
 type CheckoutFormValues = z.infer<typeof checkoutSchema>
 
 function checkoutValuesFromPosListOrder(o: PosOrder): CheckoutFormValues {
+  const addr = posCheckoutAddressFieldsFromOrder(o)
   return {
     userName: o.user_name?.trim() ?? "",
     userPhone: phoneInputFromStored(o.user_phone ?? ""),
     deliveryMode: o.delivery_mode,
-    deliveryAddress:
-      o.delivery_mode === "delivery"
-        ? (o.delivery_address?.trim() ?? "")
-        : "",
-    addressEntrance: o.address_entrance?.trim() ?? "",
-    addressFloor: o.address_floor?.trim() ?? "",
-    addressApartment: o.address_apartment?.trim() ?? "",
-    addressIntercom: o.address_intercom?.trim() ?? "",
+    deliveryAddress: addr.deliveryAddress,
+    addressEntrance: addr.entrance,
+    addressFloor: addr.floor,
+    addressApartment: addr.apartment,
+    addressIntercom: addr.intercom,
     paymentMethod: o.payment_method ?? "cash",
     changeFromLei:
       o.change_from != null && o.change_from > 0
@@ -967,18 +966,16 @@ export function OrderForm({
         setPromoInput("")
         setPromoResult(null)
         setPromoError(null)
+        const addr = posCheckoutAddressFieldsFromOrder(raw)
         form.reset({
           userName: raw.user_name?.trim() ?? "",
           userPhone: phoneInputFromStored(raw.user_phone ?? ""),
           deliveryMode: raw.delivery_mode,
-          deliveryAddress:
-            raw.delivery_mode === "delivery"
-              ? (raw.delivery_address?.trim() ?? "")
-              : "",
-          addressEntrance: raw.address_entrance?.trim() ?? "",
-          addressFloor: raw.address_floor?.trim() ?? "",
-          addressApartment: raw.address_apartment?.trim() ?? "",
-          addressIntercom: raw.address_intercom?.trim() ?? "",
+          deliveryAddress: addr.deliveryAddress,
+          addressEntrance: addr.entrance,
+          addressFloor: addr.floor,
+          addressApartment: addr.apartment,
+          addressIntercom: addr.intercom,
           paymentMethod: raw.payment_method,
           changeFromLei:
             raw.change_from != null && raw.change_from > 0
@@ -1019,18 +1016,16 @@ export function OrderForm({
         setPromoResult(null)
       }
 
+      const addr = posCheckoutAddressFieldsFromOrder(raw)
       form.reset({
         userName: raw.user_name?.trim() ?? "",
         userPhone: phoneInputFromStored(raw.user_phone ?? ""),
         deliveryMode: raw.delivery_mode,
-        deliveryAddress:
-          raw.delivery_mode === "delivery"
-            ? (raw.delivery_address?.trim() ?? "")
-            : "",
-        addressEntrance: raw.address_entrance?.trim() ?? "",
-        addressFloor: raw.address_floor?.trim() ?? "",
-        addressApartment: raw.address_apartment?.trim() ?? "",
-        addressIntercom: raw.address_intercom?.trim() ?? "",
+        deliveryAddress: addr.deliveryAddress,
+        addressEntrance: addr.entrance,
+        addressFloor: addr.floor,
+        addressApartment: addr.apartment,
+        addressIntercom: addr.intercom,
         paymentMethod: raw.payment_method,
         changeFromLei:
           raw.change_from != null && raw.change_from > 0

@@ -126,7 +126,7 @@ export function DeliveryContent({
           <div className="flex items-stretch gap-2">
             <div
               className={cn(
-                "storefront-modal-field relative min-w-0 flex-1 rounded-[12px] px-[16px] py-[8px]",
+                "storefront-input relative min-w-0 flex-1 rounded-[12px] px-[16px] py-[8px]",
                 outOfZone && "ring-2 ring-inset ring-orange-400",
               )}
             >
@@ -207,7 +207,7 @@ export function DeliveryContent({
                   placeholder={t.delivery.entrance}
                   value={entrance}
                   onChange={(e) => setSecondary({ entrance: e.target.value })}
-                  className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                  className="storefront-input min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
                 <input
                   type="text"
@@ -215,7 +215,7 @@ export function DeliveryContent({
                   placeholder={t.delivery.floor}
                   value={floor}
                   onChange={(e) => setSecondary({ floor: e.target.value })}
-                  className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                  className="storefront-input min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
                 <input
                   type="text"
@@ -223,14 +223,14 @@ export function DeliveryContent({
                   placeholder={t.delivery.apartment}
                   value={apartment}
                   onChange={(e) => setSecondary({ apartment: e.target.value })}
-                  className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                  className="storefront-input min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
                 <input
                   type="text"
                   placeholder={t.delivery.intercom}
                   value={intercom}
                   onChange={(e) => setSecondary({ intercom: e.target.value })}
-                  className="storefront-modal-field min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                  className="storefront-input min-w-0 flex-1 rounded-[8px] p-[12px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
                 />
               </div>
 
@@ -239,7 +239,7 @@ export function DeliveryContent({
                 placeholder={t.delivery.comment}
                 value={comment}
                 onChange={(e) => setSecondary({ comment: e.target.value })}
-                className="storefront-modal-field w-full rounded-[12px] px-[16px] py-[14px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
+                className="storefront-input w-full rounded-[12px] px-[16px] py-[14px] text-[14px] font-medium text-[#808080] placeholder:text-[#808080]"
               />
             </>
           ) : null}

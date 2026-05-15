@@ -1,10 +1,10 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { useMemo, useState } from "react"
+import { useFormStatus } from "react-dom"
 import type { StockAudit } from "@/types/database"
-import { AuditDialog } from "./audit-dialog"
-import { createAudit, getAuditDetail, type AuditDetail } from "./actions"
+import { createAudit } from "./actions"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,6 +20,7 @@ import { Plus } from "lucide-react"
 
 export type AuditListRow = StockAudit & {
   itemCount: number
+  diffCostMdlTotal: number | null
 }
 
 function formatCreated(iso: string): string {
@@ -36,15 +37,45 @@ function formatCreated(iso: string): string {
   }
 }
 
+function NewAuditSubmitButton() {
+  const { pending } = useFormStatus()
+  return (
+    <Button type="submit" className="gap-2" disabled={pending}>
+      <Plus className="h-4 w-4" />
+      {pending ? "Создание…" : "Новая инвентаризация"}
+    </Button>
+  )
+}
+
 type Props = {
   audits: AuditListRow[]
 }
 
+function DiffCostMdlListCell({ total }: { total: number | null }) {
+  if (total === null) {
+    return <span className="text-muted-foreground">—</span>
+  }
+  if (!Number.isFinite(total)) {
+    return <span className="text-muted-foreground">—</span>
+  }
+  if (total === 0) {
+    return <span className="text-muted-foreground tabular-nums">0 MDL</span>
+  }
+  if (total > 0) {
+    return (
+      <span className="font-medium text-green-600 tabular-nums">
+        +{total.toFixed(2)} MDL
+      </span>
+    )
+  }
+  return (
+    <span className="font-medium text-red-600 tabular-nums">
+      {total.toFixed(2)} MDL
+    </span>
+  )
+}
+
 export function AuditsTable({ audits }: Props) {
-  const router = useRouter()
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogDetail, setDialogDetail] = useState<AuditDetail | null>(null)
-  const [pending, startTransition] = useTransition()
   const [search, setSearch] = useState("")
 
   const filteredAudits = useMemo(() => {
@@ -61,46 +92,13 @@ export function AuditsTable({ audits }: Props) {
     })
   }, [audits, search])
 
-  function openAudit(detail: AuditDetail) {
-    setDialogDetail(detail)
-    setDialogOpen(true)
-  }
-
-  async function handleOpenById(id: string) {
-    try {
-      const d = await getAuditDetail(id)
-      openAudit(d)
-    } catch (e) {
-      console.error(e)
-      alert(e instanceof Error ? e.message : "Не удалось открыть")
-    }
-  }
-
-  function handleNewAudit() {
-    startTransition(async () => {
-      try {
-        const detail = await createAudit()
-        openAudit(detail)
-        router.refresh()
-      } catch (e) {
-        console.error(e)
-        alert(e instanceof Error ? e.message : "Не удалось создать")
-      }
-    })
-  }
-
   return (
     <>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Инвентаризации</h1>
-        <Button
-          className="gap-2"
-          onClick={handleNewAudit}
-          disabled={pending}
-        >
-          <Plus className="h-4 w-4" />
-          Новая инвентаризация
-        </Button>
+        <form action={createAudit}>
+          <NewAuditSubmitButton />
+        </form>
       </div>
 
       <div className="mb-4 max-w-md">
@@ -117,6 +115,9 @@ export function AuditsTable({ audits }: Props) {
             <TableHead>Дата создания</TableHead>
             <TableHead>Статус</TableHead>
             <TableHead className="text-right">Кол-во позиций</TableHead>
+            <TableHead className="min-w-[11rem] text-right">
+              Расхождение (MDL)
+            </TableHead>
             <TableHead className="w-28 text-right" />
           </TableRow>
         </TableHeader>
@@ -124,7 +125,7 @@ export function AuditsTable({ audits }: Props) {
           {audits.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={4}
+                colSpan={5}
                 className="text-muted-foreground text-center"
               >
                 Пока нет инвентаризаций
@@ -133,7 +134,7 @@ export function AuditsTable({ audits }: Props) {
           ) : filteredAudits.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={4}
+                colSpan={5}
                 className="text-muted-foreground text-center"
               >
                 Ничего не найдено
@@ -160,12 +161,13 @@ export function AuditsTable({ audits }: Props) {
                   {a.itemCount}
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleOpenById(a.id)}
-                  >
-                    Открыть
+                  <DiffCostMdlListCell total={a.diffCostMdlTotal} />
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/admin/inventory/audits/${a.id}`}>
+                      Открыть
+                    </Link>
                   </Button>
                 </TableCell>
               </TableRow>
@@ -173,15 +175,6 @@ export function AuditsTable({ audits }: Props) {
           )}
         </TableBody>
       </Table>
-
-      <AuditDialog
-        open={dialogOpen}
-        onOpenChange={(o) => {
-          setDialogOpen(o)
-          if (!o) setDialogDetail(null)
-        }}
-        detail={dialogDetail}
-      />
     </>
   )
 }

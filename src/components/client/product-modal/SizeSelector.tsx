@@ -33,7 +33,7 @@ export function VariantSelector({
   if (variants.length === 0) return null
 
   return (
-    <div className="storefront-modal-field flex w-full flex-wrap gap-2 rounded-[12px] p-1 transition-all duration-200">
+    <div className="flex w-full flex-wrap gap-1 rounded-full bg-[var(--size-selector-bg)] p-1 transition-all duration-200">
       {variants.map((v) => {
         const label = pickVariantLabel(v, lang)
         const sel = selectedVariantId === v.id
@@ -45,8 +45,8 @@ export function VariantSelector({
             className={cn(
               "min-h-11 min-w-0 flex-1 cursor-pointer rounded-full px-2 py-2 text-center text-[15px] transition-all duration-200 md:text-[16px]",
               sel
-                ? "storefront-modal-mode-active font-bold shadow-sm hover:shadow-md"
-                : "font-medium text-[rgba(36,36,36,0.5)] hover:bg-white/50 hover:text-[#242424]",
+                ? "bg-[var(--size-selector-item-active-bg)] font-bold text-[var(--size-selector-item-active-text)] shadow-sm hover:shadow-md"
+                : "bg-[var(--size-selector-item-bg)] font-medium text-[var(--color-muted)] hover:bg-white/50 hover:text-[var(--color-text)]",
             )}
           >
             {label}

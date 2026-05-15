@@ -8,6 +8,8 @@ export type BrandConfig = {
   hours: string
   cartKey: string // localStorage key for cart
   deliveryKey: string // localStorage key for delivery
+  /** Meta (Facebook) Pixel; пиксель не подключается, если null или пустая строка. */
+  metaPixelId: string | null
   colors: {
     accent: string
     accentBg: string
@@ -27,6 +29,7 @@ export const brands: BrandConfig[] = [
     hours: '11:00 – 23:00',
     cartKey: 'kitch-pizza-cart',
     deliveryKey: 'kitch-pizza-delivery',
+    metaPixelId: '342890895314551',
     colors: {
       accent: '#5F7600',
       accentBg: '#ECFFA1',
@@ -44,6 +47,7 @@ export const brands: BrandConfig[] = [
     hours: '11:00 – 23:00', // TODO
     cartKey: 'losos-cart',
     deliveryKey: 'losos-delivery',
+    metaPixelId: '2033954120857667',
     colors: {
       accent: '#f25130',
       accentBg: '#ffe2dc',
@@ -61,6 +65,7 @@ export const brands: BrandConfig[] = [
     hours: '11:00 – 23:00', // TODO
     cartKey: 'kitch-pizza-cart', // TODO
     deliveryKey: 'kitch-pizza-delivery', // TODO
+    metaPixelId: '910661225331040',
     colors: {
       accent: '#f25130',
       accentBg: '#ffebe7',

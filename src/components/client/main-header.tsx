@@ -1,7 +1,12 @@
 "use client"
 
+import { getBrandBySlug } from "@/brands/index"
+import { AccountNavLink } from "@/components/client/account-nav-link"
 import { ClientContainer } from "@/components/client/client-container"
-import { BRAND_ACCENT } from "@/lib/client-brand"
+import {
+  StorefrontDesktopAuthStrip,
+  StorefrontTopBarSchedule,
+} from "@/components/client/storefront-top-bar"
 import {
   getBrandCallLabel,
   getBrandPhone,
@@ -13,43 +18,36 @@ import type { Lang, StorefrontMessages } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
 import Image from "next/image"
 import Link from "next/link"
-import { Bike, ChevronDown, MapPin, Menu, X } from "lucide-react"
+import { Bike, ChevronDown, Menu, X } from "lucide-react"
 import { useEffect, useState } from "react"
-const ADDRESS_BG = "#f3f4f6"
-/** Фиксированная ширина полосы доставки на десктопе (не растягивается на всю колонку). */
-const DELIVERY_BAR_MAX_WIDTH_CLASS = "max-w-[520px]"
-
-function hasBoutiqueHeader(brandSlug: string): boolean {
-  return brandSlug === "the-spot" || brandSlug === "losos"
-}
 
 function getHeaderLogoMeta(brandSlug: string) {
-  if (brandSlug === "the-spot") {
-    return {
-      src: "/the-spot-logo.svg",
-      alt: "The Spot",
-      width: 80,
-      height: 47,
-      className: "h-[40px] w-[68px] md:h-[42px] md:w-[72px]",
-    }
-  }
-
-  if (brandSlug === "losos") {
-    return {
-      src: "/Losos_Logo.svg",
-      alt: "LOSOS",
-      width: 176,
-      height: 56,
-      className: "h-[40px] w-[126px] md:h-[42px] md:w-[132px]",
-    }
-  }
-
-  return {
-    src: "/kitch-pizza-logo.svg",
-    alt: "Kitch Pizza",
-    width: 121,
-    height: 56,
-    className: "h-10 w-auto md:h-12",
+  const brand = getBrandBySlug(brandSlug)
+  switch (brand.slug) {
+    case "the-spot":
+      return {
+        src: brand.logo,
+        alt: brand.name,
+        width: 80,
+        height: 47,
+        className: "h-[40px] w-[68px] md:h-[42px] md:w-[72px]",
+      }
+    case "losos":
+      return {
+        src: brand.logo,
+        alt: brand.name,
+        width: 176,
+        height: 56,
+        className: "h-[40px] w-[126px] md:h-[42px] md:w-[132px]",
+      }
+    default:
+      return {
+        src: brand.logo,
+        alt: brand.name,
+        width: 121,
+        height: 56,
+        className: "h-10 w-auto md:h-12",
+      }
   }
 }
 
@@ -123,52 +121,6 @@ function PhoneIcon({ className }: { className?: string }) {
   )
 }
 
-function DeliveryBanner({
-  addressLabel,
-  etaMinutes,
-  onOpenAddress,
-  t,
-}: {
-  addressLabel: string
-  etaMinutes: number
-  onOpenAddress: () => void
-  t: StorefrontMessages
-}) {
-  return (
-    <div
-      className={`flex w-full flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${DELIVERY_BAR_MAX_WIDTH_CLASS}`}
-      style={{ backgroundColor: ADDRESS_BG }}
-    >
-      <div className="min-w-0">
-        <p className="text-sm font-bold leading-tight text-foreground">
-          {t.header.deliveryTitle}{" "}
-          <span style={{ color: BRAND_ACCENT }}>{t.header.deliveryArea}</span>
-        </p>
-        <p className="text-muted-foreground mt-1 text-xs">
-          {t.header.etaPrefix}{" "}
-          <span className="font-bold text-foreground">
-            ~{etaMinutes} {t.header.etaSuffix}
-          </span>
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={onOpenAddress}
-        className="flex w-full max-w-full shrink-0 cursor-pointer items-center gap-2 rounded-full bg-white px-3 py-2.5 text-left text-sm text-foreground transition-all duration-200 hover:brightness-[0.98] sm:w-auto"
-        aria-label={t.header.deliveryAddress}
-      >
-        <MapPin
-          className="size-4 shrink-0"
-          style={{ color: BRAND_ACCENT }}
-          aria-hidden
-          strokeWidth={2.25}
-        />
-        <span className="min-w-0 truncate">{addressLabel}</span>
-      </button>
-    </div>
-  )
-}
-
 function TheSpotDesktopHeader({
   brandSlug,
   addressLabel,
@@ -218,7 +170,16 @@ function TheSpotDesktopHeader({
           </span>
         </button>
 
+        <div className="hidden shrink-0 lg:flex">
+          <StorefrontTopBarSchedule />
+        </div>
+
         <div className="ml-auto flex shrink-0 items-center gap-2 lg:gap-3">
+          <AccountNavLink
+            brandSlug={brandSlug}
+            lang={overlayLang}
+            className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--color-bg)] text-[var(--color-text)] transition-all duration-200 hover:brightness-[0.98] md:flex lg:hidden"
+          />
           <div className="hidden items-center gap-1 rounded-full bg-[var(--color-bg)] p-1 text-[13px] font-bold lg:flex">
             <button
               type="button"
@@ -246,12 +207,15 @@ function TheSpotDesktopHeader({
 
           <a
             href={brandPhoneHref}
-            className="hidden h-11 shrink-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-4 text-[14px] font-bold text-[var(--color-text)] transition-all duration-200 hover:brightness-[0.98] xl:flex"
+            className="hidden h-11 shrink-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-4 text-[14px] font-bold text-[var(--color-text)] transition-all duration-200 hover:brightness-[0.98] lg:flex"
             aria-label={brandCallLabel}
           >
             <PhoneIcon className="size-4" />
             <span>{brandPhone}</span>
           </a>
+          <div className="hidden lg:flex">
+            <StorefrontDesktopAuthStrip brandSlug={brandSlug} />
+          </div>
         </div>
 
         <button
@@ -304,6 +268,11 @@ function MobileFullMenuOverlay({
       <div className="flex shrink-0 items-center justify-between gap-2 rounded-full bg-white p-2 pl-3 shadow-[0_16px_42px_rgba(36,36,36,0.06)]">
         <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
         <div className="flex shrink-0 items-center gap-2">
+          <AccountNavLink
+            brandSlug={brandSlug}
+            lang={lang}
+            className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[var(--color-bg)] text-[var(--color-text)] transition-all duration-200 hover:brightness-[0.98] active:scale-[0.96]"
+          />
           <div
             className="flex items-center rounded-full bg-[var(--color-bg)] p-1"
             role="group"
@@ -316,7 +285,7 @@ function MobileFullMenuOverlay({
               onClick={() => setLang("RO")}
               className={
                 lang === "RO"
-                  ? `${langBtnBase} bg-[var(--color-accent)] text-[var(--primary-foreground)]`
+                  ? `${langBtnBase} bg-[var(--color-accent)] text-[var(--color-accent-text)]`
                   : `${langBtnBase} text-[var(--color-muted)]`
               }
             >
@@ -327,7 +296,7 @@ function MobileFullMenuOverlay({
               onClick={() => setLang("RU")}
               className={
                 lang === "RU"
-                  ? `${langBtnBase} bg-[var(--color-accent)] text-[var(--primary-foreground)]`
+                  ? `${langBtnBase} bg-[var(--color-accent)] text-[var(--color-accent-text)]`
                   : `${langBtnBase} text-[var(--color-muted)]`
               }
             >
@@ -351,7 +320,7 @@ function MobileFullMenuOverlay({
         className="mt-5 flex w-full shrink-0 items-center gap-3 rounded-full bg-white px-4 py-3 text-left shadow-[0_16px_42px_rgba(36,36,36,0.06)] transition-all duration-200 active:scale-[0.99]"
         aria-label={t.header.deliveryAddress}
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--primary-foreground)]">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--color-accent-text)]">
           <Bike className="size-5" strokeWidth={2.2} />
         </span>
         <span className="min-w-0 flex-1">
@@ -374,10 +343,10 @@ function MobileFullMenuOverlay({
       <a
         href={brandPhoneHref}
         onClick={onClose}
-        className="mt-4 flex w-full shrink-0 items-center justify-center gap-2 rounded-full bg-[var(--color-accent)] px-4 py-3.5 text-[16px] font-bold text-[var(--primary-foreground)] shadow-[0_8px_24px_rgba(36,36,36,0.12)] transition-all duration-200 hover:brightness-105 active:scale-[0.99]"
+        className="mt-4 flex w-full shrink-0 items-center justify-center gap-2 rounded-full bg-[var(--color-accent)] px-4 py-3.5 text-[16px] font-bold text-[var(--color-accent-text)] shadow-[0_8px_24px_rgba(36,36,36,0.12)] transition-all duration-200 hover:brightness-105 active:scale-[0.99]"
         aria-label={brandCallLabel}
       >
-        <PhoneIcon className="size-5 shrink-0 text-[var(--primary-foreground)]" />
+        <PhoneIcon className="size-5 shrink-0 text-[var(--color-accent-text)]" />
         <PhoneNumberDisplay phone={brandPhone} className="tabular-nums" />
       </a>
     </div>
@@ -394,23 +363,13 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const deliveryMode = useDeliveryStore((s) => s.mode)
   const resolvedAddress = useDeliveryStore((s) => s.resolvedAddress)
-  const selectedZone = useDeliveryStore((s) => s.selectedZone)
 
-  const addressLabel =
-    deliveryMode === "pickup"
-      ? t.header.pickupShort
-      : resolvedAddress
-        ? truncAddress(resolvedAddress, 42)
-        : t.header.addressPlaceholder
   const theSpotAddressLabel =
     deliveryMode === "pickup"
       ? t.header.pickupShort
       : resolvedAddress
         ? truncAddress(resolvedAddress, 34)
         : t.header.theSpotFallbackAddress
-
-  const etaMinutes = selectedZone?.delivery_time_min ?? 42
-  const hasBoutiqueLayout = hasBoutiqueHeader(brandSlug)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -429,137 +388,58 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
   return (
     <header
       className={
-        hasBoutiqueLayout
-          ? menuOpen
-            ? "sticky top-0 z-[120] bg-transparent"
-            : "sticky top-0 z-30 bg-transparent"
-          : "bg-white"
+        menuOpen
+          ? "sticky top-10 z-[120] bg-transparent lg:top-0"
+          : "sticky top-10 z-30 bg-transparent lg:top-0"
       }
     >
-      <ClientContainer className={hasBoutiqueLayout ? "px-4 py-3 md:px-4 md:py-5 lg:px-4" : "py-3"}>
-        {hasBoutiqueLayout ? (
-          <>
-            <div className="md:hidden">
-              <div className="flex h-[63px] w-full items-center gap-3 rounded-full bg-white p-2 shadow-[0_14px_42px_rgba(36,36,36,0.04)]">
-                <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
-                <button
-                  type="button"
-                  onClick={openDeliveryModal}
-                  className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--color-bg)] px-4 py-2 text-center transition-all duration-200 active:scale-[0.99]"
-                  aria-label={t.header.deliveryAddress}
-                >
-                  <Bike
-                    className="size-5 shrink-0 text-[var(--color-text)]"
-                    strokeWidth={2.2}
-                  />
-                  <span className="min-w-0 leading-none">
-                    <span className="block truncate text-[10px] font-normal text-[var(--color-muted)]">
-                      {t.header.deliveryAddress}
-                    </span>
-                    <span className="mt-1 block truncate text-[14px] font-bold text-[var(--color-text)]">
-                      {theSpotAddressLabel}
-                    </span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="flex h-full w-[51px] shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-[var(--color-text)] transition-all duration-200 active:scale-[0.97]"
-                  aria-expanded={menuOpen}
-                  aria-label={menuOpen ? t.header.closeMenu : t.header.openMenu}
-                  onClick={() => setMenuOpen((o) => !o)}
-                >
-                  <Menu className="h-7 w-7" strokeWidth={2} />
-                </button>
-              </div>
-            </div>
-            <TheSpotDesktopHeader
-              brandSlug={brandSlug}
-              addressLabel={theSpotAddressLabel}
-              brandPhone={brandPhone}
-              brandPhoneHref={brandPhoneHref}
-              brandCallLabel={brandCallLabel}
-              menuOpen={menuOpen}
-              overlayLang={overlayLang}
-              onOpenAddress={openDeliveryModal}
-              onOpenMenu={() => setMenuOpen((o) => !o)}
-              onLangChange={setOverlayLang}
-              t={t}
-            />
-          </>
-        ) : (
-        <div className="flex flex-col gap-3 md:hidden">
-          <div className="flex w-full items-center gap-2">
-            <button
-              type="button"
-              className="text-foreground -ml-1 flex shrink-0 cursor-pointer p-1 transition-all duration-200 active:scale-[0.97]"
-              aria-expanded={menuOpen}
-              aria-label={menuOpen ? t.header.closeMenu : t.header.openMenu}
-              onClick={() => setMenuOpen((o) => !o)}
-            >
-              <svg
-                className="size-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-                aria-hidden
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4 6h16M4 12h16M4 18h16"
-                />
-              </svg>
-            </button>
-            <div className="flex min-w-0 flex-1 justify-center">
+      <ClientContainer className="px-4 py-3 md:px-4 md:py-5 lg:px-4">
+        <div className="md:hidden">
+          <div className="flex h-[63px] w-full items-center gap-3 rounded-full bg-white p-2 shadow-[0_14px_42px_rgba(36,36,36,0.04)]">
               <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
-            </div>
-            <a
-              href={brandPhoneHref}
-              className="text-foreground flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#f3f4f6] p-2.5 transition-all duration-200 hover:brightness-[0.97] active:scale-[0.98]"
-              aria-label={brandCallLabel}
-            >
-              <PhoneIcon className="size-6" />
-            </a>
+              <button
+                type="button"
+                onClick={openDeliveryModal}
+                className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--color-bg)] px-4 py-2 text-center transition-all duration-200 active:scale-[0.99]"
+                aria-label={t.header.deliveryAddress}
+              >
+                <Bike
+                  className="size-5 shrink-0 text-[var(--color-text)]"
+                  strokeWidth={2.2}
+                />
+                <span className="min-w-0 leading-none">
+                  <span className="block truncate text-[10px] font-normal text-[var(--color-muted)]">
+                    {t.header.deliveryAddress}
+                  </span>
+                  <span className="mt-1 block truncate text-[14px] font-bold text-[var(--color-text)]">
+                    {theSpotAddressLabel}
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="flex h-full w-[51px] shrink-0 cursor-pointer items-center justify-center rounded-full bg-white text-[var(--color-text)] transition-all duration-200 active:scale-[0.97]"
+                aria-expanded={menuOpen}
+                aria-label={menuOpen ? t.header.closeMenu : t.header.openMenu}
+                onClick={() => setMenuOpen((o) => !o)}
+              >
+                <Menu className="h-7 w-7" strokeWidth={2} />
+              </button>
           </div>
-          <DeliveryBanner
-            addressLabel={addressLabel}
-            etaMinutes={etaMinutes}
+        </div>
+        <TheSpotDesktopHeader
+            brandSlug={brandSlug}
+            addressLabel={theSpotAddressLabel}
+            brandPhone={brandPhone}
+            brandPhoneHref={brandPhoneHref}
+            brandCallLabel={brandCallLabel}
+            menuOpen={menuOpen}
+            overlayLang={overlayLang}
             onOpenAddress={openDeliveryModal}
+            onOpenMenu={() => setMenuOpen((o) => !o)}
+            onLangChange={setOverlayLang}
             t={t}
-          />
-        </div>
-        )}
-
-        <div
-          className={
-            hasBoutiqueLayout
-              ? "hidden"
-              : "hidden md:grid md:grid-cols-[auto_1fr_auto] md:items-center md:gap-6"
-          }
-        >
-          <div className="flex justify-start">
-            <Logo brandSlug={brandSlug} homeLabel={t.common.brandHome} />
-          </div>
-          <div className="flex min-w-0 justify-start">
-            <DeliveryBanner
-              addressLabel={addressLabel}
-              etaMinutes={etaMinutes}
-              onOpenAddress={openDeliveryModal}
-              t={t}
-            />
-          </div>
-          <div className="flex justify-end">
-            <a
-              href={brandPhoneHref}
-              className="text-foreground inline-flex cursor-pointer items-center gap-2 rounded-full bg-[#f3f4f6] px-4 py-2.5 transition-all duration-200 hover:brightness-[0.97] active:scale-[0.98]"
-              aria-label={brandCallLabel}
-            >
-              <PhoneIcon className="size-5 shrink-0" />
-              <PhoneNumberDisplay phone={brandPhone} className="text-lg tracking-tight" />
-            </a>
-          </div>
-        </div>
+        />
       </ClientContainer>
 
       {menuOpen ? (
@@ -570,9 +450,7 @@ export function MainHeader({ brandSlug = "kitch-pizza" }: { brandSlug?: string }
           brandPhone={brandPhone}
           brandPhoneHref={brandPhoneHref}
           brandCallLabel={brandCallLabel}
-          addressLabel={
-            hasBoutiqueLayout ? theSpotAddressLabel : addressLabel
-          }
+          addressLabel={theSpotAddressLabel}
           lang={overlayLang}
           setLang={setOverlayLang}
           t={t}

@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const code = randomInt(100000, 1000000).toString()
+    const code = randomInt(1000, 10000).toString()
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()
 
     const { error: insertError } = await supabase.from("otp_codes").insert({

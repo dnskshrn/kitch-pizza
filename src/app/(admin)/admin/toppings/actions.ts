@@ -78,6 +78,13 @@ export async function deleteToppingGroup(id: string) {
   revalidateToppings()
 }
 
+export type ToppingRecipeLinePayload = {
+  ingredient_id: string | null
+  semi_finished_id: string | null
+  quantity: number
+  quantity_gross: number | null
+}
+
 export async function createTopping(data: {
   group_id: string
   name_ru: string
@@ -86,18 +93,22 @@ export async function createTopping(data: {
   sort_order: number
   is_active: boolean
   image_url: string | null
+  recipe_lines: ToppingRecipeLinePayload[]
 }) {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await supabase.from("toppings").insert({
-    brand_id: brandId,
-    group_id: data.group_id,
-    name_ru: data.name_ru.trim(),
-    name_ro: data.name_ro.trim(),
-    price: data.price,
-    sort_order: data.sort_order,
-    is_active: data.is_active,
-    image_url: data.image_url,
+  const { error } = await (supabase as any).rpc("save_topping_with_recipes", {
+    p_is_create: true,
+    p_topping_id: null,
+    p_brand_id: brandId,
+    p_group_id: data.group_id,
+    p_name_ru: data.name_ru.trim(),
+    p_name_ro: data.name_ro.trim(),
+    p_price: data.price,
+    p_sort_order: data.sort_order,
+    p_is_active: data.is_active,
+    p_image_url: data.image_url,
+    p_recipe_lines: data.recipe_lines,
   })
   if (error) throw new Error(error.message)
   revalidateToppings()
@@ -143,18 +154,51 @@ export async function copyToppingToGroup(data: {
   if (existingError) throw new Error(existingError.message)
   if (existing) throw new Error("Такой топпинг уже есть в выбранной группе")
 
-  const { error } = await supabase.from("toppings").insert({
-    brand_id: brandId,
-    group_id: data.group_id,
-    name_ru: topping.name_ru,
-    name_ro: topping.name_ro,
-    price: topping.price,
-    sort_order: topping.sort_order,
-    is_active: topping.is_active,
-    image_url: topping.image_url,
-  })
+  const { data: newTopping, error } = await supabase
+    .from("toppings")
+    .insert({
+      brand_id: brandId,
+      group_id: data.group_id,
+      name_ru: topping.name_ru,
+      name_ro: topping.name_ro,
+      price: topping.price,
+      sort_order: topping.sort_order,
+      is_active: topping.is_active,
+      image_url: topping.image_url,
+    })
+    .select("id")
+    .single()
 
   if (error) throw new Error(error.message)
+
+  const { data: srcLines, error: srcLinesErr } = await (
+    supabase.from("topping_recipes") as any
+  )
+    .select("ingredient_id, semi_finished_id, quantity, quantity_gross")
+    .eq("topping_id", data.topping_id)
+
+  if (srcLinesErr) throw new Error(srcLinesErr.message)
+
+  const rows = (srcLines ?? []) as {
+    ingredient_id: string | null
+    semi_finished_id: string | null
+    quantity: number
+    quantity_gross: number | null
+  }[]
+
+  if (rows.length > 0) {
+    const { error: insRecErr } = await (supabase.from("topping_recipes") as any).insert(
+      rows.map((l) => ({
+        topping_id: newTopping.id,
+        ingredient_id: l.ingredient_id,
+        semi_finished_id: l.semi_finished_id,
+        quantity: l.quantity,
+        quantity_gross: l.quantity_gross,
+      })),
+    )
+    if (insRecErr) throw new Error(insRecErr.message)
+  }
+
   revalidateToppings()
 }
 
@@ -168,23 +212,24 @@ export async function updateTopping(
     sort_order: number
     is_active: boolean
     image_url: string | null
+    recipe_lines: ToppingRecipeLinePayload[]
   }
 ) {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
-  const { error } = await supabase
-    .from("toppings")
-    .update({
-      group_id: data.group_id,
-      name_ru: data.name_ru.trim(),
-      name_ro: data.name_ro.trim(),
-      price: data.price,
-      sort_order: data.sort_order,
-      is_active: data.is_active,
-      image_url: data.image_url,
-    })
-    .eq("id", id)
-    .eq("brand_id", brandId)
+  const { error } = await (supabase as any).rpc("save_topping_with_recipes", {
+    p_is_create: false,
+    p_topping_id: id,
+    p_brand_id: brandId,
+    p_group_id: data.group_id,
+    p_name_ru: data.name_ru.trim(),
+    p_name_ro: data.name_ro.trim(),
+    p_price: data.price,
+    p_sort_order: data.sort_order,
+    p_is_active: data.is_active,
+    p_image_url: data.image_url,
+    p_recipe_lines: data.recipe_lines,
+  })
   if (error) throw new Error(error.message)
   revalidateToppings()
 }

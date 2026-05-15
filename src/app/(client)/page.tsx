@@ -9,7 +9,11 @@ import { getStorefrontPromotions } from "@/lib/data/storefront-promotions"
 import { headers } from "next/headers"
 
 function isBoutiqueBrand(brandSlug: string): boolean {
-  return brandSlug === "the-spot" || brandSlug === "losos"
+  return (
+    brandSlug === "the-spot" ||
+    brandSlug === "losos" ||
+    brandSlug === "kitch-pizza"
+  )
 }
 
 export default async function HomePage() {
@@ -23,7 +27,7 @@ export default async function HomePage() {
 
   return (
     <ClientContainer
-      className="py-10 data-[brand=the-spot]:px-4 data-[brand=the-spot]:pb-28 data-[brand=the-spot]:pt-3 data-[brand=losos]:max-w-[1180px] data-[brand=losos]:px-4 data-[brand=losos]:pb-28 data-[brand=losos]:pt-3 md:data-[brand=the-spot]:pb-16 md:data-[brand=the-spot]:pt-2 md:data-[brand=losos]:pb-16 md:data-[brand=losos]:pt-2 xl:data-[brand=losos]:px-0"
+      className="py-10 data-[brand=kitch-pizza]:px-4 data-[brand=kitch-pizza]:pb-28 data-[brand=kitch-pizza]:pt-3 md:data-[brand=kitch-pizza]:pb-16 md:data-[brand=kitch-pizza]:pt-2 data-[brand=the-spot]:px-4 data-[brand=the-spot]:pb-28 data-[brand=the-spot]:pt-3 data-[brand=losos]:max-w-[1180px] data-[brand=losos]:px-4 data-[brand=losos]:pb-28 data-[brand=losos]:pt-3 md:data-[brand=the-spot]:pb-16 md:data-[brand=the-spot]:pt-2 md:data-[brand=losos]:pb-16 md:data-[brand=losos]:pt-2 xl:data-[brand=losos]:px-0"
       data-brand={brandSlug}
     >
       <PromotionsSlider brandSlug={brandSlug} promotions={promotions} />

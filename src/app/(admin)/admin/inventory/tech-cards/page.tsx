@@ -1,12 +1,17 @@
-import { getAdminBrandId } from "@/lib/get-admin-brand-id"
-import { createClient } from "@/lib/supabase/server"
 import {
-  TechCardsTable,
-  type TechCardTableRow,
-} from "./tech-cards-table"
-import type { IngredientOption, SemiFinishedOption } from "./tech-card-dialog"
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
+import { createClient } from "@/lib/supabase/server"
+import { recipeIngredientStockStorageQty } from "@/lib/product-recipe-ingredient-qty"
 
-type RecipeRef = { id: string; variant_id: string | null }
+import {
+  TechCardsOverviewTable,
+  type TechCardsOverviewRow,
+} from "./tech-cards-table"
 
 function normalizeArray<T>(raw: unknown): T[] {
   if (raw == null) return []
@@ -14,113 +19,120 @@ function normalizeArray<T>(raw: unknown): T[] {
   return [raw as T]
 }
 
-function countForVariant(
-  recipes: RecipeRef[],
-  variantId: string | null
-): number {
-  return recipes.filter((r) => {
-    if (variantId == null) return r.variant_id == null
-    return r.variant_id === variantId
-  }).length
-}
-
-type MenuItemFetched = {
-  id: string
-  name_ru: string
-  has_sizes: boolean
-  menu_item_variants: unknown
-  product_recipes: unknown
-}
-
-function buildTechCardRows(items: MenuItemFetched[]): TechCardTableRow[] {
-  const out: TechCardTableRow[] = []
-  for (const item of items) {
-    const variants = normalizeArray<{ id: string; name_ru: string }>(
-      item.menu_item_variants
-    )
-    const recipes = normalizeArray<RecipeRef>(item.product_recipes)
-
-    if (item.has_sizes) {
-      for (const v of variants) {
-        out.push({
-          key: `${item.id}-${v.id}`,
-          menuItemId: item.id,
-          variantId: v.id,
-          itemName: item.name_ru,
-          variantLabel: v.name_ru,
-          recipeCount: countForVariant(recipes, v.id),
-        })
-      }
-    } else {
-      out.push({
-        key: `${item.id}-base`,
-        menuItemId: item.id,
-        variantId: null,
-        itemName: item.name_ru,
-        variantLabel: null,
-        recipeCount: countForVariant(recipes, null),
-      })
-    }
+function firstRelation(rel: unknown): Record<string, unknown> | null {
+  if (rel == null) return null
+  if (Array.isArray(rel)) {
+    const x = rel[0]
+    return x != null && typeof x === "object" ? (x as Record<string, unknown>) : null
   }
-  return out
+  if (typeof rel === "object") return rel as Record<string, unknown>
+  return null
+}
+
+function avgCostFromRecipeLine(
+  line: Record<string, unknown>,
+): number | null {
+  const ing = firstRelation(line.ingredients)
+  if (!ing) return null
+  const st = firstRelation(ing.ingredient_stock)
+  const raw = st?.avg_cost
+  if (raw === null || raw === undefined || raw === "") return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
+function buildOverviewRow(raw: Record<string, unknown>): TechCardsOverviewRow | null {
+  const id = String(raw.id ?? "")
+  const nameRu = String(raw.name_ru ?? "").trim()
+  if (!id || !nameRu) return null
+
+  const recipes = normalizeArray<Record<string, unknown>>(raw.product_recipes)
+  if (recipes.length === 0) return null
+
+  let sumMdl = 0
+  let pricedIngredientLines = 0
+
+  for (const line of recipes) {
+    if (line.semi_finished_id != null) continue
+
+    const ingId = line.ingredient_id
+    if (ingId == null || ingId === "") continue
+
+    const cost = avgCostFromRecipeLine(line)
+    if (cost === null) continue
+
+    const q = recipeIngredientStockStorageQty({
+      quantity: Number(line.quantity),
+      quantity_gross: (line.quantity_gross as number | null | undefined) ?? null,
+    })
+    if (!Number.isFinite(q)) continue
+
+    sumMdl += q * cost
+    pricedIngredientLines += 1
+  }
+
+  return {
+    id,
+    name_ru: nameRu,
+    componentCount: recipes.length,
+    costLabel:
+      pricedIngredientLines > 0 ? `${sumMdl.toFixed(2)} MDL` : null,
+  }
 }
 
 export default async function AdminTechCardsPage() {
-  const brandId = await getAdminBrandId()
   const supabase = await createClient()
 
-  const [itemsRes, ingRes, semiRes] = await Promise.all([
-    supabase
-      .from("menu_items")
-      .select(
-        "id, name_ru, has_sizes, menu_item_variants(id, name_ru), product_recipes(id, variant_id)"
+  const { data, error } = await supabase
+    .from("menu_items")
+    .select(`
+      id, name_ru,
+      product_recipes(
+        id,
+        ingredient_id,
+        semi_finished_id,
+        quantity,
+        quantity_gross,
+        ingredients(
+          name,
+          unit,
+          ingredient_stock(avg_cost)
+        )
       )
-      .eq("brand_id", brandId)
-      .eq("is_active", true)
-      .order("name_ru"),
-    supabase
-      .from("ingredients")
-      .select("id, name, unit")
-      .order("name"),
-    supabase
-      .from("semi_finished")
-      .select("id, name, yield_unit")
-      .order("name"),
-  ])
+    `)
+    .not("product_recipes", "is", null)
+    .order("name_ru")
 
-  if (itemsRes.error) {
+  if (error) {
     return (
       <p className="text-destructive">
-        Не удалось загрузить меню: {itemsRes.error.message}
-      </p>
-    )
-  }
-  if (ingRes.error) {
-    return (
-      <p className="text-destructive">
-        Не удалось загрузить ингредиенты: {ingRes.error.message}
-      </p>
-    )
-  }
-  if (semiRes.error) {
-    return (
-      <p className="text-destructive">
-        Не удалось загрузить полуфабрикаты: {semiRes.error.message}
+        Не удалось загрузить техкарты: {error.message}
       </p>
     )
   }
 
-  const items = (itemsRes.data ?? []) as MenuItemFetched[]
-  const tableRows = buildTechCardRows(items)
-
-  const ingredientOptions = (ingRes.data ?? []) as IngredientOption[]
-  const semiFinishedOptions = (semiRes.data ?? []) as SemiFinishedOption[]
+  const rows: TechCardsOverviewRow[] = (data ?? []).flatMap((row) => {
+    const mapped = buildOverviewRow(row as Record<string, unknown>)
+    return mapped ? [mapped] : []
+  })
 
   return (
-    <TechCardsTable
-      rows={tableRows}
-      ingredientOptions={ingredientOptions}
-      semiFinishedOptions={semiFinishedOptions}
-    />
+    <div className="space-y-6">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <span className="text-muted-foreground">Склад</span>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>Техкарты</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
+      <h1 className="text-2xl font-semibold">Техкарты</h1>
+
+      <TechCardsOverviewTable rows={rows} />
+    </div>
   )
 }

@@ -7,6 +7,7 @@ type RawSupplyItemRow = {
   id: string
   ingredient_id: string
   quantity: number | string
+  received_qty: number | string | null
   price_per_unit: number | string
   vat_rate: number | string
   price_per_unit_with_vat: number | string
@@ -43,6 +44,10 @@ function toSupplyOrderViewModel(row: RawSupplyOrderRow): SupplyOrderViewModel {
       id: it.id,
       ingredient_id: it.ingredient_id,
       quantity: Number(it.quantity),
+      received_qty:
+        it.received_qty != null && it.received_qty !== ""
+          ? Number(it.received_qty)
+          : null,
       price_per_unit: Number(it.price_per_unit),
       vat_rate: Number(it.vat_rate),
       price_per_unit_with_vat: Number(it.price_per_unit_with_vat),
@@ -84,6 +89,7 @@ export default async function AdminInventorySuppliesPage() {
           id,
           ingredient_id,
           quantity,
+          received_qty,
           price_per_unit,
           vat_rate,
           price_per_unit_with_vat,

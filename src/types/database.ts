@@ -248,6 +248,10 @@ export type Ingredient = {
   brand_id: string
   name: string
   unit: "g" | "ml" | "pcs"
+  /** Ссылка на `ingredient_categories`; NULL — без категории. */
+  category_id: string | null
+  /** Потери при очистке, % (0–100). Нетто в техкарте = брутто × (1 − waste_percent / 100). */
+  waste_percent: number
   created_at: string
 }
 
@@ -284,7 +288,14 @@ export type ProductRecipe = {
   variant_id: string | null
   ingredient_id: string | null
   semi_finished_id: string | null
+  /** Компонент комбо: вложенная позиция; при списании quantity строки не используется (в БД 1). */
+  menu_item_ref_id: string | null
+  /** Вариант вложенной позиции; NULL — рецепт без варианта. */
+  menu_item_ref_variant_id: string | null
+  /** Нетто в ед. хранения (без потерь). */
   quantity: number
+  /** Брутто в ед. хранения; списание со склада (для строк с ingredient_id). */
+  quantity_gross: number | null
 }
 
 export type ProductRecipeMeta = {
@@ -328,6 +339,7 @@ export type SupplyOrderItem = {
   supply_order_id: string
   ingredient_id: string
   quantity: number
+  received_qty: number | null
   price_per_unit: number
   vat_rate: number
   price_per_unit_with_vat: number

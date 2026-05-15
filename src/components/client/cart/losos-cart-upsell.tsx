@@ -178,7 +178,7 @@ function UpsellMenuRow({
           disabled={!readyToAdd}
           onClick={handleAdd}
           aria-label={`${addLabel}, ${priceLabel}`}
-          className="inline-flex shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] px-4 py-2 text-sm font-medium leading-[1.2] text-[var(--color-accent-text)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] px-4 py-2 text-sm font-medium leading-[1.2] text-[var(--color-accent-foreground)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {unitBani != null ? (
             <span className="tabular-nums">{priceLabel}</span>

@@ -22,7 +22,11 @@ type FeaturedMenuSectionProps = {
 }
 
 function hasBoutiqueFeaturedMenu(brandSlug: string): boolean {
-  return brandSlug === "the-spot" || brandSlug === "losos"
+  return (
+    brandSlug === "the-spot" ||
+    brandSlug === "losos" ||
+    brandSlug === "kitch-pizza"
+  )
 }
 
 function normalizeMdl(label: string | null): string | null {
@@ -91,7 +95,7 @@ function FeaturedMenuCard({ item }: { item: MenuItem }) {
         <div className="mt-auto flex items-center justify-between gap-3 md:gap-4">
           <PriceBlock {...priceLabels} />
           <span
-            className="flex h-10 min-w-[48px] shrink-0 items-center justify-center rounded-full bg-[var(--color-bg)] px-4 text-[22px] font-light leading-none text-[#808080] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-white md:h-[43px] md:min-w-[54px] md:px-5 md:text-[26px]"
+            className="flex h-10 min-w-[48px] shrink-0 items-center justify-center rounded-full bg-[var(--color-bg)] px-4 text-[22px] font-light leading-none text-[#808080] transition-colors duration-200 group-hover:bg-[var(--color-accent)] group-hover:text-[var(--color-accent-text)] md:h-[43px] md:min-w-[54px] md:px-5 md:text-[26px]"
             aria-hidden
           >
             +
@@ -125,7 +129,7 @@ export function FeaturedMenuSection({
               type="button"
               data-featured-prev={navigationId}
               aria-label={t.menu.featuredPrev}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[var(--color-text)] transition-colors duration-200 hover:bg-[var(--color-accent)] hover:text-white md:h-[46px] md:w-[46px] [&.swiper-button-disabled]:pointer-events-none [&.swiper-button-disabled]:opacity-40"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[var(--color-text)] transition-colors duration-200 hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-text)] md:h-[46px] md:w-[46px] [&.swiper-button-disabled]:pointer-events-none [&.swiper-button-disabled]:opacity-40"
             >
               <ChevronLeft className="h-5 w-5" strokeWidth={2} />
             </button>
@@ -133,7 +137,7 @@ export function FeaturedMenuSection({
               type="button"
               data-featured-next={navigationId}
               aria-label={t.menu.featuredNext}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[var(--color-text)] transition-colors duration-200 hover:bg-[var(--color-accent)] hover:text-white md:h-[46px] md:w-[46px] [&.swiper-button-disabled]:pointer-events-none [&.swiper-button-disabled]:opacity-40"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[var(--color-text)] transition-colors duration-200 hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-text)] md:h-[46px] md:w-[46px] [&.swiper-button-disabled]:pointer-events-none [&.swiper-button-disabled]:opacity-40"
             >
               <ChevronRight className="h-5 w-5" strokeWidth={2} />
             </button>

@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import type { LegacyMenuSizeColumns } from "../legacy-menu-sizes"
 import type { MenuItem, ToppingGroup } from "@/types/database"
 import { Button } from "@/components/ui/button"
@@ -32,12 +33,28 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
+import { RecipeEditorModal } from "@/components/admin/menu/RecipeEditorModal"
 import { deleteMenuItem } from "./actions"
 
 type MenuItemRow = MenuItem &
   LegacyMenuSizeColumns & {
     category: { id: string; name_ru: string; name_ro: string } | null
   }
+
+type RecipeEditorTarget = {
+  id: string
+  name_ru: string
+  variants: { id: string; name: string }[]
+}
+
+function recipeVariantsForEditor(row: MenuItemRow): { id: string; name: string }[] {
+  return [...(row.variants ?? [])]
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((v) => ({
+      id: v.id,
+      name: v.name_ru || "—",
+    }))
+}
 
 function formatPrice(item: MenuItemRow) {
   if (item.has_sizes) {
@@ -75,20 +92,37 @@ function searchableMenuText(item: MenuItemRow): string {
 }
 
 export function MenuTable({
+  brandId,
   items,
   categories,
   toppingGroups,
+  coveredItemIds,
+  costMap = {},
 }: {
+  brandId: string
   items: MenuItemRow[]
   categories: { id: string; name_ru: string; name_ro: string }[]
   toppingGroups: ToppingGroup[]
+  coveredItemIds: string[]
+  costMap?: Record<string, number>
 }) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [editingRecipe, setEditingRecipe] = useState<RecipeEditorTarget | null>(
+    null,
+  )
   const [createOpen, setCreateOpen] = useState(false)
   const [editItem, setEditItem] = useState<MenuItemRow | null>(null)
   const [deleteItem, setDeleteItem] = useState<MenuItemRow | null>(null)
   const [categoryId, setCategoryId] = useState("all")
   const [search, setSearch] = useState("")
+  const [showOnlyWithoutRecipe, setShowOnlyWithoutRecipe] = useState(false)
   const [pending, startTransition] = useTransition()
+
+  const coveredSet = useMemo(
+    () => new Set(coveredItemIds),
+    [coveredItemIds],
+  )
 
   const itemCountByCategory = useMemo(() => {
     const counts = new Map<string, number>()
@@ -98,21 +132,45 @@ export function MenuTable({
     return counts
   }, [items])
 
+  useEffect(() => {
+    const editId = searchParams.get("edit")?.trim()
+    if (!editId) return
+
+    const row = items.find((i) => i.id === editId)
+    if (!row) {
+      router.replace("/admin/menu")
+      return
+    }
+
+    setEditingRecipe({
+      id: row.id,
+      name_ru: row.name_ru,
+      variants: recipeVariantsForEditor(row),
+    })
+    router.replace("/admin/menu")
+  }, [items, router, searchParams])
+
   const filteredItems = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("ru")
     return items.filter((item) => {
       const matchesCategory =
         categoryId === "all" || item.category_id === categoryId
       const matchesSearch = !query || searchableMenuText(item).includes(query)
-      return matchesCategory && matchesSearch
+      const matchesRecipeFilter =
+        !showOnlyWithoutRecipe || !coveredSet.has(item.id)
+      return matchesCategory && matchesSearch && matchesRecipeFilter
     })
-  }, [categoryId, items, search])
+  }, [categoryId, coveredSet, items, search, showOnlyWithoutRecipe])
 
-  const hasActiveFilters = categoryId !== "all" || search.trim() !== ""
+  const hasActiveFilters =
+    categoryId !== "all" ||
+    search.trim() !== "" ||
+    showOnlyWithoutRecipe
 
   function resetFilters() {
     setCategoryId("all")
     setSearch("")
+    setShowOnlyWithoutRecipe(false)
   }
 
   function handleDelete() {
@@ -176,6 +234,21 @@ export function MenuTable({
           </Select>
         </div>
 
+        <div className="flex w-full min-w-0 flex-col gap-1.5 md:w-auto">
+          <Label className="text-muted-foreground text-xs">Техкарта</Label>
+          <button
+            type="button"
+            onClick={() => setShowOnlyWithoutRecipe((v) => !v)}
+            className="h-9 shrink-0 rounded-md border bg-transparent px-3 text-sm transition-colors"
+            style={{
+              borderColor: showOnlyWithoutRecipe ? "#ccff00" : "#e0e0e0",
+              color: showOnlyWithoutRecipe ? "#242424" : "#808080",
+            }}
+          >
+            Без рецепта
+          </button>
+        </div>
+
         <div className="flex w-full items-center justify-between gap-3 md:w-auto md:flex-1 md:justify-end">
           <span className="text-muted-foreground text-sm">
             Показано {filteredItems.length} из {items.length}
@@ -229,7 +302,56 @@ export function MenuTable({
                   </div>
                 )}
               </TableCell>
-              <TableCell className="font-medium">{row.name_ru}</TableCell>
+              <TableCell className="font-medium">
+                <span className="inline-flex max-w-full flex-wrap items-center gap-2 align-middle">
+                  <span className="min-w-0">{row.name_ru}</span>
+                  {coveredSet.has(row.id) ? (
+                    <Badge
+                      className="shrink-0 cursor-pointer whitespace-nowrap hover:opacity-80"
+                      style={{
+                        backgroundColor: "#ccff00",
+                        color: "#242424",
+                        fontSize: "11px",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditingRecipe({
+                          id: row.id,
+                          name_ru: row.name_ru,
+                          variants: recipeVariantsForEditor(row),
+                        })
+                      }}
+                    >
+                      ✓ Рецепт
+                    </Badge>
+                  ) : (
+                    <Badge
+                      className="shrink-0 cursor-pointer whitespace-nowrap hover:opacity-80"
+                      style={{
+                        backgroundColor: "#f2f2f2",
+                        color: "#808080",
+                        fontSize: "11px",
+                        border: "1px solid #e0e0e0",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditingRecipe({
+                          id: row.id,
+                          name_ru: row.name_ru,
+                          variants: recipeVariantsForEditor(row),
+                        })
+                      }}
+                    >
+                      Нет рецепта
+                    </Badge>
+                  )}
+                  {costMap[row.id] != null && costMap[row.id]! > 0 ? (
+                    <span className="ml-2 text-xs text-[#808080]">
+                      {costMap[row.id]!.toFixed(2)} MDL
+                    </span>
+                  ) : null}
+                </span>
+              </TableCell>
               <TableCell>
                 {row.category?.name_ru ?? row.category?.name_ro ?? "—"}
               </TableCell>
@@ -298,6 +420,15 @@ export function MenuTable({
         item={editItem}
         categories={categories}
         toppingGroups={toppingGroups}
+      />
+
+      <RecipeEditorModal
+        open={!!editingRecipe}
+        brandId={brandId}
+        item={editingRecipe ?? { id: "", name_ru: "" }}
+        variants={editingRecipe?.variants ?? []}
+        onClose={() => setEditingRecipe(null)}
+        onSaved={() => router.refresh()}
       />
 
       <Dialog

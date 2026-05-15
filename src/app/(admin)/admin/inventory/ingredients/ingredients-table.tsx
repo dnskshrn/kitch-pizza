@@ -1,7 +1,9 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import type { IngredientWithStock } from "@/types/database"
+import type { IngredientCategory } from "@/lib/actions/inventory/ingredient-categories"
 import { displayUnit, toDisplayPrice, toDisplayQty } from "@/lib/inventory-units"
 import { InventorySearch } from "@/components/admin/inventory-search"
 import { Button } from "@/components/ui/button"
@@ -36,22 +38,70 @@ function formatAvgLei(
 
 export function IngredientsTable({
   ingredients,
+  categoryTabs,
+  serverSideCategoryFilter,
 }: {
   ingredients: IngredientWithStock[]
+  categoryTabs: IngredientCategory[]
+  serverSideCategoryFilter: boolean
 }) {
+  const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
   const [createOpen, setCreateOpen] = useState(false)
   const [editIngredient, setEditIngredient] = useState<IngredientWithStock | null>(
     null
   )
   const [search, setSearch] = useState("")
+  const [clientCategory, setClientCategory] = useState<
+    "all" | "none" | string
+  >("all")
+
+  const categoryIdSet = useMemo(
+    () => new Set(categoryTabs.map((c) => c.id)),
+    [categoryTabs]
+  )
+
+  const rawUrlCategory = searchParams.get("category") ?? "all"
+  const activeCategory = serverSideCategoryFilter
+    ? rawUrlCategory === "all" ||
+        rawUrlCategory === "none" ||
+        categoryIdSet.has(rawUrlCategory)
+      ? rawUrlCategory
+      : "all"
+    : clientCategory
+
+  function setCategoryFilter(next: "all" | "none" | string) {
+    if (serverSideCategoryFilter) {
+      if (next === "all") {
+        router.push(pathname)
+        return
+      }
+      router.push(`${pathname}?category=${encodeURIComponent(next)}`)
+      return
+    }
+    setClientCategory(next)
+  }
 
   const filteredIngredients = useMemo(() => {
+    let list = ingredients
+    if (!serverSideCategoryFilter) {
+      if (clientCategory === "none") {
+        list = list.filter((r) => r.category_id == null)
+      } else if (clientCategory !== "all") {
+        list = list.filter((r) => r.category_id === clientCategory)
+      }
+    }
     const q = search.trim().toLowerCase()
-    if (!q) return ingredients
-    return ingredients.filter((row) =>
-      row.name.toLowerCase().includes(q)
-    )
-  }, [ingredients, search])
+    if (!q) return list
+    return list.filter((row) => row.name.toLowerCase().includes(q))
+  }, [
+    ingredients,
+    serverSideCategoryFilter,
+    clientCategory,
+    search,
+  ])
 
   return (
     <>
@@ -69,6 +119,39 @@ export function IngredientsTable({
           onChange={setSearch}
           placeholder="Search ingredients…"
         />
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={activeCategory === "all" ? "default" : "outline"}
+          className="rounded-full"
+          onClick={() => setCategoryFilter("all")}
+        >
+          Все
+        </Button>
+        {categoryTabs.map((c) => (
+          <Button
+            key={c.id}
+            type="button"
+            size="sm"
+            variant={activeCategory === c.id ? "default" : "outline"}
+            className="rounded-full"
+            onClick={() => setCategoryFilter(c.id)}
+          >
+            {c.name}
+          </Button>
+        ))}
+        <Button
+          type="button"
+          size="sm"
+          variant={activeCategory === "none" ? "default" : "outline"}
+          className="rounded-full"
+          onClick={() => setCategoryFilter("none")}
+        >
+          Без категории
+        </Button>
       </div>
 
       <Table>

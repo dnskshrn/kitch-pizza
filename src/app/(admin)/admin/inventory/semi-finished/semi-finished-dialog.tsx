@@ -10,11 +10,11 @@ import {
 } from "./actions"
 import type { IngredientSelectOption, SemiFinishedWithItems } from "./types"
 import {
-  displayUnit,
-  toDisplayPrice,
-  toDisplayQty,
-  toStorageQty,
-} from "@/lib/inventory-units"
+  formatRecipeQtyNormalized,
+  normalizeRecipeQtyInputBlur,
+  parseRecipeQtyStrict,
+  recipeEditorStorageUnitShort,
+} from "@/lib/recipe-editor-qty"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -35,8 +35,8 @@ import {
 import { Trash2 } from "lucide-react"
 
 const UNITS = [
-  { value: "g" as const, label: "кг" },
-  { value: "ml" as const, label: "л" },
+  { value: "g" as const, label: "г" },
+  { value: "ml" as const, label: "мл" },
   { value: "pcs" as const, label: "шт" },
 ]
 
@@ -229,13 +229,13 @@ export function SemiFinishedDialog({
         unitsOrdered.push(unit)
       }
 
-      const q = parseFloat((row.quantityStr ?? "").replace(",", "."))
-      const qty = Number.isFinite(q) && q > 0 ? q : 0
+      const q = parseRecipeQtyStrict(row.quantityStr ?? "")
+      const qty = q != null && q > 0 ? q : 0
       inputTotal += qty
 
       const avgCost = ing?.avgCost
       if (qty > 0 && avgCost != null && avgCost > 0) {
-        totalLineCost += qty * toDisplayPrice(avgCost, unit)
+        totalLineCost += qty * avgCost
       }
     }
 
@@ -245,12 +245,12 @@ export function SemiFinishedDialog({
       unitsOrdered.length === 0
         ? "—"
         : uniqueUnits.size === 1 && firstUnit
-          ? displayUnit(firstUnit)
+          ? recipeEditorStorageUnitShort(firstUnit)
           : "смеш."
 
-    const yieldQtyRaw = parseFloat((yieldQtyStr ?? "").replace(",", "."))
+    const yieldQtyRaw = parseRecipeQtyStrict(yieldQtyStr ?? "")
     const yieldQtyNum =
-      Number.isFinite(yieldQtyRaw) && yieldQtyRaw > 0 ? yieldQtyRaw : 0
+      yieldQtyRaw != null && yieldQtyRaw > 0 ? yieldQtyRaw : 0
 
     let lossesDisplay = "—"
     if (inputTotal > 0 && yieldQtyNum > 0) {
@@ -259,7 +259,7 @@ export function SemiFinishedDialog({
       lossesDisplay = `${loss.toFixed(1)} (${pct.toFixed(1)}%)`
     }
 
-    const yieldUnitLabel = displayUnit(yieldUnit)
+    const yieldUnitLabel = recipeEditorStorageUnitShort(yieldUnit)
     const totalCostStr = formatMdl2(totalLineCost)
     const costPerYield =
       yieldQtyNum <= 0 ? "—" : formatMdl2(totalLineCost / yieldQtyNum)
@@ -289,9 +289,7 @@ export function SemiFinishedDialog({
       setName(semiFinished.name ?? "")
       setYieldQtyStr(
         semiFinished.yield_qty !== null && semiFinished.yield_qty !== undefined
-          ? String(
-              toDisplayQty(Number(semiFinished.yield_qty), semiFinished.yield_unit)
-            )
+          ? formatRecipeQtyNormalized(Number(semiFinished.yield_qty))
           : ""
       )
       setYieldUnit(semiFinished.yield_unit)
@@ -302,12 +300,7 @@ export function SemiFinishedDialog({
         setItemRows(
           items.map((i) => ({
             ingredientId: i.ingredient_id,
-            quantityStr: String(
-              toDisplayQty(
-                Number(i.quantity),
-                i.ingredients?.unit ?? "g"
-              )
-            ),
+            quantityStr: formatRecipeQtyNormalized(Number(i.quantity)),
           }))
         )
       }
@@ -347,18 +340,14 @@ export function SemiFinishedDialog({
     }
     const out: SemiFinishedItemInput[] = []
     for (const r of filled) {
-      const q = parseFloat((r.quantityStr ?? "").replace(",", "."))
-      if (!Number.isFinite(q) || q <= 0) {
+      const q = parseRecipeQtyStrict(r.quantityStr ?? "")
+      if (q == null || q <= 0) {
         alert("Укажите положительное количество для каждой строки")
         return null
       }
-      const ing =
-        ingredientById.get(r.ingredientId) ??
-        ingredientOptions.find((o) => o.id === r.ingredientId)
-      const u = ing?.unit ?? "g"
       out.push({
         ingredient_id: r.ingredientId,
-        quantity: toStorageQty(q, u),
+        quantity: q,
       })
     }
     return out
@@ -370,8 +359,8 @@ export function SemiFinishedDialog({
       alert("Укажите название")
       return
     }
-    const y = parseFloat((yieldQtyStr ?? "").replace(",", "."))
-    if (!Number.isFinite(y) || y <= 0) {
+    const y = parseRecipeQtyStrict(yieldQtyStr ?? "")
+    if (y == null || y <= 0) {
       alert("Укажите положительный выход (количество)")
       return
     }
@@ -380,7 +369,7 @@ export function SemiFinishedDialog({
 
     const payload = {
       name: title,
-      yield_qty: toStorageQty(y, yieldUnit),
+      yield_qty: y,
       yield_unit: yieldUnit,
     }
 
@@ -408,19 +397,18 @@ export function SemiFinishedDialog({
       ? ingredientOptions.find((o) => o.id === row.ingredientId)
       : undefined
     const u = ing?.unit ?? fromProp?.unit ?? "g"
-    const unitText = displayUnit(u)
+    const unitText = recipeEditorStorageUnitShort(u)
 
-    const q = parseFloat((row.quantityStr ?? "").replace(",", "."))
-    const qty = Number.isFinite(q) && q > 0 ? q : 0
+    const q = parseRecipeQtyStrict(row.quantityStr ?? "")
+    const qty = q != null && q > 0 ? q : 0
     const ac = ing?.avgCost
 
     if (!row.ingredientId || qty <= 0 || ac == null || ac === 0) {
       return { unitText, costText: "—" }
     }
-    const p = toDisplayPrice(ac, u)
     return {
       unitText,
-      costText: `${p.toFixed(2)} × ${new Intl.NumberFormat("ro-MD", { maximumFractionDigits: 6 }).format(qty)} = ${formatMdl2(p * qty)}`,
+      costText: `${ac.toFixed(4)} MDL/${unitText} × ${new Intl.NumberFormat("ro-MD", { maximumFractionDigits: 6 }).format(qty)} = ${formatMdl2(ac * qty)}`,
     }
   }
 
@@ -451,6 +439,9 @@ export function SemiFinishedDialog({
                 inputMode="decimal"
                 value={yieldQtyStr}
                 onChange={(e) => setYieldQtyStr(e.target.value)}
+                onBlur={() =>
+                  setYieldQtyStr((prev) => normalizeRecipeQtyInputBlur(prev))
+                }
                 placeholder="0"
               />
             </div>
@@ -539,6 +530,13 @@ export function SemiFinishedDialog({
                             value={row.quantityStr}
                             onChange={(e) =>
                               updateRow(index, { quantityStr: e.target.value })
+                            }
+                            onBlur={() =>
+                              updateRow(index, {
+                                quantityStr: normalizeRecipeQtyInputBlur(
+                                  row.quantityStr,
+                                ),
+                              })
                             }
                             placeholder="0"
                           />

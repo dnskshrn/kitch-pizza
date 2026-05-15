@@ -1,5 +1,6 @@
 "use server"
 
+import { processBonusAccrualOnOrderDone } from "@/lib/bonus"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
 /** Строка `cash_sessions` (таблица без типов в генерации). */
@@ -533,6 +534,24 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
       data: null,
       error: txErr?.message ?? "insert_failed",
     }
+  }
+
+  const orderId = input.orderId
+  const { data: accrualOrder, error: accrualOrderErr } = await supabase
+    .from("orders")
+    .select("profile_id, total, bonuses_redeemed, id")
+    .eq("id", orderId)
+    .maybeSingle()
+
+  if (accrualOrderErr) {
+    console.error("[payOrder] bonus accrual select", accrualOrderErr.message)
+  } else if (accrualOrder?.profile_id) {
+    await processBonusAccrualOnOrderDone(
+      String(accrualOrder.profile_id),
+      orderId,
+      Number(accrualOrder.total),
+      Number(accrualOrder.bonuses_redeemed) || 0,
+    ).catch((e) => console.error("bonus accrual failed", e))
   }
 
   return {

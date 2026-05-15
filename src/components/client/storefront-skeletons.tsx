@@ -10,7 +10,11 @@ type StorefrontSkeletonProps = {
 }
 
 function hasBoutiqueSkeleton(brandSlug: string): boolean {
-  return brandSlug === "the-spot" || brandSlug === "losos"
+  return (
+    brandSlug === "the-spot" ||
+    brandSlug === "losos" ||
+    brandSlug === "kitch-pizza"
+  )
 }
 
 function SkeletonBox({ className }: SkeletonBoxProps) {

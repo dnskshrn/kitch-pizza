@@ -3,11 +3,18 @@ import { jwtVerify } from "jose"
 import { NextResponse, type NextRequest } from "next/server"
 import { getBrandByHost, getBrandBySlug } from "@/brands"
 
-const localBrandPathAliases: Record<string, string> = {
-  "/losos": "losos",
-  "/losos/": "losos",
-  "/thespot": "the-spot",
-  "/thespot/": "the-spot",
+function localBrandSlugFromPathname(pathname: string): string | null {
+  if (pathname === "/losos" || pathname === "/losos/" || pathname.startsWith("/losos/")) {
+    return "losos"
+  }
+  if (
+    pathname === "/thespot" ||
+    pathname === "/thespot/" ||
+    pathname.startsWith("/thespot/")
+  ) {
+    return "the-spot"
+  }
+  return null
 }
 
 function buildRequestHeadersWithBrand(request: NextRequest, brandSlug: string) {
@@ -35,7 +42,7 @@ export async function middleware(request: NextRequest) {
     request.headers.get("host") ??
     ""
   const pathname = request.nextUrl.pathname
-  const aliasedBrandSlug = localBrandPathAliases[pathname]
+  const aliasedBrandSlug = localBrandSlugFromPathname(pathname)
   const brand = aliasedBrandSlug
     ? getBrandBySlug(aliasedBrandSlug)
     : getBrandByHost(host)
@@ -59,6 +66,51 @@ export async function middleware(request: NextRequest) {
     })
   }
 
+  const isAdminApiRoute = pathname.startsWith("/api/admin")
+
+  if (isAdminApiRoute) {
+    let supabaseApiResponse = NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    })
+
+    const supabaseApi = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) =>
+              request.cookies.set(name, value),
+            )
+            supabaseApiResponse = NextResponse.next({
+              request: {
+                headers: requestHeaders,
+              },
+            })
+            cookiesToSet.forEach(({ name, value, options }) =>
+              supabaseApiResponse.cookies.set(name, value, options),
+            )
+          },
+        },
+      },
+    )
+
+    const {
+      data: { user: adminApiUser },
+    } = await supabaseApi.auth.getUser()
+
+    if (!adminApiUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    return supabaseApiResponse
+  }
+
   // const isCheckoutRoute = pathname.startsWith("/checkout")
   //
   // if (isCheckoutRoute) {
@@ -74,7 +126,19 @@ export async function middleware(request: NextRequest) {
   if (!isAdminRoute) {
     if (aliasedBrandSlug) {
       const rewriteUrl = request.nextUrl.clone()
-      rewriteUrl.pathname = "/"
+      if (aliasedBrandSlug === "losos") {
+        if (pathname === "/losos" || pathname === "/losos/") {
+          rewriteUrl.pathname = "/"
+        } else if (pathname.startsWith("/losos/")) {
+          rewriteUrl.pathname = pathname.slice("/losos".length) || "/"
+        }
+      } else if (aliasedBrandSlug === "the-spot") {
+        if (pathname === "/thespot" || pathname === "/thespot/") {
+          rewriteUrl.pathname = "/"
+        } else if (pathname.startsWith("/thespot/")) {
+          rewriteUrl.pathname = pathname.slice("/thespot".length) || "/"
+        }
+      }
 
       return NextResponse.rewrite(rewriteUrl, {
         request: {

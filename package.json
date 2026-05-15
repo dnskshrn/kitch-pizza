@@ -12,6 +12,8 @@
     "setup:telegram": "npx tsx scripts/setup-telegram-webhook.ts"
   },
   "dependencies": {
+    "@dicebear/core": "^9.4.2",
+    "@dicebear/thumbs": "^9.4.2",
     "@hookform/resolvers": "^5.2.2",
     "@supabase/ssr": "^0.10.2",
     "@supabase/storage-js": "^2.103.0",

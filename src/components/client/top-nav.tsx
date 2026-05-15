@@ -1,5 +1,8 @@
 "use client"
 
+/** TODO: Раньше монтировался только для kitch-подобной витрины (`ClientChrome` при `!hasBoutiqueStorefront`). После унификации шапки ни один бренд его не рендерит — удалить файл или встроить нужные куски, когда будет решение по навигации. */
+
+import { AccountNavLink } from "@/components/client/account-nav-link"
 import { ClientContainer } from "@/components/client/client-container"
 import { useLanguage } from "@/lib/store/language-store"
 
@@ -46,7 +49,14 @@ export function TopNav() {
       <ClientContainer className="flex h-11 items-center justify-end text-[12px]">
         <div className="hidden w-full items-center justify-end gap-6 md:flex">
           {scheduleBlock}
-          {langBlock}
+          <div className="flex items-center gap-4">
+            <AccountNavLink
+              brandSlug="kitch-pizza"
+              lang={lang}
+              className="text-muted-foreground hover:text-foreground flex shrink-0 cursor-pointer items-center justify-center rounded-full p-1 transition-all duration-200"
+            />
+            {langBlock}
+          </div>
         </div>
       </ClientContainer>
     </header>

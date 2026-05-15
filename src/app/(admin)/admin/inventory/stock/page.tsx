@@ -40,11 +40,20 @@ function normalizeRow(raw: unknown): IngredientWithStock {
         })(),
       }
     : null
+  const wasteRaw = Number((r as { waste_percent?: unknown }).waste_percent)
+  const waste_percent = Number.isFinite(wasteRaw) ? wasteRaw : 0
+
+  const catRaw = (r as { category_id?: unknown }).category_id
+  const category_id =
+    typeof catRaw === "string" && catRaw.length > 0 ? catRaw : null
+
   return {
     id: r.id,
     brand_id: r.brand_id,
     name: r.name,
     unit: r.unit,
+    category_id,
+    waste_percent,
     created_at: r.created_at,
     ingredient_stock: st,
   }

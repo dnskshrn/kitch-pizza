@@ -13,7 +13,7 @@ import type { CartItem } from "@/types/cart"
 import type { DeliveryZone } from "@/types/database"
 import { ChevronRight, Info, Loader2 } from "lucide-react"
 import Image from "next/image"
-import { useMemo } from "react"
+import { useMemo, type ReactNode } from "react"
 
 const btnMotion = "cursor-pointer transition-all duration-200 ease-out"
 const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
@@ -30,10 +30,14 @@ export type OrderSummaryProps = {
   /** Адрес привязан к точке вне зон доставки. */
   outOfZone?: boolean
   grandTotal: number
+  /** Списание бонусов в пунктах (1 пункт = 1 MDL к снятию с итога). */
+  bonusesRedeemed?: number
   /** Если не передан — кнопка «Оформить заказ» не показывается (например, страница успеха). */
   onCheckout?: () => void | Promise<void>
   checkoutSubmitting?: boolean
   checkoutError?: string | null
+  /** Между сводкой строк и итогом (напр. бонусы). Передаётся как дочерний элемент композицией. */
+  children?: ReactNode
 }
 
 export function OrderSummary({
@@ -47,6 +51,8 @@ export function OrderSummary({
   selectedZone,
   outOfZone = false,
   grandTotal,
+  bonusesRedeemed = 0,
+  children = null,
   onCheckout,
   checkoutSubmitting = false,
   checkoutError = null,
@@ -163,7 +169,17 @@ export function OrderSummary({
             </span>
           </div>
         ) : null}
+        {bonusesRedeemed > 0 ? (
+          <div className="flex items-center justify-between text-[14px] font-medium">
+            <span className="text-[rgba(36,36,36,0.5)]">{t.bonus.redeemed}:</span>
+            <span className="storefront-modal-accent tabular-nums">
+              −{bonusesRedeemed} MDL
+            </span>
+          </div>
+        ) : null}
       </div>
+
+      {children ? <div className="mt-4">{children}</div> : null}
 
       <div className="mt-6 flex items-center justify-between border-t border-[#f0f0f0] pt-4">
         <span className="text-[16px] font-bold text-[#242424]">{t.checkout.orderTotal}</span>

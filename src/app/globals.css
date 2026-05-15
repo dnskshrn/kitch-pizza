@@ -22,10 +22,13 @@
   --color-muted: #808080;
   --color-surface: #ffffff;
   --color-accent-soft: #ecffa1;
-  --color-accent-text: #5f7600;
+  /* Текст на сплошном `var(--color-accent)` (лайм / оранжевая кнопка) */
+  --color-accent-text: #242424;
   --radius-card: 24px;
   --radius-button: 999px;
   --radius-input: 12px;
+  --color-input-bg: #f2f2f2;
+  --color-selector-item-bg: #f2f2f2;
 
   /* Поверхности */
   --background:           oklch(1 0 0);           /* #ffffff — карточки, панели */
@@ -79,6 +82,12 @@
   --sidebar-accent-foreground:  oklch(0.192 0 0);        /* #242424 */
   --sidebar-border:             oklch(0.961 0 0);        /* #f2f2f2 */
   --sidebar-ring:               oklch(0.931 0.253 122.7);/* #ccff00 */
+
+  /* Product modal: сегменты размера / варианта */
+  --size-selector-bg: #f2f2f2;
+  --size-selector-item-bg: #f2f2f2;
+  --size-selector-item-active-bg: #ffffff;
+  --size-selector-item-active-text: #343434;
 }
 
 [data-brand="the-spot"] {
@@ -88,7 +97,6 @@
   --color-muted: rgb(36 36 36 / 60%);
   --color-surface: #ffffff;
   --color-accent-soft: #ffebe7;
-  --color-accent-text: #b7614f;
   --radius-card: 12px;
   --radius-button: 100px;
   --radius-input: 100px;
@@ -112,6 +120,15 @@
   --ring: #f25130;
   --radius: 0.75rem;
   --radius-md: 0.75rem;
+
+  --color-accent-text: #ffffff;
+  --color-input-bg: var(--color-surface);
+  --color-selector-item-bg: var(--color-bg);
+
+  --size-selector-bg: var(--color-bg);
+  --size-selector-item-bg: var(--color-bg);
+  --size-selector-item-active-bg: var(--color-accent);
+  --size-selector-item-active-text: #ffffff;
 }
 
 [data-brand="losos"] {
@@ -121,7 +138,6 @@
   --color-muted: rgb(32 26 24 / 62%);
   --color-surface: #ffffff;
   --color-accent-soft: #ffe2dc;
-  --color-accent-text: #9b3c34;
   --radius-card: 28px;
   --radius-button: 100px;
   --radius-input: 22px;
@@ -145,10 +161,33 @@
   --ring: #ff6b5f;
   --radius: 1.75rem;
   --radius-md: 1.375rem;
+
+  --color-accent-text: #ffffff;
+  --color-input-bg: var(--color-surface);
+  --color-selector-item-bg: var(--color-bg);
+
+  --size-selector-bg: var(--color-bg);
+  --size-selector-item-bg: var(--color-bg);
+  --size-selector-item-active-bg: var(--color-accent);
+  --size-selector-item-active-text: #ffffff;
+}
+
+[data-brand="kitch-pizza"] {
+  --color-bg: #f2f2f2;
+  --background: #f2f2f2;
+  --color-accent-text: #242424;
+  --color-input-bg: #ffffff;
+  --color-selector-item-bg: #ffffff;
+
+  --size-selector-bg: #f2f2f2;
+  --size-selector-item-bg: #f2f2f2;
+  --size-selector-item-active-bg: #ffffff;
+  --size-selector-item-active-text: #343434;
 }
 
 [data-brand="the-spot"],
-[data-brand="losos"] {
+[data-brand="losos"],
+[data-brand="kitch-pizza"] {
   background: var(--color-bg);
   color: var(--color-text);
 }
@@ -167,13 +206,17 @@
   background: #f2f2f2;
 }
 
+.storefront-input {
+  background: var(--color-input-bg);
+}
+
 .storefront-modal-soft {
   background: #f2f2f2;
 }
 
 .storefront-modal-cta {
-  background: #ccff00;
-  color: #343434;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .storefront-modal-accent {
@@ -213,8 +256,8 @@
 }
 
 .storefront-checkout-toggle-active {
-  background: #ccff00;
-  color: #242424;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .storefront-checkout-address-empty {
@@ -230,8 +273,8 @@
 }
 
 .storefront-checkout-success-hero {
-  background: #ccff00;
-  color: #242424;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 [data-brand="the-spot"] .storefront-modal-bg,
@@ -257,7 +300,7 @@
 [data-brand="the-spot"] .storefront-modal-cta,
 [data-brand="losos"] .storefront-modal-cta {
   background: var(--color-accent);
-  color: #ffffff;
+  color: var(--color-accent-text);
 }
 
 [data-brand="the-spot"] .storefront-modal-accent,
@@ -273,7 +316,7 @@
 [data-brand="the-spot"] .storefront-modal-mode-active,
 [data-brand="losos"] .storefront-modal-mode-active {
   background: var(--color-accent);
-  color: #ffffff;
+  color: var(--color-accent-text);
 }
 
 [data-brand="the-spot"] .storefront-modal-card-radius,
@@ -295,7 +338,9 @@
 }
 
 [data-brand="the-spot"] .storefront-checkout-form-panel .storefront-modal-field,
-[data-brand="losos"] .storefront-checkout-form-panel .storefront-modal-field {
+[data-brand="losos"] .storefront-checkout-form-panel .storefront-modal-field,
+[data-brand="the-spot"] .storefront-checkout-form-panel .storefront-input,
+[data-brand="losos"] .storefront-checkout-form-panel .storefront-input {
   background: var(--color-surface);
 }
 
@@ -323,7 +368,7 @@
 [data-brand="the-spot"] .storefront-checkout-progress-active,
 [data-brand="losos"] .storefront-checkout-progress-active {
   background: var(--color-accent-soft);
-  color: var(--color-accent-text);
+  color: var(--color-accent-foreground);
 }
 
 [data-brand="the-spot"] .storefront-checkout-progress-muted,
@@ -335,7 +380,7 @@
 [data-brand="the-spot"] .storefront-checkout-toggle-active,
 [data-brand="losos"] .storefront-checkout-toggle-active {
   background: var(--color-accent);
-  color: #ffffff;
+  color: var(--color-accent-text);
 }
 
 [data-brand="the-spot"] .storefront-checkout-address-empty,

@@ -25,6 +25,11 @@ import {
   ChevronRight,
   Users,
   Clock,
+  ArrowLeftRight,
+  Trash2,
+  Gift,
+  Megaphone,
+  FolderTree,
 } from "lucide-react"
 import { brands } from "@/brands"
 import { BrandSwitcher } from "@/components/admin/brand-switcher"
@@ -100,9 +105,7 @@ const brandNavGroups: NavGroup[] = [
       { href: "/admin/categories", label: "Категории", icon: LayoutGrid },
       { href: "/admin/menu", label: "Позиции меню", icon: UtensilsCrossed },
       { href: "/admin/toppings", label: "Топпинги", icon: Layers },
-      { href: "/admin/promotions", label: "Акции", icon: Tag },
-      { href: "/admin/promo-codes", label: "Промокоды", icon: Ticket },
-      { href: "/admin/featured-menu", label: "Фичеред", icon: Star },
+      { href: "/admin/featured-menu", label: "Популярное", icon: Star },
     ],
   },
   {
@@ -115,6 +118,22 @@ const brandNavGroups: NavGroup[] = [
   },
 ]
 
+const marketingNavGroup: NavGroup = {
+  id: "marketing",
+  label: "Маркетинг",
+  icon: Megaphone,
+  items: [
+    { href: "/admin/promotions", label: "Галерея", icon: Tag },
+    { href: "/admin/promo-codes", label: "Промокоды", icon: Ticket },
+    { href: "/admin/customers", label: "Клиенты", icon: Users },
+    {
+      href: "/admin/settings/bonus",
+      label: "Программа лояльности",
+      icon: Gift,
+    },
+  ],
+}
+
 const generalNavGroups: NavGroup[] = [
   {
     id: "inventory",
@@ -123,6 +142,11 @@ const generalNavGroups: NavGroup[] = [
     items: [
       { href: "/admin/inventory/stock", label: "Остатки", icon: Warehouse },
       { href: "/admin/inventory/suppliers", label: "Поставщики", icon: Package },
+      {
+        href: "/admin/inventory/ingredient-categories",
+        label: "Категории ингредиентов",
+        icon: FolderTree,
+      },
       {
         href: "/admin/inventory/ingredients",
         label: "Ингредиенты",
@@ -140,9 +164,19 @@ const generalNavGroups: NavGroup[] = [
       },
       { href: "/admin/inventory/supplies", label: "Поставки", icon: Receipt },
       {
+        href: "/admin/inventory/writeoffs",
+        label: "Списания",
+        icon: Trash2,
+      },
+      {
         href: "/admin/inventory/audits",
         label: "Инвентаризации",
         icon: ClipboardCheck,
+      },
+      {
+        href: "/admin/finance/ledger",
+        label: "История движений",
+        icon: ArrowLeftRight,
       },
     ],
   },
@@ -157,7 +191,11 @@ const generalNavGroups: NavGroup[] = [
   },
 ]
 
-const allNavGroups: NavGroup[] = [...brandNavGroups, ...generalNavGroups]
+const allNavGroups: NavGroup[] = [
+  ...brandNavGroups,
+  marketingNavGroup,
+  ...generalNavGroups,
+]
 
 function renderSidebarNavGroups(
   groups: NavGroup[],
@@ -301,6 +339,20 @@ export default function AdminSidebar({
             <SidebarMenu>
               {renderSidebarNavGroups(
                 brandNavGroups,
+                pathname,
+                groupOpen,
+                setGroupOpen,
+              )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarSeparator className="my-1" />
+        <SidebarGroup>
+          <SidebarGroupLabel>Маркетинг</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {renderSidebarNavGroups(
+                [marketingNavGroup],
                 pathname,
                 groupOpen,
                 setGroupOpen,

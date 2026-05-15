@@ -2,6 +2,7 @@
 
 import { createOrder } from "@/lib/actions/create-order"
 import { buildCondimentOrderLines } from "@/lib/cart-helpers"
+import { BonusRedeemBlock } from "@/components/client/bonus-redeem-block"
 import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
 import { OrderSummary } from "@/components/client/checkout/order-summary"
@@ -14,6 +15,7 @@ import {
   selectCartSubtotal,
   useCartStore,
 } from "@/lib/store/cart-store"
+import { useAuthStore } from "@/lib/store/auth-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
 import { useLanguage } from "@/lib/store/language-store"
@@ -163,7 +165,7 @@ function buildQuickDeliveryTimeSlots(): string[] {
 }
 
 const inputClassName =
-  "storefront-modal-field w-full rounded-[12px] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] placeholder:font-medium placeholder:text-[16px] placeholder:text-[#808080] outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+  "storefront-input w-full rounded-[12px] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] placeholder:font-medium placeholder:text-[16px] placeholder:text-[#808080] outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
 
 /** lg+: подпись 240px слева, контент справа; уже lg — колонка с заголовком над полем (в т.ч. мобилка). */
 const checkoutRow =
@@ -180,6 +182,8 @@ const btnMotion = "cursor-pointer transition-all duration-200 ease-out"
 const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
 const checkoutActiveToggle = `${btnMotion} hover:brightness-95 active:scale-[0.98]`
 const checkoutGrayToggle = `${btnMotion} hover:bg-[#e8e8e8] active:scale-[0.98]`
+/** Неактивные сегменты (оплата, время и т.д.): фон из токена бренда */
+const checkoutToggleInactive = `bg-[var(--color-selector-item-bg)] text-[var(--color-text)] ${checkoutGrayToggle}`
 const checkoutIconCircle = `${btnMotion} hover:bg-[#e8e8e8] active:scale-[0.96]`
 const checkoutWhiteMini = `${btnMotion} hover:bg-[#f5f5f5] active:scale-[0.98]`
 const checkoutDarkSolid = `${btnMotion} hover:opacity-90 active:scale-[0.98]`
@@ -212,6 +216,7 @@ export function CheckoutView({
   const brandCallLabel = getBrandCallLabel(brandPhone, lang)
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const openCart = useCartStore((s) => s.openCart)
+  const profile = useAuthStore((s) => s.profile)
 
   const items = useCartStore((s) => s.items)
   const appliedPromo = useCartStore((s) => s.appliedPromo)
@@ -253,6 +258,7 @@ export function CheckoutView({
   const [submitAttempted, setSubmitAttempted] = useState(false)
   const [orderSubmitError, setOrderSubmitError] = useState<string | null>(null)
   const [orderSubmitting, setOrderSubmitting] = useState(false)
+  const [bonusesRedeemed, setBonusesRedeemed] = useState(0)
 
   const nameRef = useRef<HTMLInputElement>(null)
   const phoneRef = useRef<HTMLInputElement>(null)
@@ -263,7 +269,10 @@ export function CheckoutView({
   const timeSlots = useMemo(() => buildDeliveryTimeSlots(), [])
 
   useEffect(() => {
-    if (useCartStore.persist.hasHydrated()) setHydrated(true)
+    if (useCartStore.persist.hasHydrated()) {
+      setHydrated(true)
+      return
+    }
     const unsub = useCartStore.persist.onFinishHydration(() =>
       setHydrated(true),
     )
@@ -285,10 +294,22 @@ export function CheckoutView({
     }
   }, [deliveryTimeMode, quickTimeSlots, timeSlots, scheduledTime])
 
+  useEffect(() => {
+    if (!profile) return
+    setName((n) => {
+      if (n.trim() !== "") return n
+      const fromProfile = profile.name?.trim()
+      return fromProfile && fromProfile.length > 0 ? fromProfile : n
+    })
+    setPhone((p) => (p.trim() === "" ? profile.phone : p))
+    setPhoneRepeat((pr) => (pr.trim() === "" ? profile.phone : pr))
+  }, [profile])
+
   const showTimeSelect = showCustomTimeSelect || quickTimeSlots.length === 0
 
   const deliveryFeeBani = getDeliveryFeeBani(subtotal)
   const grandTotal = getCartGrandTotalBani()
+  const checkoutGrandTotalBani = Math.max(0, grandTotal - bonusesRedeemed * 100)
 
   const hasResolvedAddress = Boolean(resolvedAddress?.trim())
   const deliveryAddressCardBg = !hasResolvedAddress
@@ -372,7 +393,9 @@ export function CheckoutView({
         subtotalBani: subtotal,
         discountBani: discount,
         deliveryFeeBani,
-        grandTotalBani: grandTotal,
+        grandTotalBani: checkoutGrandTotalBani,
+        bonuses_redeemed: bonusesRedeemed,
+        profile_id: profile?.id ?? null,
         items,
         condimentOrderLines: buildCondimentOrderLines(
           useCartStore.getState().condimentQuantities,
@@ -721,7 +744,7 @@ export function CheckoutView({
                       "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                       deliveryTimeMode === "asap"
                         ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
-                        : cn("storefront-modal-field text-[#242424]", checkoutGrayToggle),
+                        : checkoutToggleInactive,
                     )}
                   >
                     <Zap className="size-[14px] shrink-0" strokeWidth={2} />
@@ -742,7 +765,7 @@ export function CheckoutView({
                       "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                       deliveryTimeMode === "scheduled"
                         ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
-                        : cn("storefront-modal-field text-[#242424]", checkoutGrayToggle),
+                        : checkoutToggleInactive,
                     )}
                   >
                     <Clock className="size-[14px] shrink-0" strokeWidth={2} />
@@ -773,10 +796,7 @@ export function CheckoutView({
                                       "storefront-checkout-toggle-active",
                                       checkoutActiveToggle,
                                     )
-                                  : cn(
-                                      "storefront-modal-field text-[#242424]",
-                                      checkoutGrayToggle,
-                                    ),
+                                  : checkoutToggleInactive,
                               )}
                             >
                               {slot}
@@ -800,10 +820,7 @@ export function CheckoutView({
                                   "storefront-checkout-toggle-active",
                                   checkoutActiveToggle,
                                 )
-                              : cn(
-                                  "storefront-modal-field text-[#242424]",
-                                  checkoutGrayToggle,
-                                ),
+                              : checkoutToggleInactive,
                           )}
                         >
                           {t.checkout.chooseTime}
@@ -816,7 +833,7 @@ export function CheckoutView({
                         value={scheduledTime}
                         onValueChange={setScheduledTime}
                       >
-                        <SelectTrigger className="storefront-modal-field h-[50px] w-full rounded-[12px] border-0 px-[16px] font-medium text-[16px] text-[#242424] transition-all duration-200 hover:bg-[#e8e8e8] focus:ring-2 focus:ring-[var(--color-accent)]">
+                        <SelectTrigger className="storefront-input h-[50px] w-full rounded-[12px] border-0 px-[16px] font-medium text-[16px] text-[#242424] transition-all duration-200 hover:bg-[#e8e8e8] focus:ring-2 focus:ring-[var(--color-accent)]">
                           <SelectValue placeholder={t.checkout.deliveryTimeTitle} />
                         </SelectTrigger>
                         <SelectContent>
@@ -874,7 +891,7 @@ export function CheckoutView({
                         disabled={promoLoading}
                         onChange={(e) => setPromoInput(e.target.value)}
                         onKeyDown={handlePromoKeyDown}
-                        className="storefront-modal-field min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
+                        className="storefront-input min-w-0 flex-1 rounded-[12px] px-4 py-3 font-mono uppercase text-[#242424] placeholder:text-[rgba(36,36,36,0.35)] disabled:opacity-60"
                         aria-label={t.cart.promoAria}
                         autoComplete="off"
                       />
@@ -953,7 +970,7 @@ export function CheckoutView({
                         "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                         payment === "cash"
                           ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
-                          : cn("storefront-modal-field text-[#242424]", checkoutGrayToggle),
+                          : checkoutToggleInactive,
                       )}
                     >
                       <Banknote className="size-[14px] shrink-0" strokeWidth={2} />
@@ -966,7 +983,7 @@ export function CheckoutView({
                         "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                         payment === "card"
                           ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
-                          : cn("storefront-modal-field text-[#242424]", checkoutGrayToggle),
+                          : checkoutToggleInactive,
                       )}
                     >
                       <CreditCard className="size-[14px] shrink-0" strokeWidth={2} />
@@ -986,7 +1003,7 @@ export function CheckoutView({
                           inputMode="numeric"
                           value={changeFrom}
                           onChange={(e) => setChangeFrom(e.target.value)}
-                          className="storefront-modal-field w-[120px] rounded-[12px] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                          className="storefront-input w-[120px] rounded-[12px] px-[16px] py-[14px] font-medium text-[16px] text-[#242424] outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
                           placeholder={t.checkout.changePlaceholder}
                         />
                         <span className="text-[16px] font-medium text-[#242424]">
@@ -1017,11 +1034,17 @@ export function CheckoutView({
               mode={mode}
               selectedZone={selectedZone}
               outOfZone={outOfZone}
-              grandTotal={grandTotal}
+              grandTotal={checkoutGrandTotalBani}
+              bonusesRedeemed={bonusesRedeemed}
               onCheckout={handleSubmit}
               checkoutSubmitting={orderSubmitting}
               checkoutError={orderSubmitError}
-            />
+            >
+              <BonusRedeemBlock
+                orderTotalBani={grandTotal}
+                onRedeemChange={setBonusesRedeemed}
+              />
+            </OrderSummary>
           </aside>
         </div>
       </ClientContainer>

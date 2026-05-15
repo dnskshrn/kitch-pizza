@@ -1,7 +1,9 @@
 "use server"
 
+import { getAdminBrandId } from "@/lib/get-admin-brand-id"
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { redirect } from "next/navigation"
 import type { Ingredient, StockAudit, StockAuditItem } from "@/types/database"
 
 export type AuditDetailItem = StockAuditItem & {
@@ -105,12 +107,14 @@ async function loadAuditDetail(
   }
 }
 
-export async function createAudit(): Promise<AuditDetail> {
+export async function createAudit(): Promise<never> {
   const supabase = await createClient()
+  const brandId = await getAdminBrandId()
 
   const { data: auditRow, error: auditError } = await supabase
     .from("stock_audits")
     .insert({
+      brand_id: brandId,
       note: null,
       confirmed_at: null,
     })
@@ -143,6 +147,7 @@ export async function createAudit(): Promise<AuditDetail> {
       audit_id: auditId,
       ingredient_id: r.id,
       expected_qty: q,
+      actual_qty: null,
     }
   })
 
@@ -158,7 +163,8 @@ export async function createAudit(): Promise<AuditDetail> {
   }
 
   revalidatePath("/admin/inventory/audits")
-  return loadAuditDetail(supabase, auditId)
+  revalidatePath(`/admin/inventory/audits/${auditId}`)
+  redirect(`/admin/inventory/audits/${auditId}`)
 }
 
 export async function getAuditDetail(auditId: string): Promise<AuditDetail> {

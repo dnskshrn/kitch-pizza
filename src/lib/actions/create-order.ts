@@ -1,9 +1,10 @@
 "use server"
 
 import { getCartItemPrice, type CartLang } from "@/lib/cart-helpers"
+import { redeemBonus } from "@/lib/bonus"
 import { getBrandId } from "@/lib/get-brand-id"
 import { getMessages } from "@/lib/i18n/storefront"
-import { createServiceRoleClient } from "@/lib/supabase/service-role"
+import { createServiceSupabaseClient } from "@/lib/supabase/server"
 import type { CartItem } from "@/types/cart"
 
 export type CreateOrderPayload = {
@@ -31,6 +32,10 @@ export type CreateOrderPayload = {
     quantity: number
     price: number
   }>
+  /** Пункты лояльности, вычтенные из итога (1 п. = 100 bani); итог уже с вычетом в `grandTotalBani`. */
+  bonuses_redeemed?: number
+  /** Профиль витрины (если пользователь залогинен); нужен для списания бонусов при создании заказа. */
+  profile_id?: string | null
 }
 
 export type CreateOrderResult =
@@ -158,7 +163,7 @@ export async function executeCreateOrder(
   let brandId: string
   try {
     brandId = await resolveBrandId()
-    supabase = createServiceRoleClient()
+    supabase = createServiceSupabaseClient()
   } catch {
     return { success: false, error: t.orderErrors.serverUnavailable }
   }
@@ -178,6 +183,9 @@ export async function executeCreateOrder(
     promo_code: payload.promoCode?.trim() || null,
     scheduled_time: scheduledTime,
     comment: payload.comment?.trim() || null,
+    bonuses_redeemed: payload.bonuses_redeemed ?? 0,
+    bonuses_earned: 0,
+    profile_id: payload.profile_id?.trim() || null,
   }
 
   const { data: orderRow, error: orderError } = await supabase
@@ -237,6 +245,40 @@ export async function executeCreateOrder(
       .eq("id", orderId)
       .eq("brand_id", brandId)
     return { success: false, error: t.orderErrors.saveItemsFailed }
+  }
+
+  const pid = payload.profile_id?.trim()
+  if (pid && name) {
+    try {
+      const { error: profileNameError } = await supabase
+        .from("profiles")
+        .update({ name, updated_at: new Date().toISOString() })
+        .eq("id", pid)
+        .or("name.is.null,name.eq.")
+      if (profileNameError) {
+        console.error(
+          "[createOrder] profile name backfill",
+          profileNameError.message,
+        )
+      }
+    } catch (e) {
+      console.error(
+        "[createOrder] profile name backfill",
+        e instanceof Error ? e.message : e,
+      )
+    }
+  }
+
+  const redeemed = payload.bonuses_redeemed ?? 0
+  if (redeemed > 0 && pid) {
+    try {
+      await redeemBonus(pid, orderId, redeemed)
+    } catch (e) {
+      console.error(
+        "[createOrder] redeemBonus",
+        e instanceof Error ? e.message : e,
+      )
+    }
   }
 
   const { data: brandRow } = await supabase

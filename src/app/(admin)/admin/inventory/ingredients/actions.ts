@@ -6,6 +6,10 @@ import { revalidatePath } from "next/cache"
 export type IngredientPayload = {
   name: string
   unit: "g" | "ml" | "pcs"
+  /** FK на `ingredient_categories`; null — без категории */
+  category_id: string | null
+  /** 0–100, один знак после запятой допустим */
+  waste_percent: number
 }
 
 export async function createIngredient(payload: IngredientPayload) {
@@ -16,6 +20,8 @@ export async function createIngredient(payload: IngredientPayload) {
     .insert({
       name: payload.name.trim(),
       unit: payload.unit,
+      category_id: payload.category_id,
+      waste_percent: payload.waste_percent,
     })
     .select("id")
     .single()
@@ -42,6 +48,8 @@ export async function updateIngredient(id: string, payload: IngredientPayload) {
     .update({
       name: payload.name.trim(),
       unit: payload.unit,
+      category_id: payload.category_id,
+      waste_percent: payload.waste_percent,
     })
     .eq("id", id)
 

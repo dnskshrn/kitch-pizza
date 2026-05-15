@@ -68,16 +68,13 @@ export default function BonusRedeemBlock({ orderTotalBani, onRedeemChange }: Pro
           🎁 {t.bonus.balance}: <strong>{balance}</strong>
         </span>
         <button
+          type="button"
           onClick={handleToggle}
-          style={{
-            fontSize: 13,
-            padding: '4px 12px',
-            borderRadius: 20,
-            border: '1px solid var(--color-accent)',
-            background: toggled ? 'var(--color-accent)' : 'transparent',
-            color: toggled ? 'var(--color-accent-text)' : 'var(--color-accent)',
-            cursor: 'pointer'
-          }}
+          className={
+            toggled
+              ? 'cursor-pointer rounded-[20px] border border-[var(--color-accent)] bg-[var(--color-accent)] px-3 py-1 text-[13px] text-[var(--color-accent-text)]'
+              : 'cursor-pointer rounded-[20px] border-0 bg-[#f2f2f2] px-3 py-1 text-[13px] text-[#242424]'
+          }
         >
           {toggled ? t.bonus.cancel : t.bonus.redeem}
         </button>

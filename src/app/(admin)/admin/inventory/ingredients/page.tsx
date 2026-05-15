@@ -85,9 +85,8 @@ export default async function AdminIngredientsPage({
 
   let categoryTabsForLookup: IngredientCategory[] = []
   if (useServerCategoryFilter) {
-    const { data: cats, error: catErr } = await (
-      supabase.from("ingredient_categories") as any
-    )
+    const { data: cats, error: catErr } = await supabase
+      .from("ingredient_categories")
       .select("id, name, sort_order")
       .order("sort_order", { ascending: true })
 

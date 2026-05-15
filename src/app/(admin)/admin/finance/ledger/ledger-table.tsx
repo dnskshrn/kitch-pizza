@@ -68,7 +68,6 @@ function formatQtyDisplay(n: number): string {
 
 function formatQuantityDelta(delta: number, unit: StorageUnit): string {
   if (!Number.isFinite(delta) || delta === 0) {
-    const z = formatQtyDisplay(toDisplayQty(0, unit))
     return `0 ${displayUnit(unit)}`
   }
   const sign = delta > 0 ? "+" : "−"

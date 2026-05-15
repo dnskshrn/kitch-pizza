@@ -145,7 +145,8 @@ export default async function AdminCustomerDetailPage({
 
   const bonusBalance = await getUserBalance(id)
 
-  const { data: bonusTxData } = await (supabase.from("bonus_transactions") as any)
+  const { data: bonusTxData } = await supabase
+    .from("bonus_transactions")
     .select("created_at, type, amount, balance_after, note")
     .eq("profile_id", id)
     .order("created_at", { ascending: false })
@@ -170,7 +171,7 @@ export default async function AdminCustomerDetailPage({
 
   const ordersList = (ordRows ?? []) as OrderRow[]
   const brandIds = [...new Set(ordersList.map((r) => r.brand_id).filter(Boolean))]
-  let slugById: Record<string, string> = {}
+  const slugById: Record<string, string> = {}
   if (brandIds.length > 0) {
     const { data: brands } = await supabase
       .from("brands")

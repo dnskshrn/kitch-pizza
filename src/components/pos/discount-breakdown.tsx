@@ -16,12 +16,20 @@ function formatMdl(bani: number): string {
 type DiscountBreakdownProps = {
   output: DiscountEngineOutput | null
   deliveryZone: DeliveryZoneForEngine | null
+  bonusRedeemedBani?: number
 }
 
-export function DiscountBreakdown({ output, deliveryZone }: DiscountBreakdownProps) {
+export function DiscountBreakdown({
+  output,
+  deliveryZone,
+  bonusRedeemedBani = 0,
+}: DiscountBreakdownProps) {
   if (output == null) return null
 
   const hasDiscountLines = output.appliedDiscounts.length > 0
+  const safeBonusBani = Math.max(0, Math.round(bonusRedeemedBani))
+  const finalTotalBani =
+    output.totalBani === null ? null : Math.max(0, output.totalBani - safeBonusBani)
 
   return (
     <div className="space-y-2 text-sm text-foreground">
@@ -79,12 +87,23 @@ export function DiscountBreakdown({ output, deliveryZone }: DiscountBreakdownPro
         )}
       </div>
 
+      {safeBonusBani > 0 ? (
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="min-w-0 truncate text-emerald-700">
+            Списание бонусов
+          </span>
+          <span className="shrink-0 font-mono tabular-nums text-emerald-600">
+            −{formatMdl(safeBonusBani)} MDL
+          </span>
+        </div>
+      ) : null}
+
       <div className="border-t-2 border-border" />
 
       <div className="flex items-baseline justify-between gap-3 pt-0.5">
         <span className="text-base font-bold text-[#242424]">Итого</span>
         <span className="font-mono text-lg font-bold tabular-nums text-[#242424]">
-          {output.totalBani === null ? '—' : `${formatMdl(output.totalBani)} MDL`}
+          {finalTotalBani === null ? '—' : `${formatMdl(finalTotalBani)} MDL`}
         </span>
       </div>
     </div>

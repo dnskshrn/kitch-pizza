@@ -12,8 +12,10 @@ import {
   fetchCompletedPosOrders,
   fetchPosOrders,
 } from "@/lib/pos/fetch-orders"
+import { updateOrderStatusPos } from "@/lib/actions/pos/update-order-status-pos"
+import { usePosOrderMutations } from "@/hooks/use-pos-order-mutations"
 import { createClient } from "@/lib/supabase/client"
-import type { PosOrder } from "@/types/pos"
+import type { PosOrder, PosOrderStatus } from "@/types/pos"
 import { CheckCheck, ChevronLeft, Phone } from "lucide-react"
 
 /** Если join `brands` в выборке заказа пустой, не теряем уже показанный slug после reload/realtime. */
@@ -84,6 +86,11 @@ type OrdersPanelProps = {
 
 export type OrdersPanelHandle = {
   updateOrderLocalState: (orderId: string, patch: Partial<PosOrder>) => void
+  updateOrderStatus: (
+    orderId: string,
+    status: PosOrderStatus,
+  ) => Promise<boolean>
+  isOrderStatusPending: (orderId: string) => boolean
   refetchOrders: () => Promise<void>
 }
 
@@ -97,6 +104,8 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
     )
     const [incomingCallBanner, setIncomingCallBanner] =
       useState<IncomingCallBannerState | null>(null)
+    const { updateStatus, isStatusPending } =
+      usePosOrderMutations(setMainOrders)
 
     const reloadOrders = useCallback(async () => {
       const [main, completed] = await Promise.all([
@@ -107,14 +116,21 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
       setCompletedOrders(completed)
     }, [])
 
-    useImperativeHandle(ref, () => ({
-      updateOrderLocalState: (orderId, patch) => {
-        setMainOrders((prev) =>
-          prev.map((o) => (o.id === orderId ? { ...o, ...patch } : o)),
-        )
-      },
-      refetchOrders: reloadOrders,
-    }))
+    useImperativeHandle(
+      ref,
+      () => ({
+        updateOrderLocalState: (orderId, patch) => {
+          setMainOrders((prev) =>
+            prev.map((o) => (o.id === orderId ? { ...o, ...patch } : o)),
+          )
+        },
+        updateOrderStatus: (orderId, status) =>
+          updateStatus(orderId, status, updateOrderStatusPos),
+        isOrderStatusPending: isStatusPending,
+        refetchOrders: reloadOrders,
+      }),
+      [isStatusPending, reloadOrders, updateStatus],
+    )
 
     const mainPanelOrders = mainOrders
 

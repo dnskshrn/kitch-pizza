@@ -10,6 +10,7 @@ import {
 import { closeCashSession } from "@/lib/actions/pos/cash-session"
 import { logout } from "@/lib/actions/pos/auth"
 import { closeShift } from "@/lib/actions/pos/shifts"
+import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
@@ -67,6 +68,7 @@ export function CloseShiftModal({
 
       await closeShift()
       await logout()
+      await createClient().auth.signOut()
       onClose()
       router.push("/pos")
       router.refresh()

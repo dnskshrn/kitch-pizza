@@ -50,20 +50,67 @@ export async function middleware(request: NextRequest) {
   const requestHeaders = buildRequestHeadersWithBrand(request, brand.slug)
 
   const isPosRoute = pathname.startsWith("/pos")
-  const isPosLogin = pathname === "/pos/login"
+  const isPosManagerLogin =
+    pathname === "/pos/manager-login" || pathname === "/pos/manager-login/"
+  const isPosLogin =
+    pathname === "/pos/login" || pathname === "/pos/login/"
 
   if (isPosRoute) {
+    if (isPosManagerLogin) {
+      return NextResponse.next({
+        request: {
+          headers: requestHeaders,
+        },
+      })
+    }
+
+    let posSupabaseResponse = NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    })
+
+    const posSupabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) =>
+              request.cookies.set(name, value),
+            )
+            posSupabaseResponse = NextResponse.next({
+              request: {
+                headers: requestHeaders,
+              },
+            })
+            cookiesToSet.forEach(({ name, value, options }) =>
+              posSupabaseResponse.cookies.set(name, value, options),
+            )
+          },
+        },
+      },
+    )
+
+    const {
+      data: { user: posUser },
+    } = await posSupabase.auth.getUser()
+
+    if (!posUser) {
+      return NextResponse.redirect(new URL("/pos/manager-login", request.url))
+    }
+
     if (!isPosLogin) {
       const token = request.cookies.get("pos-session")?.value
       if (!(await posSessionIsValid(token))) {
         return NextResponse.redirect(new URL("/pos/login", request.url))
       }
     }
-    return NextResponse.next({
-      request: {
-        headers: requestHeaders,
-      },
-    })
+
+    return posSupabaseResponse
   }
 
   const isAdminApiRoute = pathname.startsWith("/api/admin")

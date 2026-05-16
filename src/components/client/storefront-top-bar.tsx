@@ -1,5 +1,6 @@
 "use client"
 
+import { getBrandBySlug } from "@/brands/index"
 import { Avatar } from "@/components/client/avatar"
 import {
   getBrandPhone,
@@ -33,12 +34,13 @@ function BrandPhoneText({
   )
 }
 
-export function StorefrontTopBarSchedule() {
+export function StorefrontTopBarSchedule({ brandSlug }: { brandSlug: string }) {
+  const hours = getBrandBySlug(brandSlug).hours
   return (
     <div className="flex min-w-0 shrink-0 items-center gap-2 text-[#242424]">
       <Clock className="size-4 shrink-0" strokeWidth={2} aria-hidden />
       <span className="text-[13px] font-normal tabular-nums whitespace-nowrap">
-        10:00 – 23:00
+        {hours}
       </span>
     </div>
   )
@@ -102,7 +104,7 @@ export function StorefrontTopBar({ brandSlug }: StorefrontTopBarProps) {
         }}
       >
         <div className="flex h-11 items-center justify-between rounded-b-2xl bg-[#ffffff] px-4">
-          <StorefrontTopBarSchedule />
+          <StorefrontTopBarSchedule brandSlug={brandSlug} />
 
           <div className="flex min-w-0 shrink-0 items-center gap-3">
             {profile ? (

@@ -4,7 +4,7 @@ import type { PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 
 /** Колонки `orders` + вложения для списка/карточек POS (без несуществующих полей). */
 const ORDERS_POS_SELECT =
-  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, delivery_fee, promo_code, discount, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(count)"
+  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, delivery_fee, promo_code, discount, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, brands(slug), order_items(count)"
 
 /** Активные заказы левой колонки POS (без завершённых, отмен и отказов сайта). */
 export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
@@ -47,6 +47,7 @@ export type OrderRow = {
   address_floor?: string | null
   address_apartment?: string | null
   address_intercom?: string | null
+  courier_id?: string | null
 }
 
 function brandSlugFromRow(row: OrderRow): string {
@@ -92,14 +93,45 @@ function collectBrandIdsNeedingSlug(rows: OrderRow[]): string[] {
   return [...ids]
 }
 
+function collectCourierIds(rows: OrderRow[]): string[] {
+  const ids = new Set<string>()
+  for (const row of rows) {
+    const id = row.courier_id
+    if (typeof id === "string" && id) ids.add(id)
+  }
+  return [...ids]
+}
+
+async function fetchCourierNamesByStaffIds(
+  staffIds: string[],
+): Promise<Map<string, string>> {
+  if (staffIds.length === 0) return new Map()
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from("staff")
+    .select("id, name")
+    .in("id", staffIds)
+
+  if (error) {
+    console.error("[fetchCourierNamesByStaffIds]", error.message)
+    return new Map()
+  }
+  return new Map(
+    (data ?? []).map((r: { id: string; name: string }) => [r.id, r.name]),
+  )
+}
+
 async function rowsToPosOrders(rows: OrderRow[]): Promise<PosOrder[]> {
   const slugById = await fetchBrandSlugsByIds(collectBrandIdsNeedingSlug(rows))
+  const courierNameById = await fetchCourierNamesByStaffIds(
+    collectCourierIds(rows),
+  )
   return rows.map((row) => {
     const fromEmbed = brandSlugFromRow(row)
     const fromTable =
       row.brand_id != null ? (slugById.get(row.brand_id) ?? "") : ""
     const merged = fromEmbed || fromTable
-    return mapOrderRowToPosOrder(row, merged)
+    return mapOrderRowToPosOrder(row, merged, courierNameById)
   })
 }
 
@@ -118,10 +150,19 @@ function parseSource(v: unknown): PosOrderSource {
  * Маппинг строки заказа для POS.
  * @param resolvedSlug — уже собранный slug (embed или запрос к `brands`); иначе только из join.
  */
-export function mapOrderRowToPosOrder(row: OrderRow, resolvedSlug?: string): PosOrder {
+export function mapOrderRowToPosOrder(
+  row: OrderRow,
+  resolvedSlug?: string,
+  courierNameById?: Map<string, string>,
+): PosOrder {
   const raw =
     resolvedSlug !== undefined ? resolvedSlug : brandSlugFromRow(row)
   const brand_slug = normalizePosBrandSlug(raw)
+  const courierId = row.courier_id ?? null
+  const courierName =
+    courierId && courierNameById?.size
+      ? (courierNameById.get(courierId) ?? null)
+      : null
 
   return {
     id: row.id,
@@ -150,6 +191,8 @@ export function mapOrderRowToPosOrder(row: OrderRow, resolvedSlug?: string): Pos
     address_floor: row.address_floor ?? null,
     address_apartment: row.address_apartment ?? null,
     address_intercom: row.address_intercom ?? null,
+    courier_id: courierId,
+    courier_name: courierName,
   }
 }
 

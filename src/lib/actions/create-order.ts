@@ -1,5 +1,6 @@
 "use server"
 
+import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import { getCartItemPrice, type CartLang } from "@/lib/cart-helpers"
 import { redeemBonus } from "@/lib/bonus"
 import { getBrandId } from "@/lib/get-brand-id"
@@ -36,6 +37,9 @@ export type CreateOrderPayload = {
   bonuses_redeemed?: number
   /** Профиль витрины (если пользователь залогинен); нужен для списания бонусов при создании заказа. */
   profile_id?: string | null
+  /** Координаты доставки (карта / геокод); при отсутствии — best-effort геокод по строке адреса. */
+  delivery_lat?: number | null
+  delivery_lng?: number | null
 }
 
 export type CreateOrderResult =
@@ -72,6 +76,18 @@ function orderItemSizeAndVariantForInsert(ci: CartItem): {
     return { size: ci.selectedSize, variant_id: null }
   }
   return { size: null, variant_id: null }
+}
+
+function deliveryCoordsAreUsable(
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+): boolean {
+  return (
+    lat != null &&
+    lng != null &&
+    Number.isFinite(Number(lat)) &&
+    Number.isFinite(Number(lng))
+  )
 }
 
 async function sendTelegramNotification(order: {
@@ -168,6 +184,28 @@ export async function executeCreateOrder(
     return { success: false, error: t.orderErrors.serverUnavailable }
   }
 
+  let delivery_lat: number | null = null
+  let delivery_lng: number | null = null
+  if (payload.deliveryMode === "delivery") {
+    const latRaw = payload.delivery_lat
+    const lngRaw = payload.delivery_lng
+    if (deliveryCoordsAreUsable(latRaw, lngRaw)) {
+      delivery_lat = Number(latRaw)
+      delivery_lng = Number(lngRaw)
+    } else {
+      try {
+        const hit = await geocodeAddress(payload.deliveryAddress)
+        if (hit) {
+          delivery_lat = hit.lat
+          delivery_lng = hit.lng
+        }
+      } catch {
+        delivery_lat = null
+        delivery_lng = null
+      }
+    }
+  }
+
   const insertRow = {
     brand_id: brandId,
     user_name: name,
@@ -175,6 +213,8 @@ export async function executeCreateOrder(
     status: "new" as const,
     delivery_mode: payload.deliveryMode,
     delivery_address: payload.deliveryAddress.trim(),
+    delivery_lat,
+    delivery_lng,
     payment_method: payload.paymentMethod,
     change_from: payload.changeFromBani,
     total: payload.grandTotalBani,

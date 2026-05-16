@@ -60,4 +60,7 @@ export type PosOrder = {
   address_floor: string | null
   address_apartment: string | null
   address_intercom: string | null
+  courier_id: string | null
+  /** Имя из `staff` при непустом `courier_id`; подгружается в `fetchPosOrders`. */
+  courier_name: string | null
 }

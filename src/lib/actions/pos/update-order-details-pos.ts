@@ -1,5 +1,6 @@
 "use server"
 
+import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
@@ -20,6 +21,10 @@ export type UpdateOrderDetailsPosInput = {
   promoCode?: string
   discount: number
   deliveryFee: number
+  /** Не передавать — не менять `orders.profile_id`. */
+  profileId?: string | null
+  delivery_lat?: number | null
+  delivery_lng?: number | null
 }
 
 export type UpdateOrderDetailsPosResult =
@@ -95,6 +100,33 @@ export async function updateOrderDetailsPos(
     return { success: false, error: "Некорректная сумма заказа" }
   }
 
+  let delivery_lat: number | null = null
+  let delivery_lng: number | null = null
+  if (input.deliveryMode === "delivery") {
+    const latIn = input.delivery_lat
+    const lngIn = input.delivery_lng
+    if (
+      latIn != null &&
+      lngIn != null &&
+      Number.isFinite(Number(latIn)) &&
+      Number.isFinite(Number(lngIn))
+    ) {
+      delivery_lat = Number(latIn)
+      delivery_lng = Number(lngIn)
+    } else {
+      try {
+        const hit = await geocodeAddress(deliveryAddress)
+        if (hit) {
+          delivery_lat = hit.lat
+          delivery_lng = hit.lng
+        }
+      } catch {
+        delivery_lat = null
+        delivery_lng = null
+      }
+    }
+  }
+
   const updatedAt = new Date().toISOString()
 
   const patch: Record<string, unknown> = {
@@ -120,6 +152,12 @@ export async function updateOrderDetailsPos(
     promo_code: input.promoCode?.trim() || null,
     comment: input.comment?.trim() || null,
     updated_at: updatedAt,
+    delivery_lat,
+    delivery_lng,
+  }
+
+  if (input.profileId !== undefined) {
+    patch.profile_id = input.profileId
   }
 
   const { error: updateError } = await supabase

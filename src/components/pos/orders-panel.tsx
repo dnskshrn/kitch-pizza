@@ -8,8 +8,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { acceptOrderPos } from "@/lib/actions/pos/accept-order-pos"
-import { rejectOrderPos } from "@/lib/actions/pos/reject-order-pos"
 import {
   fetchCompletedPosOrders,
   fetchPosOrders,
@@ -97,9 +95,6 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
     const [completedDetailId, setCompletedDetailId] = useState<string | null>(
       null,
     )
-    const [websiteActionOrderId, setWebsiteActionOrderId] = useState<
-      string | null
-    >(null)
     const [incomingCallBanner, setIncomingCallBanner] =
       useState<IncomingCallBannerState | null>(null)
 
@@ -130,69 +125,6 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
     useEffect(() => {
       onMainOrdersChange?.(mainOrders)
     }, [mainOrders, onMainOrdersChange])
-
-    const handleStatusChange = useCallback(
-      async (orderId: string, newStatus: string) => {
-        const order = mainOrders.find((o) => o.id === orderId)
-        if (!order) return
-
-        const next = newStatus
-        const allowed =
-          (next === "delivery" &&
-            order.status === "ready" &&
-            order.delivery_mode === "delivery") ||
-          (next === "done" && order.status === "delivery")
-
-        if (!allowed) return
-
-        const updatedAt = new Date().toISOString()
-        const supabase = createClient()
-        const { error } = await supabase
-          .from("orders")
-          .update({ status: next, updated_at: updatedAt })
-          .eq("id", orderId)
-
-        if (error) {
-          console.error("[orders-panel] status update", error.message)
-        }
-        await reloadOrders()
-      },
-      [mainOrders, reloadOrders],
-    )
-
-    const handleWebsiteAccept = useCallback(
-      async (orderId: string) => {
-        setWebsiteActionOrderId(orderId)
-        try {
-          const res = await acceptOrderPos({ orderId })
-          if (!res.success) {
-            console.error("[orders-panel] accept", res.error)
-            return
-          }
-          await reloadOrders()
-        } finally {
-          setWebsiteActionOrderId(null)
-        }
-      },
-      [reloadOrders],
-    )
-
-    const handleWebsiteReject = useCallback(
-      async (orderId: string, reason: string) => {
-        setWebsiteActionOrderId(orderId)
-        try {
-          const res = await rejectOrderPos({ orderId, reason })
-          if (!res.success) {
-            console.error("[orders-panel] reject", res.error)
-            return
-          }
-          await reloadOrders()
-        } finally {
-          setWebsiteActionOrderId(null)
-        }
-      },
-      [reloadOrders],
-    )
 
     useEffect(() => {
       const supabase = createClient()
@@ -386,10 +318,6 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
                     order={order}
                     isSelected={selectedOrderId === order.id}
                     onSelect={() => onSelectOrder(order.id)}
-                    onStatusChange={handleStatusChange}
-                    onWebsiteAccept={handleWebsiteAccept}
-                    onWebsiteReject={handleWebsiteReject}
-                    websiteActionBusy={websiteActionOrderId === order.id}
                   />
                 ))}
               </div>
@@ -448,7 +376,6 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
                           order={order}
                           isSelected={false}
                           onSelect={() => setCompletedDetailId(order.id)}
-                          onStatusChange={() => {}}
                         />
                       ))}
                     </div>

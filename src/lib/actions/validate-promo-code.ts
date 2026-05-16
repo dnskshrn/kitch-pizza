@@ -7,8 +7,13 @@ import type { PromoCode, PromoCodeValidationResult } from "@/types/database"
 export async function validatePromoCode(
   code: string,
   cartSubtotalBani: number,
+  /** В POS — UUID бренда выбранного заказа; без аргумента — витрина по `x-brand-slug`. */
+  brandIdForOrder?: string | null,
 ): Promise<PromoCodeValidationResult> {
-  const brandId = await getBrandId()
+  const brandId =
+    brandIdForOrder != null && brandIdForOrder !== ""
+      ? brandIdForOrder
+      : await getBrandId()
   const normalized = code.trim().toUpperCase()
   if (!normalized) {
     return { valid: false, error: "not_found" }

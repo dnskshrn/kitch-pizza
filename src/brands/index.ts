@@ -26,7 +26,7 @@ export const brands: BrandConfig[] = [
     devDomain: 'localhost:3000',
     logo: '/kitch-pizza-logo.svg',
     phone: '079 700 290',
-    hours: '11:00 – 23:00',
+    hours: '11:00 – 03:00',
     cartKey: 'kitch-pizza-cart',
     deliveryKey: 'kitch-pizza-delivery',
     metaPixelId: '342890895314551',
@@ -44,7 +44,7 @@ export const brands: BrandConfig[] = [
     devDomain: 'www.losos.md',
     logo: '/Losos_Logo.svg',
     phone: '079 200 190',
-    hours: '11:00 – 23:00', // TODO
+    hours: '15:00 – 03:00',
     cartKey: 'losos-cart',
     deliveryKey: 'losos-delivery',
     metaPixelId: '2033954120857667',
@@ -62,7 +62,7 @@ export const brands: BrandConfig[] = [
     devDomain: '192.168.50.137',
     logo: '/the-spot-logo.svg',
     phone: '079 200 120',
-    hours: '11:00 – 23:00', // TODO
+    hours: '11:00 – 03:00',
     cartKey: 'kitch-pizza-cart', // TODO
     deliveryKey: 'kitch-pizza-delivery', // TODO
     metaPixelId: '910661225331040',

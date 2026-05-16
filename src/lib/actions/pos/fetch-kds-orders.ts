@@ -1,27 +1,8 @@
 "use server"
 
+import { KDS_ORDER_QUERY_SELECT } from "@/components/pos/kds/types"
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
-
-/** Совпадает с выборкой KDS-клиента; читается через service role (RLS не режет строки). */
-const KDS_ORDER_SELECT = `
-  id,
-  order_number,
-  brand_id,
-  status,
-  scheduled_time,
-  updated_at,
-  cooking_started_at,
-  brands ( slug ),
-  order_items (
-    id,
-    item_name,
-    quantity,
-    size,
-    toppings,
-    price
-  )
-`
 
 export type FetchKdsCookingOrdersResult =
   | { success: true; orders: unknown[] }
@@ -49,7 +30,7 @@ export async function fetchKdsCookingOrdersPos(
 
   const { data, error } = await supabase
     .from("orders")
-    .select(KDS_ORDER_SELECT)
+    .select(KDS_ORDER_QUERY_SELECT)
     .eq("brand_id", bid)
     .eq("status", "cooking")
 
@@ -87,7 +68,7 @@ export async function fetchKdsOrderByIdPos(
 
   const { data, error } = await supabase
     .from("orders")
-    .select(KDS_ORDER_SELECT)
+    .select(KDS_ORDER_QUERY_SELECT)
     .eq("id", oid)
     .maybeSingle()
 

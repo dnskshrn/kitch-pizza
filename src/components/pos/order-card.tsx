@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import type { PosOrder, PosOrderStatus } from "@/types/pos"
-import { MapPin, Phone, Store, Truck, User } from "lucide-react"
+import { MapPin, Phone, Store, Truck, User, CircleUser } from "lucide-react"
 import { useEffect, useState } from "react"
 
 function formatOrderTime(iso: string): string {
@@ -217,67 +217,18 @@ export function WebsiteNewActions({
   )
 }
 
-function ActionButtons({
-  order,
-  onStatusChange,
-  onWebsiteAccept,
-  onWebsiteReject,
-  websiteActionBusy,
-}: {
-  order: PosOrder
-  onStatusChange: (orderId: string, newStatus: string) => void
-  onWebsiteAccept?: (orderId: string) => void | Promise<void>
-  onWebsiteReject?: (orderId: string, reason: string) => void | Promise<void>
-  websiteActionBusy?: boolean
-}) {
-  if (order.status === "new" && order.source === "website") {
-    if (onWebsiteAccept && onWebsiteReject) {
-      return (
-        <WebsiteNewActions
-          order={order}
-          busy={Boolean(websiteActionBusy)}
-          onAccept={onWebsiteAccept}
-          onReject={onWebsiteReject}
-        />
-      )
-    }
-  }
-  if (order.status === "delivery") {
-    return (
-      <div className="pt-1">
-        <button
-          type="button"
-          onClick={() => onStatusChange(order.id, "done")}
-          className="rounded-full bg-[#242424] px-3.5 py-1.5 text-[12px] font-bold text-white transition-colors hover:bg-[#3a3a3a]"
-        >
-          Выдан
-        </button>
-      </div>
-    )
-  }
-  return null
-}
-
 export type OrderWithBrand = PosOrder
 
 type OrderCardProps = {
   order: OrderWithBrand
   isSelected: boolean
   onSelect: () => void
-  onStatusChange: (orderId: string, newStatus: string) => void
-  onWebsiteAccept?: (orderId: string) => void | Promise<void>
-  onWebsiteReject?: (orderId: string, reason: string) => void | Promise<void>
-  websiteActionBusy?: boolean
 }
 
 export function OrderCard({
   order,
   isSelected,
   onSelect,
-  onStatusChange,
-  onWebsiteAccept,
-  onWebsiteReject,
-  websiteActionBusy,
 }: OrderCardProps) {
   const orderTime = formatOrderTime(order.created_at)
   const displayName = order.user_name?.trim() || "—"
@@ -335,6 +286,25 @@ export function OrderCard({
           </span>
         </div>
 
+        {order.delivery_mode === "delivery" &&
+        order.status === "delivery" &&
+        order.courier_id ? (
+          <div
+            className="flex items-center gap-2 rounded-lg border border-[#e8e8e8] bg-white px-3 py-2"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            role="presentation"
+          >
+            <CircleUser
+              className="size-3.5 shrink-0 text-[#808080]"
+              aria-hidden
+            />
+            <span className="min-w-0 truncate text-[13px] font-bold text-[#242424]">
+              {order.courier_name?.trim() || "Курьер"}
+            </span>
+          </div>
+        ) : null}
+
         {/* ── Строка 3: имя · телефон ── */}
         <div className="flex items-center gap-2">
           <User className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
@@ -354,20 +324,6 @@ export function OrderCard({
             {formatMdl(order.total)}
           </span>
         </div>
-      </div>
-
-      {/* ── Кнопки действий — не propagate клик ── */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        <ActionButtons
-          order={order}
-          onStatusChange={onStatusChange}
-          onWebsiteAccept={onWebsiteAccept}
-          onWebsiteReject={onWebsiteReject}
-          websiteActionBusy={websiteActionBusy}
-        />
       </div>
     </div>
   )

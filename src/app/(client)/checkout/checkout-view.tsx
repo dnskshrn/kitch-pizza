@@ -238,6 +238,8 @@ export function CheckoutView({
   const apartment = useDeliveryStore((s) => s.apartment)
   const intercom = useDeliveryStore((s) => s.intercom)
   const getDeliveryFeeBani = useDeliveryStore((s) => s.getDeliveryFeeBani)
+  const deliveryLat = useDeliveryStore((s) => s.lat)
+  const deliveryLng = useDeliveryStore((s) => s.lng)
 
   const [hydrated, setHydrated] = useState(false)
 
@@ -396,6 +398,22 @@ export function CheckoutView({
         grandTotalBani: checkoutGrandTotalBani,
         bonuses_redeemed: bonusesRedeemed,
         profile_id: profile?.id ?? null,
+        delivery_lat:
+          mode === "delivery" &&
+          deliveryLat != null &&
+          deliveryLng != null &&
+          Number.isFinite(deliveryLat) &&
+          Number.isFinite(deliveryLng)
+            ? deliveryLat
+            : null,
+        delivery_lng:
+          mode === "delivery" &&
+          deliveryLat != null &&
+          deliveryLng != null &&
+          Number.isFinite(deliveryLat) &&
+          Number.isFinite(deliveryLng)
+            ? deliveryLng
+            : null,
         items,
         condimentOrderLines: buildCondimentOrderLines(
           useCartStore.getState().condimentQuantities,

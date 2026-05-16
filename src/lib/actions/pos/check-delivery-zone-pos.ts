@@ -30,8 +30,19 @@ async function getZonesByBrandSlug(brandSlug: string): Promise<DeliveryZone[]> {
 }
 
 export type DeliveryZoneCheckResultPos =
-  | { status: "in_zone"; zone: DeliveryZone; display_name: string }
-  | { status: "out_of_zone"; display_name: string }
+  | {
+      status: "in_zone"
+      zone: DeliveryZone
+      display_name: string
+      lat: number
+      lng: number
+    }
+  | {
+      status: "out_of_zone"
+      display_name: string
+      lat: number
+      lng: number
+    }
   | { status: "not_found" }
   | { status: "error"; message: string }
 
@@ -80,8 +91,8 @@ export async function checkDeliveryZoneByAddress(
   const zone = findZoneForPoint(lat, lng, zones)
 
   if (zone) {
-    return { status: "in_zone", zone, display_name }
+    return { status: "in_zone", zone, display_name, lat, lng }
   }
 
-  return { status: "out_of_zone", display_name }
+  return { status: "out_of_zone", display_name, lat, lng }
 }

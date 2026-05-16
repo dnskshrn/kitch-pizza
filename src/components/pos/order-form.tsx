@@ -27,6 +27,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -57,8 +58,14 @@ import {
   updateOrderItemCompositionPos,
   updateOrderItemQuantityPos,
 } from "@/lib/actions/pos/update-order-items"
+import {
+  posLookupCustomer,
+  posSaveCustomer,
+  posSaveCustomerAddress,
+} from "@/lib/actions/pos/customers-pos-actions"
 import { validatePromoCode } from "@/lib/actions/validate-promo-code"
 import { calcPromoDiscount } from "@/lib/discount"
+import type { CustomerAddressRow, CustomerWithAddresses } from "@/lib/customers"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import { orderItemSizeDisplayLabel } from "@/lib/order-item-size-display"
@@ -198,6 +205,10 @@ function parseLeiToBani(raw: string): number | null {
   const n = Number.parseFloat(t)
   if (!Number.isFinite(n) || n < 0) return null
   return Math.round(n * 100)
+}
+
+function roundMoneyMdl(n: number): number {
+  return Math.round(n * 100) / 100
 }
 
 function promoErrorRu(
@@ -398,6 +409,12 @@ function CartPanel({
   runnerDisabled,
   runnerBusy,
   runnerAlreadySent,
+  assignedCourierId,
+  assignedCourierName,
+  onChangeAssignedCourier,
+  courierContactWarnings = [],
+  courierButtonDisabled = false,
+  courierButtonHints = [],
 }: {
   cart: PosCartItem[]
   cartCount: number
@@ -415,6 +432,13 @@ function CartPanel({
   runnerBusy?: boolean
   /** Заказ уже ушёл на кухню (не черновик) — только подпись, без повторной отправки */
   runnerAlreadySent?: boolean
+  assignedCourierId?: string | null
+  assignedCourierName?: string | null
+  onChangeAssignedCourier?: () => void
+  courierContactWarnings?: string[]
+  /** Телефон / адрес (доставка): блокирует «Назначить» и «Сменить» */
+  courierButtonDisabled?: boolean
+  courierButtonHints?: string[]
 }) {
   return (
     /* Серая полоса-отступ справа — часть родительского bg-[#f2f2f2] */
@@ -473,14 +497,84 @@ function CartPanel({
               {formatMdlAmount(subtotalBani)} лей
             </span>
           </div>
+          {(onCourierAssign || onChangeAssignedCourier) &&
+          courierContactWarnings.length > 0 ? (
+            <div className="mt-3 flex flex-col gap-1">
+              {courierContactWarnings.map((line, i) => (
+                <p
+                  key={`${line}-${i}`}
+                  className="text-center text-[12px] font-medium leading-snug text-amber-800"
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {assignedCourierId && onChangeAssignedCourier ? (
+            <div className="mt-3">
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-[#f2f2f2] px-3 py-2">
+                <span className="min-w-0 flex-1 truncate text-left text-[13px] text-[#242424]">
+                  <span className="font-normal text-[#808080]">Курьер · </span>
+                  <span className="font-bold">
+                    {assignedCourierName?.trim() || "—"}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  disabled={courierButtonDisabled}
+                  onClick={onChangeAssignedCourier}
+                  className={cn(
+                    "shrink-0 rounded-full border border-[#e0e0e0] bg-white px-2.5 py-1 text-[11px] font-bold text-[#242424] transition-colors hover:bg-[#f2f2f2]",
+                    courierButtonDisabled
+                      ? "pointer-events-none cursor-not-allowed opacity-40 hover:bg-white"
+                      : "",
+                  )}
+                >
+                  Сменить
+                </button>
+              </div>
+              {courierButtonDisabled && courierButtonHints.length > 0 ? (
+                <div className="mt-1.5 flex flex-col gap-0.5 px-1">
+                  {courierButtonHints.map((line, i) => (
+                    <p
+                      key={`${line}-${i}`}
+                      className="text-center text-[11px] font-medium leading-snug text-[#808080]"
+                    >
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {onCourierAssign ? (
-            <button
-              type="button"
-              onClick={onCourierAssign}
-              className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
-            >
-              🛵 Выбрать курьера
-            </button>
+            <div className="mt-3">
+              <button
+                type="button"
+                disabled={courierButtonDisabled}
+                onClick={onCourierAssign}
+                className={cn(
+                  POS_RUNNER_CTA_CLASS,
+                  courierButtonDisabled
+                    ? "pointer-events-none cursor-not-allowed opacity-40"
+                    : "",
+                )}
+              >
+                Назначить курьера
+              </button>
+              {courierButtonDisabled && courierButtonHints.length > 0 ? (
+                <div className="mt-1.5 flex flex-col gap-0.5 px-1">
+                  {courierButtonHints.map((line, i) => (
+                    <p
+                      key={`${line}-assign-${i}`}
+                      className="text-center text-[11px] font-medium leading-snug text-[#808080]"
+                    >
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ) : onPayOrder ? (
             <button
               type="button"
@@ -682,11 +776,40 @@ export function OrderForm({
   const [promoError, setPromoError] = useState<string | null>(null)
   const [promoLoading, setPromoLoading] = useState(false)
 
+  const [posCustomerData, setPosCustomerData] = useState<CustomerWithAddresses | null>(
+    null,
+  )
+  const [posBonusBalance, setPosBonusBalance] = useState<number | null>(null)
+  const [posMaxRedemptionRate, setPosMaxRedemptionRate] = useState<number | null>(
+    null,
+  )
+  const [posCustomerLoading, setPosCustomerLoading] = useState(false)
+  const [posCustomerLookupDone, setPosCustomerLookupDone] = useState(false)
+  /** saved: из справочника; new: ввод вручную */
+  const [addressBookMode, setAddressBookMode] = useState<"saved" | "new">("saved")
+  const [selectedSavedAddressId, setSelectedSavedAddressId] = useState<string | null>(
+    null,
+  )
+  const [saveNewAddressOnSubmit, setSaveNewAddressOnSubmit] = useState(false)
+  /** undefined — не трогать orders.profile_id; null — сбросить */
+  const [linkedProfileId, setLinkedProfileId] = useState<string | null | undefined>(
+    undefined,
+  )
+  const [saveCustomerBusy, setSaveCustomerBusy] = useState(false)
+  /** Сумма списания бонусов в MDL (шаг «Детали» → сводка перед отправкой). */
+  const [bonusesToRedeem, setBonusesToRedeem] = useState(0)
+  const [bonusRedeemFieldError, setBonusRedeemFieldError] = useState<
+    string | null
+  >(null)
+  const [bonusRedeemTouched, setBonusRedeemTouched] = useState(false)
+
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const [zoneResult, setZoneResult] = useState<DeliveryZoneCheckResultPos | null>(null)
   const [zoneChecking, setZoneChecking] = useState(false)
+  /** Последние координаты по геокоду зоны POS (для customer_addresses / orders). */
+  const posDeliveryGeoRef = useRef<{ lat: number; lng: number } | null>(null)
 
   const [orderPrep, setOrderPrep] = useState<{ loading: boolean; error: string | null }>({
     loading: true,
@@ -698,12 +821,52 @@ export function OrderForm({
   /** Защита от двойного нажатия «Отправить бегунок» до смены черновика */
   const runnerKitchenLockedRef = useRef(false)
   const [courierModalOpen, setCourierModalOpen] = useState(false)
+  const [courierModalMode, setCourierModalMode] = useState<
+    "assign" | "reassign"
+  >("assign")
+  const [courierContactWarnings, setCourierContactWarnings] = useState<
+    string[]
+  >([])
   const cashSession = useCashSession()
   const [payModalOpen, setPayModalOpen] = useState(false)
   const runnerAlreadySent = listOrder?.status === "cooking"
   const readyForCourierAssign =
     listOrder?.status === "ready" && listOrder?.delivery_mode === "delivery"
   const showPayOrderCta = listOrder?.status === "delivery"
+  const courierButtonGate = useMemo(() => {
+    if (!listOrder) {
+      return { disabled: false as boolean, hints: [] as string[] }
+    }
+    const isPickup = listOrder.delivery_mode === "pickup"
+    const missingPhone = !listOrder.user_phone?.trim()
+    const missingAddress = !isPickup && !listOrder.delivery_address?.trim()
+    const disabled = missingPhone || missingAddress
+    const hints = [
+      missingPhone ? "Укажите телефон клиента" : null,
+      missingAddress ? "Укажите адрес доставки" : null,
+    ].filter((x): x is string => x != null)
+    return { disabled, hints }
+  }, [listOrder])
+  const openCourierModalWithContactWarnings = useCallback(
+    (mode: "assign" | "reassign") => {
+      if (!listOrder) {
+        setCourierContactWarnings([])
+        setCourierModalMode(mode)
+        setCourierModalOpen(true)
+        return
+      }
+      const isPickup = listOrder.delivery_mode === "pickup"
+      const missingPhone = !listOrder.user_phone?.trim()
+      const missingAddress = !isPickup && !listOrder.delivery_address?.trim()
+      if (missingPhone || missingAddress) {
+        return
+      }
+      setCourierContactWarnings([])
+      setCourierModalMode(mode)
+      setCourierModalOpen(true)
+    },
+    [listOrder],
+  )
   const [clearCartBusy, setClearCartBusy] = useState(false)
   const cartInteractionDisabled =
     cartActionBusy || extendSubmitting || clearCartBusy || runnerBusy
@@ -731,6 +894,30 @@ export function OrderForm({
   const deliveryMode = form.watch("deliveryMode")
   const paymentMethod = form.watch("paymentMethod")
   const deliveryAddress = form.watch("deliveryAddress")
+  const userPhoneWatched = form.watch("userPhone")
+
+  useEffect(() => {
+    setCourierContactWarnings([])
+  }, [posOrderId])
+
+  useEffect(() => {
+    if (!listOrder) return
+    const isPickup = listOrder.delivery_mode === "pickup"
+    const missingAddress = !isPickup && !listOrder.delivery_address?.trim()
+    const missingPhone = !listOrder.user_phone?.trim()
+    if (!missingAddress && !missingPhone) {
+      setCourierContactWarnings([])
+    }
+  }, [listOrder])
+
+  useEffect(() => {
+    const isPickupForm = deliveryMode === "pickup"
+    const addrOk = isPickupForm || Boolean(deliveryAddress?.trim())
+    const phoneOk = Boolean(userPhoneWatched?.trim())
+    if (addrOk && phoneOk) {
+      setCourierContactWarnings([])
+    }
+  }, [deliveryMode, deliveryAddress, userPhoneWatched])
 
   const subtotalBani = useMemo(
     () => cart.reduce((s, it) => s + it.price * it.qty, 0),
@@ -767,6 +954,15 @@ export function OrderForm({
   ])
 
   const totalBani = subtotalBani - discountBani + deliveryFeeBani
+  const redeemBaniApplied = Math.round(bonusesToRedeem * 100)
+  const payableAfterBonusBani = Math.max(0, totalBani - redeemBaniApplied)
+
+  const posBonusMaxRedeemable = useMemo(() => {
+    const balance = posBonusBalance ?? 0
+    const orderTotalMdl = totalBani / 100
+    const rate = posMaxRedemptionRate ?? 0.3
+    return Math.floor(Math.min(balance, orderTotalMdl * rate))
+  }, [posBonusBalance, totalBani, posMaxRedemptionRate])
 
   const detailsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -781,6 +977,8 @@ export function OrderForm({
     deliveryFeeBani,
     promoResult: null as import("@/types/database").PromoCode | null,
     promoInput: "",
+    linkedProfileId: undefined as string | null | undefined,
+    bonusesToRedeem: 0,
   })
   detailsPricingRef.current = {
     subtotalBani,
@@ -788,6 +986,8 @@ export function OrderForm({
     deliveryFeeBani,
     promoResult,
     promoInput,
+    linkedProfileId,
+    bonusesToRedeem,
   }
 
   const clearDetailsDebounce = useCallback(() => {
@@ -826,6 +1026,44 @@ export function OrderForm({
     menuLoadedKeyRef.current = null
   }, [posOrderId])
 
+  useEffect(() => {
+    setPosCustomerData(null)
+    setPosBonusBalance(null)
+    setPosCustomerLoading(false)
+    setPosCustomerLookupDone(false)
+    setAddressBookMode("saved")
+    setSelectedSavedAddressId(null)
+    setSaveNewAddressOnSubmit(false)
+    setLinkedProfileId(undefined)
+    setBonusesToRedeem(0)
+    setBonusRedeemFieldError(null)
+    setPosMaxRedemptionRate(null)
+    setBonusRedeemTouched(false)
+  }, [posOrderId])
+
+  const posBonusRedeemAllowed =
+    typeof linkedProfileId === "string" &&
+    (posBonusBalance ?? 0) > 0 &&
+    totalBani > 0
+
+  useEffect(() => {
+    if (!posBonusRedeemAllowed) {
+      setBonusesToRedeem(0)
+      setBonusRedeemFieldError(null)
+    }
+  }, [posBonusRedeemAllowed])
+
+  useEffect(() => {
+    if (!posBonusRedeemAllowed) return
+    setBonusesToRedeem((prev) =>
+      prev > posBonusMaxRedeemable ? posBonusMaxRedeemable : prev,
+    )
+  }, [posBonusRedeemAllowed, posBonusMaxRedeemable])
+
+  useEffect(() => {
+    setBonusRedeemTouched(false)
+  }, [posOrderId, posCustomerData?.profile.id])
+
   /* Debounce-проверка зоны доставки при вводе адреса */
   useEffect(() => {
     if (deliveryMode !== "delivery" || !selectedBrand) {
@@ -850,6 +1088,17 @@ export function OrderForm({
 
     return () => clearTimeout(timer)
   }, [deliveryAddress, deliveryMode, selectedBrand])
+
+  useEffect(() => {
+    if (zoneResult?.status === "in_zone" || zoneResult?.status === "out_of_zone") {
+      posDeliveryGeoRef.current = {
+        lat: zoneResult.lat,
+        lng: zoneResult.lng,
+      }
+    } else {
+      posDeliveryGeoRef.current = null
+    }
+  }, [zoneResult])
 
   /* Сбрасываем зону при переключении режима */
   useEffect(() => {
@@ -1005,12 +1254,29 @@ export function OrderForm({
       setPromoInput(raw.promo_code?.trim() ?? "")
       setPromoError(null)
       if (raw.promo_code?.trim() && sub > 0) {
-        const res = await validatePromoCode(raw.promo_code.trim(), sub)
-        if (cancelled) return
-        if (res.valid) {
-          setPromoResult(res.promo)
+        let promoBrandId: string | null = cfg.dbId
+        if (!promoBrandId) {
+          const { data: br } = await supabase
+            .from("brands")
+            .select("id")
+            .eq("slug", cfg.slug)
+            .maybeSingle()
+          promoBrandId = (br as { id: string } | null)?.id ?? null
+        }
+        if (!promoBrandId) {
+          if (!cancelled) setPromoResult(null)
         } else {
-          setPromoResult(null)
+          const res = await validatePromoCode(
+            raw.promo_code.trim(),
+            sub,
+            promoBrandId,
+          )
+          if (cancelled) return
+          if (res.valid) {
+            setPromoResult(res.promo)
+          } else {
+            setPromoResult(null)
+          }
         }
       } else {
         setPromoResult(null)
@@ -1416,9 +1682,28 @@ export function OrderForm({
       setPromoError("Введите промокод")
       return
     }
+    if (!selectedBrand) {
+      setPromoError("Выберите бренд")
+      return
+    }
+    const brandRow = wizardBrands.find((b) => b.slug === selectedBrand.slug)
+    let promoBrandId = brandRow?.dbId ?? brandId
+    if (!promoBrandId) {
+      const supabase = createClient()
+      const { data: br } = await supabase
+        .from("brands")
+        .select("id")
+        .eq("slug", selectedBrand.slug)
+        .maybeSingle()
+      promoBrandId = (br as { id: string } | null)?.id ?? null
+    }
+    if (!promoBrandId) {
+      setPromoError("Не удалось определить бренд заказа")
+      return
+    }
     setPromoLoading(true)
     setPromoError(null)
-    const res = await validatePromoCode(code, subtotalBani)
+    const res = await validatePromoCode(code, subtotalBani, promoBrandId)
     setPromoLoading(false)
     if (!res.valid) {
       setPromoResult(null)
@@ -1533,6 +1818,7 @@ export function OrderForm({
         deliveryFeeBani: fee,
         promoResult: pr,
         promoInput: pi,
+        linkedProfileId: pid,
       } = detailsPricingRef.current
 
       const changeBani =
@@ -1559,6 +1845,15 @@ export function OrderForm({
         promoCode: pr ? pi.trim().toUpperCase() : undefined,
         discount: disc > 0 ? disc : 0,
         deliveryFee: fee,
+        profileId: pid,
+        delivery_lat:
+          values.deliveryMode === "delivery"
+            ? (posDeliveryGeoRef.current?.lat ?? null)
+            : null,
+        delivery_lng:
+          values.deliveryMode === "delivery"
+            ? (posDeliveryGeoRef.current?.lng ?? null)
+            : null,
       })
       if (!res.success) {
         if (opts?.forSubmit) setSubmitError(res.error)
@@ -1600,6 +1895,169 @@ export function OrderForm({
     },
     [posOrderId, updateOrderLocalState, scheduleDebouncedDetailsSave],
   )
+
+  const phoneDigitsCount = (raw: string) => raw.replace(/\D/g, "").length
+
+  const handleBonusRedeemInputChange = useCallback(
+    (rawStr: string) => {
+      setBonusRedeemTouched(true)
+      const balance = posBonusBalance ?? 0
+      const rate = posMaxRedemptionRate ?? 0.3
+      const maxRedeemable = posBonusMaxRedeemable
+      const t = rawStr.trim().replace(",", ".")
+      if (t === "") {
+        setBonusesToRedeem(0)
+        setBonusRedeemFieldError(null)
+        return
+      }
+      const raw = Number.parseFloat(t)
+      if (!Number.isFinite(raw)) {
+        return
+      }
+      const capped = Math.max(0, Math.min(raw, maxRedeemable))
+      let msg: string | null = null
+      if (raw < 0) {
+        msg = "Сумма не может быть отрицательной"
+      } else if (raw > maxRedeemable) {
+        msg = `Максимум ${maxRedeemable} бонусов (${Math.round(rate * 100)}% от суммы заказа)`
+      }
+      setBonusRedeemFieldError(msg)
+      setBonusesToRedeem(capped)
+    },
+    [posBonusBalance, posMaxRedemptionRate, posBonusMaxRedeemable],
+  )
+
+  const applyAddressRowToForm = useCallback(
+    (row: CustomerAddressRow) => {
+      form.setValue("deliveryAddress", row.address)
+      form.setValue("addressEntrance", row.entrance ?? "")
+      form.setValue("addressFloor", row.floor ?? "")
+      form.setValue("addressApartment", row.apartment ?? "")
+      form.setValue("addressIntercom", row.intercom ?? "")
+      patchDetailsCardAndScheduleSave({
+        delivery_address: row.address,
+        address_entrance: row.entrance?.trim() || null,
+        address_floor: row.floor?.trim() || null,
+        address_apartment: row.apartment?.trim() || null,
+        address_intercom: row.intercom?.trim() || null,
+      })
+    },
+    [form, patchDetailsCardAndScheduleSave],
+  )
+
+  const runPosCustomerLookup = useCallback(
+    async (rawPhone: string) => {
+      const digits = phoneDigitsCount(buildPhoneForSave(rawPhone))
+      if (digits < 11) {
+        setPosCustomerData(null)
+        setPosBonusBalance(null)
+        setPosMaxRedemptionRate(null)
+        setPosCustomerLookupDone(false)
+        setSelectedSavedAddressId(null)
+        setLinkedProfileId(undefined)
+        return
+      }
+      setPosCustomerLoading(true)
+      try {
+        const res = await posLookupCustomer(rawPhone)
+        setPosCustomerLookupDone(true)
+        if (!res.ok) {
+          toast.error(res.error)
+          return
+        }
+        if (!res.customer) {
+          setPosCustomerData(null)
+          setPosBonusBalance(null)
+          setPosMaxRedemptionRate(null)
+          setLinkedProfileId(null)
+          setSelectedSavedAddressId(null)
+          setAddressBookMode("new")
+          window.setTimeout(() => scheduleDebouncedDetailsSave(), 0)
+          return
+        }
+        setPosCustomerData(res.customer)
+        setPosBonusBalance(res.bonusBalance)
+        setPosMaxRedemptionRate(res.maxRedemptionRate ?? 0.3)
+        setLinkedProfileId(res.customer.profile.id)
+        const nm = res.customer.profile.name?.trim()
+        if (nm) {
+          form.setValue("userName", nm)
+          patchDetailsCardAndScheduleSave({ user_name: nm })
+        }
+        const addrs = res.customer.addresses
+        if (addrs.length === 0) {
+          setAddressBookMode("new")
+          setSelectedSavedAddressId(null)
+          const legacy = res.customer.profile.address?.trim()
+          if (legacy) {
+            form.setValue("deliveryAddress", legacy)
+            patchDetailsCardAndScheduleSave({
+              delivery_address: legacy,
+            })
+          }
+          window.setTimeout(() => scheduleDebouncedDetailsSave(), 0)
+          return
+        }
+        setAddressBookMode("saved")
+        const first = addrs[0]!
+        setSelectedSavedAddressId(first.id)
+        applyAddressRowToForm(first)
+        window.setTimeout(() => scheduleDebouncedDetailsSave(), 0)
+      } finally {
+        setPosCustomerLoading(false)
+      }
+    },
+    [applyAddressRowToForm, form, patchDetailsCardAndScheduleSave, scheduleDebouncedDetailsSave],
+  )
+
+  const phoneLookupDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+
+  useEffect(() => {
+    if (step !== 3) return
+    if (phoneLookupDebounceRef.current !== undefined) {
+      clearTimeout(phoneLookupDebounceRef.current)
+    }
+    phoneLookupDebounceRef.current = setTimeout(() => {
+      phoneLookupDebounceRef.current = undefined
+      void runPosCustomerLookup(userPhoneWatched)
+    }, 500)
+    return () => {
+      if (phoneLookupDebounceRef.current !== undefined) {
+        clearTimeout(phoneLookupDebounceRef.current)
+      }
+    }
+  }, [step, userPhoneWatched, runPosCustomerLookup])
+
+  const handleSaveNewPosCustomer = useCallback(async () => {
+    const v = form.getValues()
+    if (!v.userPhone.trim()) {
+      toast.error("Введите телефон")
+      return
+    }
+    if (!v.userName.trim()) {
+      toast.error("Введите имя")
+      return
+    }
+    setSaveCustomerBusy(true)
+    try {
+      const res = await posSaveCustomer({
+        phone: v.userPhone,
+        name: v.userName.trim(),
+        address: v.deliveryAddress?.trim() || undefined,
+      })
+      if (!res.ok) {
+        toast.error(res.error)
+        return
+      }
+      toast.success("Клиент сохранён")
+      setLinkedProfileId(res.profile.id)
+      await runPosCustomerLookup(v.userPhone)
+    } finally {
+      setSaveCustomerBusy(false)
+    }
+  }, [form, runPosCustomerLookup])
 
   const navigateToStep = (target: 1 | 2 | 3) => {
     if (target === step) return
@@ -1747,11 +2205,20 @@ export function OrderForm({
       const cartOk = await persistCartToServer()
       if (!cartOk) return
 
-      const res = await sendPosDraftToKitchen({ orderId: posOrderId })
+      const res = await sendPosDraftToKitchen({
+        orderId: posOrderId,
+        bonusesToRedeem: detailsPricingRef.current.bonusesToRedeem,
+        profileId:
+          typeof detailsPricingRef.current.linkedProfileId === "string"
+            ? detailsPricingRef.current.linkedProfileId
+            : undefined,
+      })
       if (!res.success) {
         toast.error(res.error)
         return
       }
+      setBonusesToRedeem(0)
+      setBonusRedeemFieldError(null)
       await refetchOrdersPanel()
       toast.success(`Заказ №${res.orderNumber} отправлен на кухню`)
     } finally {
@@ -1796,12 +2263,49 @@ export function OrderForm({
         return
       }
 
-      const res = await sendPosDraftToKitchen({ orderId: posOrderId })
+      const profileForAddr = detailsPricingRef.current.linkedProfileId
+      if (
+        saveNewAddressOnSubmit &&
+        values.deliveryMode === "delivery" &&
+        profileForAddr &&
+        addressBookMode === "new" &&
+        values.deliveryAddress?.trim()
+      ) {
+        const geo = posDeliveryGeoRef.current
+        const addrRes = await posSaveCustomerAddress({
+          profileId: profileForAddr,
+          address: {
+            address: values.deliveryAddress.trim(),
+            entrance: values.addressEntrance?.trim() || null,
+            floor: values.addressFloor?.trim() || null,
+            apartment: values.addressApartment?.trim() || null,
+            intercom: values.addressIntercom?.trim() || null,
+            delivery_lat: geo?.lat ?? null,
+            delivery_lng: geo?.lng ?? null,
+          },
+          setAsDefault: false,
+        })
+        if (!addrRes.ok) {
+          toast.error(addrRes.error)
+        }
+      }
+
+      const res = await sendPosDraftToKitchen({
+        orderId: posOrderId,
+        bonusesToRedeem: detailsPricingRef.current.bonusesToRedeem,
+        profileId:
+          typeof detailsPricingRef.current.linkedProfileId === "string"
+            ? detailsPricingRef.current.linkedProfileId
+            : undefined,
+      })
 
       if (!res.success) {
         setSubmitError(res.error)
         return
       }
+
+      setBonusesToRedeem(0)
+      setBonusRedeemFieldError(null)
 
       await refetchOrdersPanel()
       toast.success(`Заказ №${res.orderNumber} отправлен на кухню`)
@@ -2114,12 +2618,42 @@ export function OrderForm({
               errorBanner={extendError}
               cartInteractionDisabled={cartInteractionDisabled}
               onCourierAssign={
-                readyForCourierAssign ? () => setCourierModalOpen(true) : undefined
+                readyForCourierAssign
+                  ? () => {
+                      openCourierModalWithContactWarnings("assign")
+                    }
+                  : undefined
               }
               onPayOrder={
                 showPayOrderCta ? () => setPayModalOpen(true) : undefined
               }
               payOrderDisabled={!cashSession}
+              assignedCourierId={
+                showPayOrderCta &&
+                listOrder?.delivery_mode === "delivery" &&
+                listOrder?.courier_id
+                  ? listOrder.courier_id
+                  : null
+              }
+              assignedCourierName={
+                showPayOrderCta &&
+                listOrder?.delivery_mode === "delivery" &&
+                listOrder?.courier_id
+                  ? listOrder.courier_name
+                  : null
+              }
+              onChangeAssignedCourier={
+                showPayOrderCta &&
+                listOrder?.delivery_mode === "delivery" &&
+                listOrder?.courier_id
+                  ? () => {
+                      openCourierModalWithContactWarnings("reassign")
+                    }
+                  : undefined
+              }
+              courierButtonDisabled={courierButtonGate.disabled}
+              courierButtonHints={courierButtonGate.hints}
+              courierContactWarnings={courierContactWarnings}
               onRunnerSend={
                 listOrder?.status === "draft"
                   ? handleRunnerFromStep2
@@ -2164,13 +2698,29 @@ export function OrderForm({
           <AssignCourierModal
             orderId={posOrderId}
             orderNumber={orderNumber}
+            mode={courierModalMode}
+            currentCourierId={
+              courierModalMode === "reassign"
+                ? (listOrder?.courier_id ?? null)
+                : null
+            }
             isOpen={courierModalOpen}
             onClose={() => setCourierModalOpen(false)}
-            onAssigned={() => {
-              updateOrderLocalState(posOrderId, {
-                status: "delivery",
-                updated_at: new Date().toISOString(),
-              })
+            onAssigned={(courierId, courierName) => {
+              if (courierModalMode === "assign") {
+                updateOrderLocalState(posOrderId, {
+                  status: "delivery",
+                  courier_id: courierId,
+                  courier_name: courierName,
+                  updated_at: new Date().toISOString(),
+                })
+              } else {
+                updateOrderLocalState(posOrderId, {
+                  courier_id: courierId,
+                  courier_name: courierName,
+                  updated_at: new Date().toISOString(),
+                })
+              }
               void refetchOrdersPanel()
             }}
           />
@@ -2329,6 +2879,10 @@ export function OrderForm({
                                     ),
                                   })
                                 }}
+                                onBlur={(e) => {
+                                  field.onBlur()
+                                  void runPosCustomerLookup(e.target.value)
+                                }}
                               />
                             </div>
                           </FormControl>
@@ -2338,8 +2892,152 @@ export function OrderForm({
                     />
                   </div>
 
+                  <div className="mt-2 flex min-h-5 flex-wrap items-center gap-2">
+                    {posCustomerLoading ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        Поиск клиента…
+                      </span>
+                    ) : null}
+                    {posCustomerLookupDone &&
+                    !posCustomerData &&
+                    phoneDigitsCount(buildPhoneForSave(userPhoneWatched)) >=
+                      11 ? (
+                      <span className="rounded-md bg-[#f2f2f2] px-2 py-0.5 text-[11px] text-[#808080]">
+                        Новый клиент
+                      </span>
+                    ) : null}
+                    {posCustomerData ? (
+                      <span className="text-[12px] font-bold tabular-nums text-[#242424]">
+                        Бонусы: {posBonusBalance ?? 0}
+                      </span>
+                    ) : null}
+                    {posBonusRedeemAllowed ? (
+                      <div className="mt-2 w-full max-w-[280px] space-y-1">
+                        <label
+                          htmlFor="pos-bonus-redeem"
+                          className="text-[11px] text-muted-foreground"
+                        >
+                          Списать бонусов
+                        </label>
+                        {!bonusRedeemTouched ? (
+                          <p className="text-[11px] text-[#808080]">
+                            Можно списать до {posBonusMaxRedeemable} бонусов (
+                            {Math.round((posMaxRedemptionRate ?? 0.3) * 100)}% от
+                            суммы)
+                          </p>
+                        ) : null}
+                        <Input
+                          id="pos-bonus-redeem"
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          inputMode="decimal"
+                          className="h-8 font-mono text-xs tabular-nums"
+                          value={bonusesToRedeem === 0 ? "" : bonusesToRedeem}
+                          onChange={(e) =>
+                            handleBonusRedeemInputChange(e.target.value)
+                          }
+                        />
+                        {bonusRedeemFieldError ? (
+                          <p className="text-[11px] text-red-600">
+                            {bonusRedeemFieldError}
+                          </p>
+                        ) : null}
+                        <p className="text-[11px] text-[#808080]">
+                          К оплате: {formatMdlAmount(payableAfterBonusBani)} MDL
+                          <span className="mx-1.5 opacity-50">|</span>
+                          Списывается бонусов: {bonusesToRedeem}
+                        </p>
+                      </div>
+                    ) : null}
+                    {posCustomerLookupDone &&
+                    !posCustomerData &&
+                    !posCustomerLoading &&
+                    phoneDigitsCount(buildPhoneForSave(userPhoneWatched)) >=
+                      11 ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                          saveCustomerBusy || !form.getValues("userName").trim()
+                        }
+                        className="h-7 border-[#242424]/20 text-[11px]"
+                        onClick={() => void handleSaveNewPosCustomer()}
+                      >
+                        {saveCustomerBusy ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          "Сохранить клиента"
+                        )}
+                      </Button>
+                    ) : null}
+                  </div>
+
                   {deliveryMode === "delivery" ? (
                     <>
+                      {posCustomerData &&
+                      posCustomerData.addresses.length > 1 &&
+                      addressBookMode === "saved" ? (
+                        <div className="mt-3 space-y-1.5">
+                          <p className="text-xs text-muted-foreground">
+                            Сохранённые адреса
+                          </p>
+                          <Select
+                            value={selectedSavedAddressId ?? ""}
+                            onValueChange={(id) => {
+                              if (id === "__new__") {
+                                setAddressBookMode("new")
+                                setSelectedSavedAddressId(null)
+                                setSaveNewAddressOnSubmit(false)
+                                form.setValue("deliveryAddress", "")
+                                form.setValue("addressEntrance", "")
+                                form.setValue("addressFloor", "")
+                                form.setValue("addressApartment", "")
+                                form.setValue("addressIntercom", "")
+                                patchDetailsCardAndScheduleSave({
+                                  delivery_address: null,
+                                  address_entrance: null,
+                                  address_floor: null,
+                                  address_apartment: null,
+                                  address_intercom: null,
+                                })
+                                return
+                              }
+                              const row = posCustomerData.addresses.find(
+                                (a) => a.id === id,
+                              )
+                              if (row) {
+                                setSelectedSavedAddressId(id)
+                                setAddressBookMode("saved")
+                                setSaveNewAddressOnSubmit(false)
+                                applyAddressRowToForm(row)
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="h-9 w-full text-left text-sm">
+                              <SelectValue placeholder="Выберите адрес" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {posCustomerData.addresses.map((a) => (
+                                <SelectItem key={a.id} value={a.id}>
+                                  {a.label
+                                    ? `${a.label} — ${a.address}`
+                                    : a.address}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="__new__">+ Новый адрес</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
+                      {posCustomerData &&
+                      posCustomerData.addresses.length === 1 &&
+                      addressBookMode === "saved" ? (
+                        <p className="mt-2 text-[11px] text-[#808080]">
+                          Адрес из профиля клиента (можно изменить)
+                        </p>
+                      ) : null}
                       <FormField
                         control={form.control}
                         name="deliveryAddress"
@@ -2467,6 +3165,24 @@ export function OrderForm({
                           )}
                         />
                       </div>
+                      {typeof linkedProfileId === "string" &&
+                      addressBookMode === "new" ? (
+                        <div className="mt-3 flex items-center gap-2">
+                          <Checkbox
+                            id="pos-save-new-address"
+                            checked={saveNewAddressOnSubmit}
+                            onCheckedChange={(c) =>
+                              setSaveNewAddressOnSubmit(c === true)
+                            }
+                          />
+                          <label
+                            htmlFor="pos-save-new-address"
+                            className="cursor-pointer text-xs text-[#808080]"
+                          >
+                            Сохранить адрес
+                          </label>
+                        </div>
+                      ) : null}
                       <DeliveryZoneInfo
                         result={zoneResult}
                         checking={zoneChecking}
@@ -2655,6 +3371,14 @@ export function OrderForm({
                     </dd>
                   </div>
                 ) : null}
+                {bonusesToRedeem > 0 ? (
+                  <div className="flex justify-between gap-2 text-emerald-700">
+                    <dt>Списание бонусов</dt>
+                    <dd className="font-mono tabular-nums">
+                      −{formatMdl(redeemBaniApplied)}
+                    </dd>
+                  </div>
+                ) : null}
                 <Separator className="my-1" />
                 <div className="flex justify-between gap-2 text-sm font-bold">
                   <dt>Итого</dt>
@@ -2662,6 +3386,14 @@ export function OrderForm({
                     {formatMdl(totalBani)}
                   </dd>
                 </div>
+                {bonusesToRedeem > 0 ? (
+                  <div className="flex justify-between gap-2 text-xs font-semibold text-[#242424]">
+                    <dt>К оплате</dt>
+                    <dd className="font-mono tabular-nums">
+                      {formatMdl(payableAfterBonusBani)}
+                    </dd>
+                  </div>
+                ) : null}
               </dl>
               {showPayOrderCta ? (
                 <button

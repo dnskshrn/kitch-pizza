@@ -3,12 +3,27 @@
 import { PosFoodServiceLogo } from "@/components/pos/pos-food-service-logo"
 import { KdsOrderCard } from "@/components/pos/kds/kds-order-card"
 import {
+  filterKdsOrderForWorkshops,
+  KDS_ORDER_QUERY_SELECT,
+  KDS_WORKSHOP_OPTIONS,
+  KDS_WORKSHOPS_STORAGE_KEY,
+  normalizeKdsOrderItemFromRaw,
+  parseKdsWorkshopsFromStorage,
   POS_KDS_BRAND_STORAGE_KEY,
   isKdsScheduledOrder,
   scheduledSortKey,
+  type KdsOrderItemRow,
   type KdsOrderRow,
+  type KdsWorkshopId,
 } from "@/components/pos/kds/types"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { brands as staticBrands, getBrandBySlug, normalizePosBrandSlug } from "@/brands/index"
 import { fetchKdsOrderByIdPos } from "@/lib/actions/pos/fetch-kds-orders"
 import {
@@ -20,7 +35,13 @@ import { createClient } from "@/lib/supabase/client"
 import { Toaster } from "@/components/ui/sonner"
 import { MoreVertical } from "lucide-react"
 import { toast } from "sonner"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 
 function sortKdsOrders(rows: KdsOrderRow[]): KdsOrderRow[] {
   const asap = rows
@@ -90,7 +111,10 @@ function normalizeOrderRow(raw: unknown): KdsOrderRow | null {
   if (!raw || typeof raw !== "object") return null
   const o = raw as Record<string, unknown>
   const slug = brandSlugFromEmbed(o.brands)
-  const items = Array.isArray(o.order_items) ? o.order_items : []
+  const itemsRaw = Array.isArray(o.order_items) ? o.order_items : []
+  const order_items = itemsRaw
+    .map(normalizeKdsOrderItemFromRaw)
+    .filter((x): x is KdsOrderItemRow => x != null)
   return {
     id: String(o.id),
     order_number: Number(o.order_number),
@@ -104,7 +128,7 @@ function normalizeOrderRow(raw: unknown): KdsOrderRow | null {
         ? null
         : String(o.cooking_started_at),
     brands: slug ? { slug } : null,
-    order_items: items as KdsOrderRow["order_items"],
+    order_items,
   }
 }
 
@@ -120,6 +144,8 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
   const [brandId, setBrandId] = useState<string | null>(null)
 
   const [orders, setOrders] = useState<KdsOrderRow[]>([])
+  const [workshopSelection, setWorkshopSelection] = useState<string[]>([])
+  const [kdsSettingsOpen, setKdsSettingsOpen] = useState(false)
   const [undoExpiresByOrderId, setUndoExpiresByOrderId] = useState<
     Record<string, number>
   >({})
@@ -132,6 +158,62 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     () => getBrandBySlug(brandSlug),
     [brandSlug],
   )
+
+  useEffect(() => {
+    try {
+      setWorkshopSelection(
+        parseKdsWorkshopsFromStorage(
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(KDS_WORKSHOPS_STORAGE_KEY)
+            : null,
+        ),
+      )
+    } catch {
+      setWorkshopSelection([])
+    }
+  }, [])
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== KDS_WORKSHOPS_STORAGE_KEY) return
+      setWorkshopSelection(parseKdsWorkshopsFromStorage(e.newValue))
+    }
+    window.addEventListener("storage", onStorage)
+    return () => window.removeEventListener("storage", onStorage)
+  }, [])
+
+  const toggleWorkshop = useCallback((id: KdsWorkshopId, checked: boolean) => {
+    setWorkshopSelection((prev) => {
+      const next = checked
+        ? [...new Set([...prev, id])]
+        : prev.filter((x) => x !== id)
+      try {
+        window.localStorage.setItem(
+          KDS_WORKSHOPS_STORAGE_KEY,
+          JSON.stringify(next),
+        )
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
+  }, [])
+
+  const onKdsMenuOpenChange = useCallback((open: boolean) => {
+    setKdsSettingsOpen(open)
+    if (!open) return
+    try {
+      setWorkshopSelection(
+        parseKdsWorkshopsFromStorage(
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(KDS_WORKSHOPS_STORAGE_KEY)
+            : null,
+        ),
+      )
+    } catch {
+      setWorkshopSelection([])
+    }
+  }, [])
 
   useEffect(() => {
     try {
@@ -261,9 +343,7 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     const supabase = createClient()
     const { data, error } = await supabase
       .from("orders")
-      .select(
-        "id, order_number, brand_id, status, scheduled_time, updated_at, cooking_started_at, brands(slug), order_items(id, item_name, quantity, price, size, toppings)",
-      )
+      .select(KDS_ORDER_QUERY_SELECT)
       .eq("status", "cooking")
       .order("updated_at", { ascending: true })
     if (error) {
@@ -414,6 +494,12 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     return normalizePosBrandSlug(raw ?? activeBrandConfig.slug)
   }, [activeBrandConfig.slug])
 
+  const visibleOrders = useMemo(() => {
+    return orders
+      .map((o) => filterKdsOrderForWorkshops(o, workshopSelection))
+      .filter((o): o is KdsOrderRow => o != null)
+  }, [orders, workshopSelection])
+
   return (
     <div
       className="fixed inset-0 z-[200] flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#111]"
@@ -432,15 +518,66 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
             <KdsClock />
           </div>
           <div className="flex min-w-0 flex-1 items-center justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-9 shrink-0 rounded-lg text-white hover:bg-white/10 hover:text-white sm:size-10"
-              aria-label="Меню"
-            >
-              <MoreVertical className="size-5 sm:size-6" />
-            </Button>
+            <Popover open={kdsSettingsOpen} onOpenChange={onKdsMenuOpenChange}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-9 shrink-0 rounded-lg text-white hover:bg-white/10 hover:text-white sm:size-10"
+                  aria-label="Меню"
+                >
+                  <MoreVertical className="size-5 sm:size-6" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={8}
+                className="z-[320] w-[min(320px,calc(100vw-2rem))] gap-0 border border-white/15 bg-[#242424] p-0 text-white shadow-lg ring-0"
+              >
+                <section
+                  className="flex flex-col gap-3 p-4"
+                  aria-labelledby="kds-menu-workshop-filter-heading"
+                >
+                  <div className="space-y-1">
+                    <h2
+                      id="kds-menu-workshop-filter-heading"
+                      className="text-[15px] font-bold leading-tight"
+                    >
+                      Фильтр цеха
+                    </h2>
+                    <p className="text-[13px] leading-snug text-white/65">
+                      Ничего не выбрано — все позиции. Иначе только выбранные
+                      цеха; без цеха в категории — всегда показываются.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {KDS_WORKSHOP_OPTIONS.map((opt) => {
+                      const cbId = `kds-workshop-${opt.id}`
+                      const checked = workshopSelection.includes(opt.id)
+                      return (
+                        <div key={opt.id} className="flex items-center gap-3">
+                          <Checkbox
+                            id={cbId}
+                            checked={checked}
+                            onCheckedChange={(v) =>
+                              toggleWorkshop(opt.id, v === true)
+                            }
+                            className="border-white/40 data-checked:border-[#ccff00] data-checked:bg-[#ccff00] data-checked:text-[#111]"
+                          />
+                          <Label
+                            htmlFor={cbId}
+                            className="cursor-pointer text-[15px] font-medium text-white"
+                          >
+                            {opt.label}
+                          </Label>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              </PopoverContent>
+            </Popover>
           </div>
         </nav>
       </div>
@@ -456,7 +593,7 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
 
         <div className="flex min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 [-webkit-overflow-scrolling:touch] sm:px-5 sm:pb-5">
           <div className="flex h-full min-h-0 items-stretch gap-5">
-            {orders.map((order) => (
+            {visibleOrders.map((order) => (
               <KdsOrderCard
                 key={order.id}
                 order={order}

@@ -171,7 +171,7 @@ function TheSpotDesktopHeader({
         </button>
 
         <div className="hidden shrink-0 lg:flex">
-          <StorefrontTopBarSchedule />
+          <StorefrontTopBarSchedule brandSlug={brandSlug} />
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-2 lg:gap-3">

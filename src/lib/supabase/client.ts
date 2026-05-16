@@ -6,3 +6,8 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 }
+
+/** Алиас для POS / клиентские подписки Realtime на anon-ключе. */
+export function createBrowserSupabaseClient() {
+  return createClient()
+}

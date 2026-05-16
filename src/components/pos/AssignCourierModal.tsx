@@ -6,19 +6,28 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { assignCourierPos } from "@/lib/actions/pos/assign-courier-pos"
+import {
+  assignCourierPos,
+  changeCourierPos,
+} from "@/lib/actions/pos/assign-courier-pos"
 import { createClient } from "@/lib/supabase/client"
 import { Loader2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
 type OnlineCourier = { id: string; name: string; phone: string | null }
 
+export type AssignCourierModalMode = "assign" | "reassign"
+
 type Props = {
   orderId: string
   orderNumber: number
   isOpen: boolean
   onClose: () => void
-  onAssigned: (courierId: string) => void
+  onAssigned: (courierId: string, courierName: string) => void
+  /** Первичное назначение (`ready` → `delivery`) или смена у заказа в доставке */
+  mode?: AssignCourierModalMode
+  /** Текущий курьер при `reassign` — тот же в списке игнорируем без запроса */
+  currentCourierId?: string | null
 }
 
 export function AssignCourierModal({
@@ -27,6 +36,8 @@ export function AssignCourierModal({
   isOpen,
   onClose,
   onAssigned,
+  mode = "assign",
+  currentCourierId = null,
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [couriers, setCouriers] = useState<OnlineCourier[]>([])
@@ -73,17 +84,32 @@ export function AssignCourierModal({
   }, [isOpen])
 
   const handleAssign = async (courierId: string) => {
+    if (mode === "reassign" && courierId === currentCourierId) {
+      onClose()
+      return
+    }
+
+    const picked = couriers.find((c) => c.id === courierId)
+
     setAssigningId(courierId)
     setError(null)
-    const result = await assignCourierPos({ orderId, courierId })
+    const result =
+      mode === "reassign"
+        ? await changeCourierPos({ orderId, courierId })
+        : await assignCourierPos({ orderId, courierId })
     if (!result.success) {
       setError(result.error)
       setAssigningId(null)
       return
     }
-    onAssigned(courierId)
+    onAssigned(courierId, picked?.name ?? "—")
     onClose()
   }
+
+  const title =
+    mode === "reassign"
+      ? `Сменить курьера · #${orderNumber}`
+      : `Курьер — Заказ #${orderNumber}`
 
   return (
     <Dialog
@@ -94,9 +120,7 @@ export function AssignCourierModal({
     >
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="text-sm font-bold">
-            Курьер — Заказ #{orderNumber}
-          </DialogTitle>
+          <DialogTitle className="text-sm font-bold">{title}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-2 py-1">

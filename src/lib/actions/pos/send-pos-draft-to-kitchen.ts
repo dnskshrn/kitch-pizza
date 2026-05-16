@@ -19,6 +19,8 @@ export type SendPosDraftToKitchenResult =
   | { success: true; orderNumber: number }
   | { success: false; error: string }
 
+const SENDABLE_POS_STATUSES = ["draft", "new", "confirmed"] as const
+
 export async function sendPosDraftToKitchen(
   input: SendPosDraftToKitchenInput,
 ): Promise<SendPosDraftToKitchenResult> {
@@ -51,23 +53,46 @@ export async function sendPosDraftToKitchen(
 
   const { data: orderBefore, error: orderLoadError } = await supabase
     .from("orders")
-    .select("total, profile_id")
+    .select("status, total, profile_id, bonuses_redeemed, order_number")
     .eq("id", input.orderId)
-    .eq("status", "draft")
     .maybeSingle()
 
   if (orderLoadError || !orderBefore) {
     console.error("[sendPosDraftToKitchen] load order", orderLoadError?.message)
-    return { success: false, error: "Черновик уже отправлен или недоступен" }
+    return { success: false, error: "Заказ недоступен" }
   }
 
-  const totalBani = Math.max(0, Math.round((orderBefore as { total: number }).total ?? 0))
+  const orderStatus = String((orderBefore as { status: string }).status)
+  if (orderStatus === "cooking") {
+    return {
+      success: true,
+      orderNumber: Number((orderBefore as { order_number: number }).order_number),
+    }
+  }
+
+  if (!SENDABLE_POS_STATUSES.includes(orderStatus as (typeof SENDABLE_POS_STATUSES)[number])) {
+    return { success: false, error: "Заказ уже отправлен или недоступен" }
+  }
+
+  const storedTotalBani = Math.max(
+    0,
+    Math.round((orderBefore as { total: number }).total ?? 0),
+  )
+  const existingPtsRaw = (orderBefore as { bonuses_redeemed: unknown })
+    .bonuses_redeemed
+  const existingBonusPts =
+    typeof existingPtsRaw === "number" && Number.isFinite(existingPtsRaw)
+      ? Math.max(0, Math.floor(existingPtsRaw))
+      : Math.max(0, Math.floor(Number(existingPtsRaw) || 0))
+  /** `orders.total` — нетто; восстанавливаем сумму до списания, чтобы не вычитать бонусы дважды. */
+  const grossBeforeRedeemBani = storedTotalBani + existingBonusPts * 100
+
   const rawMdl = Math.max(0, Number(input.bonusesToRedeem ?? 0))
   const redeemBani = Math.round(rawMdl * 100)
-  const maxPointsFromTotal = Math.floor(totalBani / 100)
-  const redeemPoints = Math.min(Math.floor(redeemBani / 100), maxPointsFromTotal)
+  const maxPointsFromGross = Math.floor(grossBeforeRedeemBani / 100)
+  const redeemPoints = Math.min(Math.floor(redeemBani / 100), maxPointsFromGross)
   const appliedBani = redeemPoints * 100
-  const newTotalBani = Math.max(0, totalBani - appliedBani)
+  const newTotalBani = Math.max(0, grossBeforeRedeemBani - appliedBani)
 
   const profileIdForRedeem =
     typeof input.profileId === "string" && input.profileId.trim()
@@ -86,7 +111,7 @@ export async function sendPosDraftToKitchen(
       bonuses_redeemed: redeemPoints,
     })
     .eq("id", input.orderId)
-    .eq("status", "draft")
+    .in("status", [...SENDABLE_POS_STATUSES])
     .select("order_number")
     .maybeSingle()
 
@@ -96,9 +121,20 @@ export async function sendPosDraftToKitchen(
   }
 
   if (!updated) {
+    const { data: currentOrder } = await supabase
+      .from("orders")
+      .select("status, order_number")
+      .eq("id", input.orderId)
+      .maybeSingle()
+    const current = currentOrder as
+      | { status: string; order_number: number }
+      | null
+    if (current?.status === "cooking") {
+      return { success: true, orderNumber: Number(current.order_number) }
+    }
     return {
       success: false,
-      error: "Черновик уже отправлен или недоступен",
+      error: "Заказ уже отправлен или недоступен",
     }
   }
 

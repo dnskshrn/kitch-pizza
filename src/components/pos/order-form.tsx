@@ -1084,6 +1084,7 @@ export function OrderForm({
   )
 
   const totalBani = effectiveEngineOutput.totalBani ?? 0
+  const runnerHasPricedItems = effectiveEngineOutput.itemSubtotalBani > 0
 
   const skipWebsitePromoSeedResolve = Boolean(
     listOrder?.source === "website" && listOrder?.promo_code?.trim(),
@@ -2105,6 +2106,7 @@ export function OrderForm({
   const persistBrandOrError = async (): Promise<boolean> => {
     if (!selectedBrand) {
       setExtendError("Выберите бренд")
+      toast.error("Выберите бренд")
       return false
     }
     const res = await updateOrderBrandPos({
@@ -2113,6 +2115,7 @@ export function OrderForm({
     })
     if (!res.success) {
       setExtendError(res.error)
+      toast.error(res.error)
       return false
     }
     setExtendError(null)
@@ -2123,6 +2126,7 @@ export function OrderForm({
   const persistCartToServer = async (): Promise<boolean> => {
     if (!brandId || !selectedBrand) {
       setExtendError("Сначала выберите бренд")
+      toast.error("Сначала выберите бренд")
       return false
     }
     setExtendError(null)
@@ -2149,6 +2153,7 @@ export function OrderForm({
       })
       if (!res.success) {
         setExtendError(res.error)
+        toast.error(res.error)
         return false
       }
       await refreshCartFromDb()
@@ -2624,8 +2629,13 @@ export function OrderForm({
       }
       setBonusesToRedeem(0)
       setBonusRedeemFieldError(null)
-      await refetchOrdersPanel()
       toast.success(`Заказ №${res.orderNumber} отправлен на кухню`)
+      void refetchOrdersPanel().catch(() => undefined)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Не удалось отправить заказ"
+      setExtendError(message)
+      toast.error(message)
     } finally {
       setRunnerBusy(false)
       runnerKitchenLockedRef.current = false
@@ -2712,8 +2722,13 @@ export function OrderForm({
       setBonusesToRedeem(0)
       setBonusRedeemFieldError(null)
 
-      await refetchOrdersPanel()
       toast.success(`Заказ №${res.orderNumber} отправлен на кухню`)
+      void refetchOrdersPanel().catch(() => undefined)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Не удалось отправить заказ"
+      setSubmitError(message)
+      toast.error(message)
     } finally {
       setRunnerBusy(false)
       setSubmitting(false)
@@ -3120,9 +3135,10 @@ export function OrderForm({
               runnerDisabled={
                 runnerAlreadySent ||
                 cart.length === 0 ||
+                cartActionBusy ||
                 extendSubmitting ||
                 !selectedBrand ||
-                (effectiveEngineOutput.totalBani ?? 0) <= 0
+                !runnerHasPricedItems
               }
               runnerBusy={runnerBusy}
               runnerAlreadySent={runnerAlreadySent}
@@ -3771,7 +3787,8 @@ export function OrderForm({
                   disabled={
                     runnerAlreadySent ||
                     submitting ||
-                    (effectiveEngineOutput.totalBani ?? 0) <= 0
+                    cartActionBusy ||
+                    !runnerHasPricedItems
                   }
                   className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
                 >

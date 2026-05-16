@@ -1,4 +1,9 @@
 const POS_NEW_ORDER_CHIME_URL = "/pos-new-order-chime.wav"
+const HTML_CHIME_VOLUME = 1
+const NEW_ORDER_PING_GAIN = 0.62
+const STATUS_UPDATE_PING_GAIN = 0.5
+
+type PosAlertSoundKind = "new-order" | "status-update"
 
 type AudioWindow = typeof window & {
   webkitAudioContext?: typeof AudioContext
@@ -26,12 +31,12 @@ function getChimeAudio(): HTMLAudioElement | null {
 
   const audio = new Audio(POS_NEW_ORDER_CHIME_URL)
   audio.preload = "auto"
-  audio.volume = 0.9
+  audio.volume = HTML_CHIME_VOLUME
   chimeAudio = audio
   return audio
 }
 
-function playOscillatorPing(ctx: AudioContext): void {
+function playNewOrderPing(ctx: AudioContext): void {
   const now = ctx.currentTime
   const osc = ctx.createOscillator()
   const gain = ctx.createGain()
@@ -43,10 +48,36 @@ function playOscillatorPing(ctx: AudioContext): void {
   osc.frequency.setValueAtTime(1175, now + 0.12)
   osc.frequency.setValueAtTime(988, now + 0.24)
   gain.gain.setValueAtTime(0.0001, now)
-  gain.gain.exponentialRampToValueAtTime(0.34, now + 0.025)
+  gain.gain.exponentialRampToValueAtTime(NEW_ORDER_PING_GAIN, now + 0.025)
   gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5)
   osc.start(now)
   osc.stop(now + 0.5)
+}
+
+function playStatusUpdatePing(ctx: AudioContext): void {
+  const now = ctx.currentTime
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.type = "triangle"
+  osc.frequency.setValueAtTime(660, now)
+  osc.frequency.setValueAtTime(880, now + 0.09)
+  osc.frequency.setValueAtTime(660, now + 0.18)
+  gain.gain.setValueAtTime(0.0001, now)
+  gain.gain.exponentialRampToValueAtTime(STATUS_UPDATE_PING_GAIN, now + 0.02)
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36)
+  osc.start(now)
+  osc.stop(now + 0.36)
+}
+
+function playOscillatorPing(ctx: AudioContext, kind: PosAlertSoundKind): void {
+  if (kind === "status-update") {
+    playStatusUpdatePing(ctx)
+    return
+  }
+  playNewOrderPing(ctx)
 }
 
 async function playHtmlChime(): Promise<boolean> {
@@ -114,7 +145,7 @@ export async function unlockPosAlertSound(): Promise<boolean> {
   return unlocked
 }
 
-export async function playPosAlertSound(): Promise<boolean> {
+async function playPosAlertSoundKind(kind: PosAlertSoundKind): Promise<boolean> {
   const ctx = getAudioContext()
   let played = false
 
@@ -123,7 +154,7 @@ export async function playPosAlertSound(): Promise<boolean> {
       await ctx.resume()
     }
     if (ctx?.state === "running") {
-      playOscillatorPing(ctx)
+      playOscillatorPing(ctx, kind)
       played = true
       unlocked = true
     }
@@ -131,11 +162,25 @@ export async function playPosAlertSound(): Promise<boolean> {
     // Fallback ниже попробует HTMLAudio.
   }
 
-  const htmlPlayed = await playHtmlChime()
-  if (htmlPlayed) {
-    played = true
-    unlocked = true
+  if (!played && kind === "new-order") {
+    const htmlPlayed = await playHtmlChime()
+    if (htmlPlayed) {
+      played = true
+      unlocked = true
+    }
   }
 
   return played
+}
+
+export async function playPosNewOrderSound(): Promise<boolean> {
+  return playPosAlertSoundKind("new-order")
+}
+
+export async function playPosStatusUpdateSound(): Promise<boolean> {
+  return playPosAlertSoundKind("status-update")
+}
+
+export async function playPosAlertSound(): Promise<boolean> {
+  return playPosNewOrderSound()
 }

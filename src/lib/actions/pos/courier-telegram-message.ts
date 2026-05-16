@@ -2,6 +2,9 @@ import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zon
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import { editMessageText, sendMessage } from "@/lib/telegram/bot"
 
+export const COURIER_ORDER_ASSIGNMENT_SELECT =
+  "id, status, delivery_mode, courier_id, order_number, total, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
+
 export const COURIER_ORDER_TELEGRAM_SELECT =
   "id, status, delivery_mode, courier_id, courier_tg_chat_id, courier_tg_message_id, courier_tg_message_updated_at, order_number, total, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
 

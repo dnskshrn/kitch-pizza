@@ -16,7 +16,8 @@ import { updateOrderStatusPos } from "@/lib/actions/pos/update-order-status-pos"
 import { usePosOrderMutations } from "@/hooks/use-pos-order-mutations"
 import {
   isPosAlertSoundUnlocked,
-  playPosAlertSound,
+  playPosNewOrderSound,
+  playPosStatusUpdateSound,
   unlockPosAlertSound,
 } from "@/lib/pos/alert-sound"
 import { createClient } from "@/lib/supabase/client"
@@ -47,6 +48,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react"
 
@@ -96,6 +98,7 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
     const [incomingCallBanner, setIncomingCallBanner] =
       useState<IncomingCallBannerState | null>(null)
     const [soundUnlocked, setSoundUnlocked] = useState(false)
+    const orderStatusByIdRef = useRef(new Map<string, PosOrderStatus>())
     const { updateStatus, isStatusPending } =
       usePosOrderMutations(setMainOrders)
 
@@ -103,7 +106,7 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
       const ok = await unlockPosAlertSound()
       if (ok) {
         setSoundUnlocked(true)
-        void playPosAlertSound()
+        void playPosNewOrderSound()
       }
     }, [])
 
@@ -144,7 +147,20 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
     }, [mainOrders, onMainOrdersChange])
 
     useEffect(() => {
+      const next = new Map<string, PosOrderStatus>()
+      for (const order of mainOrders) next.set(order.id, order.status)
+      for (const order of completedOrders) next.set(order.id, order.status)
+      orderStatusByIdRef.current = next
+    }, [completedOrders, mainOrders])
+
+    useEffect(() => {
       const supabase = createClient()
+
+      const playStatusUpdateSound = () => {
+        void playPosStatusUpdateSound().then((ok) => {
+          if (!ok) setSoundUnlocked(false)
+        })
+      }
 
       const ordersChannel = supabase
         .channel("pos-orders")
@@ -153,9 +169,31 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
           { event: "*", schema: "public", table: "orders" },
           (payload) => {
             if (payload.eventType === "INSERT") {
-              void playPosAlertSound().then((ok) => {
+              void playPosNewOrderSound().then((ok) => {
                 if (!ok) setSoundUnlocked(false)
               })
+            } else if (payload.eventType === "UPDATE") {
+              const row = payload.new as Record<string, unknown>
+              const idRaw = row.id
+              const id =
+                typeof idRaw === "string"
+                  ? idRaw
+                  : idRaw != null
+                    ? String(idRaw)
+                    : ""
+              const nextStatus =
+                typeof row.status === "string" ? row.status : null
+              const prevStatus = id
+                ? orderStatusByIdRef.current.get(id)
+                : undefined
+
+              if (
+                nextStatus &&
+                prevStatus &&
+                nextStatus !== prevStatus
+              ) {
+                playStatusUpdateSound()
+              }
             }
             void reloadOrders()
           },

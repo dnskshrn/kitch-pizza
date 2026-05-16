@@ -32,7 +32,7 @@ import {
 } from "@/lib/pos/pos-brand-slug-cookie"
 import {
   isPosAlertSoundUnlocked,
-  playPosAlertSound,
+  playPosStatusUpdateSound,
   unlockPosAlertSound,
 } from "@/lib/pos/alert-sound"
 import { updateOrderStatusKds } from "@/lib/actions/pos/update-order-status-kds"
@@ -318,12 +318,12 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     const ok = await unlockPosAlertSound()
     if (ok) {
       setSoundUnlocked(true)
-      void playPosAlertSound()
+      void playPosStatusUpdateSound()
     }
   }, [])
 
   const playNewOrderBeep = useCallback(() => {
-    void playPosAlertSound().then((ok) => {
+    void playPosStatusUpdateSound().then((ok) => {
       if (!ok) setSoundUnlocked(false)
     })
   }, [])

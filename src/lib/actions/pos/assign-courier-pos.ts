@@ -1,12 +1,133 @@
 "use server"
 
 import {
+  COURIER_ORDER_ASSIGNMENT_SELECT,
   COURIER_ORDER_TELEGRAM_SELECT,
   editPreviousCourierAssignmentTelegram,
   sendCourierAssignmentTelegram,
   type CourierOrderTelegramFields,
+  type SentCourierTelegramMessage,
 } from "@/lib/actions/pos/courier-telegram-message"
 import { createServiceSupabaseClient } from "@/lib/supabase/server"
+
+type ServiceSupabaseClient = ReturnType<typeof createServiceSupabaseClient>
+type SupabaseErrorLike = { message?: string } | null
+
+function isMissingCourierTelegramColumn(error: SupabaseErrorLike): boolean {
+  const message = error?.message?.toLowerCase() ?? ""
+  return message.includes("courier_tg_") && message.includes("does not exist")
+}
+
+async function loadCourierOrderForAssignment(
+  supabase: ServiceSupabaseClient,
+  orderId: string,
+): Promise<
+  | { order: CourierOrderTelegramFields; error: null }
+  | { order: null; error: string }
+> {
+  const full = await supabase
+    .from("orders")
+    .select(COURIER_ORDER_TELEGRAM_SELECT)
+    .eq("id", orderId)
+    .maybeSingle()
+
+  if (!full.error) {
+    return full.data
+      ? { order: full.data as CourierOrderTelegramFields, error: null }
+      : { order: null, error: "Заказ не найден" }
+  }
+
+  if (!isMissingCourierTelegramColumn(full.error)) {
+    console.error("[assignCourierPos] load order", full.error.message)
+    return { order: null, error: "Не удалось загрузить заказ" }
+  }
+
+  console.error(
+    "[assignCourierPos] courier telegram columns are missing; continuing without message tracking",
+    full.error.message,
+  )
+
+  const fallback = await supabase
+    .from("orders")
+    .select(COURIER_ORDER_ASSIGNMENT_SELECT)
+    .eq("id", orderId)
+    .maybeSingle()
+
+  if (fallback.error) {
+    console.error("[assignCourierPos] fallback load order", fallback.error.message)
+    return { order: null, error: "Не удалось загрузить заказ" }
+  }
+
+  return fallback.data
+    ? { order: fallback.data as CourierOrderTelegramFields, error: null }
+    : { order: null, error: "Заказ не найден" }
+}
+
+async function updateOrderCourierWithFallback(
+  supabase: ServiceSupabaseClient,
+  orderId: string,
+  courierId: string,
+  status: "delivery" | null,
+): Promise<string | null> {
+  const now = new Date().toISOString()
+  const baseUpdate = {
+    courier_id: courierId,
+    courier_assigned_at: now,
+    updated_at: now,
+  }
+  const fullUpdate = {
+    ...baseUpdate,
+    ...(status ? { status } : {}),
+    courier_tg_chat_id: null,
+    courier_tg_message_id: null,
+    courier_tg_message_updated_at: null,
+  }
+
+  const { error } = await supabase
+    .from("orders")
+    .update(fullUpdate)
+    .eq("id", orderId)
+
+  if (!error) return null
+  if (!isMissingCourierTelegramColumn(error)) return error.message
+
+  console.error(
+    "[assignCourierPos] update without courier telegram columns",
+    error.message,
+  )
+
+  const fallbackUpdate = {
+    ...baseUpdate,
+    ...(status ? { status } : {}),
+  }
+  const { error: fallbackError } = await supabase
+    .from("orders")
+    .update(fallbackUpdate)
+    .eq("id", orderId)
+
+  return fallbackError?.message ?? null
+}
+
+async function saveCourierTelegramMessageRef(
+  supabase: ServiceSupabaseClient,
+  orderId: string,
+  sent: SentCourierTelegramMessage | null,
+): Promise<void> {
+  if (!sent) return
+
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      courier_tg_chat_id: sent.chatId,
+      courier_tg_message_id: sent.messageId,
+      courier_tg_message_updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+
+  if (error && !isMissingCourierTelegramColumn(error)) {
+    console.error("[assignCourierPos] save telegram refs", error.message)
+  }
+}
 
 export async function assignCourierPos({
   orderId,
@@ -18,14 +139,13 @@ export async function assignCourierPos({
   try {
     const supabase = createServiceSupabaseClient()
 
-    const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .select(COURIER_ORDER_TELEGRAM_SELECT)
-      .eq("id", orderId)
-      .maybeSingle()
+    const { order, error: orderLoadError } = await loadCourierOrderForAssignment(
+      supabase,
+      orderId,
+    )
 
-    if (orderError || !order) {
-      return { success: false, error: "Заказ не найден" }
+    if (orderLoadError || !order) {
+      return { success: false, error: orderLoadError ?? "Заказ не найден" }
     }
     if (order.status !== "ready") {
       return {
@@ -44,36 +164,20 @@ export async function assignCourierPos({
       return { success: false, error: "Курьер не найден" }
     }
 
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({
-        status: "delivery",
-        courier_id: courierId,
-        courier_assigned_at: new Date().toISOString(),
-        courier_tg_chat_id: null,
-        courier_tg_message_id: null,
-        courier_tg_message_updated_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", orderId)
+    const updateError = await updateOrderCourierWithFallback(
+      supabase,
+      orderId,
+      courierId,
+      "delivery",
+    )
 
     if (updateError) {
-      return { success: false, error: updateError.message }
+      return { success: false, error: updateError }
     }
 
     try {
-      const row = order as CourierOrderTelegramFields
-      const sent = await sendCourierAssignmentTelegram(courier.tg_chat_id, row)
-      if (sent) {
-        await supabase
-          .from("orders")
-          .update({
-            courier_tg_chat_id: sent.chatId,
-            courier_tg_message_id: sent.messageId,
-            courier_tg_message_updated_at: new Date().toISOString(),
-          })
-          .eq("id", orderId)
-      }
+      const sent = await sendCourierAssignmentTelegram(courier.tg_chat_id, order)
+      await saveCourierTelegramMessageRef(supabase, orderId, sent)
     } catch (e) {
       console.error(
         "[assignCourierPos] telegram",
@@ -102,14 +206,13 @@ export async function changeCourierPos({
   try {
     const supabase = createServiceSupabaseClient()
 
-    const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .select(COURIER_ORDER_TELEGRAM_SELECT)
-      .eq("id", orderId)
-      .maybeSingle()
+    const { order, error: orderLoadError } = await loadCourierOrderForAssignment(
+      supabase,
+      orderId,
+    )
 
-    if (orderError || !order) {
-      return { success: false, error: "Заказ не найден" }
+    if (orderLoadError || !order) {
+      return { success: false, error: orderLoadError ?? "Заказ не найден" }
     }
 
     const o = order as {
@@ -141,36 +244,21 @@ export async function changeCourierPos({
       return { success: false, error: "Курьер не найден" }
     }
 
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({
-        courier_id: courierId,
-        courier_assigned_at: new Date().toISOString(),
-        courier_tg_chat_id: null,
-        courier_tg_message_id: null,
-        courier_tg_message_updated_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", orderId)
+    const updateError = await updateOrderCourierWithFallback(
+      supabase,
+      orderId,
+      courierId,
+      null,
+    )
 
     if (updateError) {
-      return { success: false, error: updateError.message }
+      return { success: false, error: updateError }
     }
 
     try {
-      const row = order as CourierOrderTelegramFields
-      await editPreviousCourierAssignmentTelegram(row, newCourier.name)
-      const sent = await sendCourierAssignmentTelegram(newCourier.tg_chat_id, row)
-      if (sent) {
-        await supabase
-          .from("orders")
-          .update({
-            courier_tg_chat_id: sent.chatId,
-            courier_tg_message_id: sent.messageId,
-            courier_tg_message_updated_at: new Date().toISOString(),
-          })
-          .eq("id", orderId)
-      }
+      await editPreviousCourierAssignmentTelegram(order, newCourier.name)
+      const sent = await sendCourierAssignmentTelegram(newCourier.tg_chat_id, order)
+      await saveCourierTelegramMessageRef(supabase, orderId, sent)
     } catch (e) {
       console.error(
         "[changeCourierPos] telegram",

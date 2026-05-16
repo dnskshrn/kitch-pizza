@@ -274,6 +274,9 @@ export function AuthModal() {
             onChange={(e) =>
               setDigits(e.target.value.replace(/\D/g, "").slice(0, DIGIT_COUNT))
             }
+            onFocus={(e) =>
+              e.target.scrollIntoView({ behavior: "smooth", block: "center" })
+            }
             className="min-w-0 flex-1 bg-transparent text-gray-900 outline-none placeholder:text-gray-400"
             aria-label={t.auth.modal.phonePlaceholder}
           />
@@ -320,6 +323,9 @@ export function AuthModal() {
             onChange={(e) => setOtpDigit(i, e.target.value)}
             onKeyDown={(e) => handleOtpKeyDown(i, e)}
             onPaste={(e) => handleOtpPaste(i, e)}
+            onFocus={(e) =>
+              e.target.scrollIntoView({ behavior: "smooth", block: "center" })
+            }
             className="h-16 w-16 rounded-2xl bg-[#F5F5F5] text-center text-2xl font-bold tabular-nums text-gray-900 outline-none disabled:opacity-50"
             aria-label={t.auth.modal.otpDigitAria(i + 1)}
           />
@@ -378,7 +384,10 @@ export function AuthModal() {
       >
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 z-50 bg-black/40" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 flex w-full max-h-[90vh] flex-col rounded-t-[24px] bg-white px-5 pt-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] outline-none">
+          <Drawer.Content
+            className="fixed bottom-0 left-0 right-0 z-50 flex w-full max-h-[90vh] flex-col rounded-t-[24px] bg-white px-5 pt-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] outline-none"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+          >
             <div className="mx-auto mb-6 h-1 w-10 shrink-0 rounded-full bg-gray-200" />
             <Drawer.Title className="sr-only">
               {step === "phone"

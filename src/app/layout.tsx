@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Inter, Roboto_Mono } from "next/font/google";
 import { headers } from "next/headers";
@@ -38,6 +38,13 @@ export async function generateMetadata(): Promise<Metadata> {
     },
   };
 }
+
+/** Меньше скачков layout на iOS при открытой клавиатуре над Vaul drawer. */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  interactiveWidget: "resizes-visual",
+};
 
 export default function RootLayout({
   children,

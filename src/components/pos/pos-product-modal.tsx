@@ -22,7 +22,13 @@ import { useEffect, useMemo, useState } from "react"
 /** Поля меню, нужные для модалки POS (совместимо с выборкой из `menu_items`). */
 export type PosProductModalMenuItem = Pick<
   MenuItem,
-  "id" | "name_ru" | "description_ru" | "image_url" | "has_sizes" | "price"
+  | "id"
+  | "category_id"
+  | "name_ru"
+  | "description_ru"
+  | "image_url"
+  | "has_sizes"
+  | "price"
 > & {
   variants?: MenuItemVariant[] | null
 }
@@ -446,6 +452,7 @@ export function PosProductModal({
     }
     const payload: PosCartItem = {
       menuItemId: item.id,
+      category_id: item.category_id,
       name: item.name_ru,
       size: sizeSnap,
       variantId: vid,

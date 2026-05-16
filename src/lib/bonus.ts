@@ -149,6 +149,7 @@ export async function processBonusAccrualOnOrderDone(
   profileId: string,
   orderId: string,
   totalBani: number,
+  multiplier: number = 1,
 ): Promise<void> {
   try {
     if (!profileId) return
@@ -171,7 +172,9 @@ export async function processBonusAccrualOnOrderDone(
     const total = Number(totalBani)
     if (!Number.isFinite(total)) return
 
-    const earnedAmount = calculateEarned(total, settings.accrualRate)
+    const earnedAmount = Math.round(
+      (total / 100) * settings.accrualRate * multiplier,
+    )
 
     if (earnedAmount > 0) {
       try {

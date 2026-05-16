@@ -425,6 +425,11 @@ type OrderPayRow = {
   paid_at: string | null
 }
 
+type PayOrderLoadedRow = OrderPayRow & {
+  profile_id: string | null
+  bonus_multiplier?: number | null
+}
+
 export type PayOrderInput = {
   orderId: string
   cashSessionId: string
@@ -447,9 +452,10 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
     return { data: null, error: "server_unavailable" }
   }
 
-  const { data: orderRow, error: orderErr } = await supabase
-    .from("orders")
-    .select("id, total, status, paid_at")
+  const { data: orderRow, error: orderErr } = await (
+    supabase.from("orders") as any
+  )
+    .select("id, total, status, paid_at, profile_id, bonus_multiplier")
     .eq("id", input.orderId)
     .maybeSingle()
 
@@ -461,7 +467,7 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
     return { data: null, error: "invalid_order_status" }
   }
 
-  const order = orderRow as OrderPayRow
+  const order = orderRow as PayOrderLoadedRow
 
   if (order.status !== "delivery") {
     return { data: null, error: "invalid_order_status" }
@@ -537,19 +543,12 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
   }
 
   const orderId = input.orderId
-  const { data: accrualOrder, error: accrualOrderErr } = await supabase
-    .from("orders")
-    .select("profile_id, total, bonuses_redeemed, id")
-    .eq("id", orderId)
-    .maybeSingle()
-
-  if (accrualOrderErr) {
-    console.error("[payOrder] bonus accrual select", accrualOrderErr.message)
-  } else if (accrualOrder?.profile_id) {
+  if (order.profile_id) {
     await processBonusAccrualOnOrderDone(
-      String(accrualOrder.profile_id),
+      String(order.profile_id),
       orderId,
-      Number(accrualOrder.total),
+      Number(order.total),
+      order.bonus_multiplier ?? 1,
     ).catch((e) => console.error("bonus accrual failed", e))
   }
 

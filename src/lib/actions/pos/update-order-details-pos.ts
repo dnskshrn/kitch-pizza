@@ -3,6 +3,7 @@
 import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
+import type { GiftCartItem } from "@/types/promotions"
 
 export type UpdateOrderDetailsPosInput = {
   orderId: string
@@ -21,10 +22,16 @@ export type UpdateOrderDetailsPosInput = {
   promoCode?: string
   discount: number
   deliveryFee: number
+  /** JSON массив применённых правил скидок (для `orders.discount_rules_applied`). */
+  discountRulesApplied?: string | null
+  /** Подарочные строки — синхронизируются после обновления заказа. */
+  giftItems?: GiftCartItem[]
   /** Не передавать — не менять `orders.profile_id`. */
   profileId?: string | null
   delivery_lat?: number | null
   delivery_lng?: number | null
+  /** Множитель начисления бонусов (POS / движок скидок). */
+  bonus_multiplier?: number
 }
 
 export type UpdateOrderDetailsPosResult =
@@ -154,10 +161,15 @@ export async function updateOrderDetailsPos(
     updated_at: updatedAt,
     delivery_lat,
     delivery_lng,
+    bonus_multiplier: input.bonus_multiplier ?? 1,
   }
 
   if (input.profileId !== undefined) {
     patch.profile_id = input.profileId
+  }
+
+  if (input.discountRulesApplied !== undefined) {
+    patch.discount_rules_applied = input.discountRulesApplied
   }
 
   const { error: updateError } = await supabase
@@ -168,6 +180,38 @@ export async function updateOrderDetailsPos(
   if (updateError) {
     console.error("[updateOrderDetailsPos] update", updateError.message)
     return { success: false, error: "Не удалось сохранить изменения" }
+  }
+
+  const giftItems = input.giftItems ?? []
+  const { error: delGiftError } = await (supabase.from("order_items") as any)
+    .delete()
+    .eq("order_id", input.orderId)
+    .eq("is_gift", true)
+  if (delGiftError) {
+    console.error("[updateOrderDetailsPos] delete gift items", delGiftError.message)
+  }
+
+  if (giftItems.length > 0) {
+    const giftRows = giftItems.map((g) => ({
+      order_id: input.orderId,
+      menu_item_id: g.menu_item_id,
+      variant_id: g.variant_id,
+      lunch_set_id: null as string | null,
+      item_name: g.label_ru,
+      size: null as string | null,
+      quantity: g.quantity,
+      toppings: [] as { name: string; price: number }[],
+      price: 0,
+      is_gift: true,
+      gift_rule_id: g.rule_id,
+    }))
+    const { error: giftInsErr } = await (supabase.from("order_items") as any).insert(
+      giftRows,
+    )
+    if (giftInsErr) {
+      console.error("[updateOrderDetailsPos] gift items", giftInsErr.message)
+      return { success: false, error: "Не удалось сохранить подарочные позиции" }
+    }
   }
 
   return { success: true }

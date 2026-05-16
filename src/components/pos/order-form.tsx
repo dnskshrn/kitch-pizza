@@ -1,9 +1,11 @@
 "use client"
 
 import { normalizePosBrandSlug, type BrandConfig } from "@/brands/index"
+import { DiscountBreakdown } from "@/components/pos/discount-breakdown"
 import type { OrdersPanelHandle } from "@/components/pos/orders-panel"
 import { AssignCourierModal } from "@/components/pos/AssignCourierModal"
 import { PayOrderModal } from "@/components/pos/pay-order-modal"
+import { PromoPanel } from "@/components/pos/promo-panel"
 import { useCashSession } from "@/components/pos/cash-session-context"
 import {
   PosHeaderIconButton,
@@ -42,7 +44,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
@@ -63,8 +64,7 @@ import {
   posSaveCustomer,
   posSaveCustomerAddress,
 } from "@/lib/actions/pos/customers-pos-actions"
-import { validatePromoCode } from "@/lib/actions/validate-promo-code"
-import { calcPromoDiscount } from "@/lib/discount"
+import { evaluateDiscounts } from "@/lib/discount-engine"
 import type { CustomerAddressRow, CustomerWithAddresses } from "@/lib/customers"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -77,6 +77,11 @@ import {
 import { writePosBrandSlugCookie } from "@/lib/pos/pos-brand-slug-cookie"
 import { posCheckoutAddressFieldsFromOrder } from "@/lib/pos/split-composite-delivery-address"
 import type { MenuItem, MenuItemVariant } from "@/types/database"
+import type {
+  CartItemForEngine,
+  DeliveryZoneForEngine,
+  DiscountEngineOutput,
+} from "@/types/promotions"
 import type { PosCartItem, PosOrder, PosWizardBrandOption } from "@/types/pos"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
@@ -94,7 +99,7 @@ import {
   XIcon,
 } from "lucide-react"
 import Image from "next/image"
-import type { RefObject } from "react"
+import type { RefObject, ReactNode } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
@@ -205,32 +210,6 @@ function parseLeiToBani(raw: string): number | null {
   const n = Number.parseFloat(t)
   if (!Number.isFinite(n) || n < 0) return null
   return Math.round(n * 100)
-}
-
-function roundMoneyMdl(n: number): number {
-  return Math.round(n * 100) / 100
-}
-
-function promoErrorRu(
-  err: import("@/types/database").PromoCodeValidationResult,
-): string {
-  if (err.valid) return ""
-  switch (err.error) {
-    case "not_found":
-      return "Промокод не найден"
-    case "inactive":
-      return "Промокод неактивен"
-    case "expired":
-      return "Срок промокода истёк"
-    case "not_started":
-      return "Промокод ещё не действует"
-    case "limit_reached":
-      return "Лимит использований исчерпан"
-    case "min_order_not_met":
-      return "Не достигнута минимальная сумма заказа"
-    default:
-      return "Промокод недействителен"
-  }
 }
 
 function unitPriceBani(row: MenuItemRow): number {
@@ -396,7 +375,7 @@ const POS_RUNNER_CTA_CLASS =
 function CartPanel({
   cart,
   cartCount,
-  subtotalBani,
+  totalsSlot,
   onUpdateQty,
   onRemove,
   onOpenLine,
@@ -418,7 +397,8 @@ function CartPanel({
 }: {
   cart: PosCartItem[]
   cartCount: number
-  subtotalBani: number
+  /** Сводка: промо + строки скидок и итог (вместо одной строки «подытог»). */
+  totalsSlot?: ReactNode
   onUpdateQty: (idx: number, delta: number) => void | Promise<void>
   onRemove: (idx: number) => void | Promise<void>
   onOpenLine: (idx: number) => void
@@ -487,16 +467,11 @@ function CartPanel({
           )}
         </div>
 
-        {/* Футер: подытог + CTA */}
+        {/* Футер: сводка + CTA */}
         <div className="shrink-0 border-t border-border p-5">
-          <div className="flex items-baseline justify-between">
-            <span className="text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
-              подытог
-            </span>
-            <span className="font-mono text-base font-bold tabular-nums text-foreground">
-              {formatMdlAmount(subtotalBani)} лей
-            </span>
-          </div>
+          {totalsSlot != null ? (
+            <div className="mb-3">{totalsSlot}</div>
+          ) : null}
           {(onCourierAssign || onChangeAssignedCourier) &&
           courierContactWarnings.length > 0 ? (
             <div className="mt-3 flex flex-col gap-1">
@@ -658,8 +633,8 @@ function posCartFromOrderLine(line: {
   price: number
   toppings: unknown
   menu_items:
-    | { image_url: string | null }
-    | { image_url: string | null }[]
+    | { image_url: string | null; category_id?: string | null }
+    | { image_url: string | null; category_id?: string | null }[]
     | null
 }): PosCartItem {
   const rawName = line.item_name?.trim() || "—"
@@ -681,9 +656,14 @@ function posCartFromOrderLine(line: {
   const embed = Array.isArray(line.menu_items)
     ? line.menu_items[0]
     : line.menu_items
+  const categoryId =
+    (embed && "category_id" in embed
+      ? (embed as { category_id?: string | null }).category_id
+      : null) ?? ""
   return {
     orderItemId: line.id,
     menuItemId: line.menu_item_id ?? "",
+    category_id: typeof categoryId === "string" ? categoryId : "",
     name: baseName,
     size: line.size,
     variantId: line.variant_id ?? null,
@@ -769,12 +749,10 @@ export function OrderForm({
   const cartModalBusyRef = useRef(false)
   const [cartActionBusy, setCartActionBusy] = useState(false)
 
-  const [promoInput, setPromoInput] = useState("")
-  const [promoResult, setPromoResult] = useState<
-    import("@/types/database").PromoCode | null
-  >(null)
-  const [promoError, setPromoError] = useState<string | null>(null)
-  const [promoLoading, setPromoLoading] = useState(false)
+  const [engineOutput, setEngineOutput] = useState<DiscountEngineOutput | null>(
+    null,
+  )
+  const [appliedPromoCode, setAppliedPromoCode] = useState<string | null>(null)
 
   const [posCustomerData, setPosCustomerData] = useState<CustomerWithAddresses | null>(
     null,
@@ -919,43 +897,52 @@ export function OrderForm({
     }
   }, [deliveryMode, deliveryAddress, userPhoneWatched])
 
-  const subtotalBani = useMemo(
-    () => cart.reduce((s, it) => s + it.price * it.qty, 0),
-    [cart],
-  )
+  const cartForEngine = useMemo((): CartItemForEngine[] => {
+    return cart.map((it) => ({
+      menu_item_id: it.menuItemId,
+      category_id: it.category_id,
+      variant_id: it.variantId ?? null,
+      quantity: it.qty,
+      unit_price_bani: it.price,
+    }))
+  }, [cart])
 
-  const discountBani = useMemo(() => {
-    if (!promoResult) return 0
-    return calcPromoDiscount(promoResult, subtotalBani)
-  }, [promoResult, subtotalBani])
-
-  const deliveryFeeBani = useMemo(() => {
-    if (deliveryMode !== "delivery") return 0
+  const deliveryZoneForEngine = useMemo((): DeliveryZoneForEngine | null => {
+    if (deliveryMode === "pickup") {
+      return { price_bani: 0, free_from_bani: 0 }
+    }
     if (zoneResult?.status === "in_zone") {
-      const zone = zoneResult.zone
-      if (zone.free_delivery_from_bani != null && subtotalBani >= zone.free_delivery_from_bani) return 0
-      return zone.delivery_price_bani
+      const z = zoneResult.zone
+      return {
+        price_bani: z.delivery_price_bani,
+        free_from_bani: z.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
+      }
     }
     if (
-      zoneResult?.status === "out_of_zone" ||
-      zoneResult?.status === "not_found"
+      editBaselineDeliveryFeeBani != null &&
+      editBaselineDeliveryFeeBani > 0
     ) {
-      return 0
+      return {
+        price_bani: editBaselineDeliveryFeeBani,
+        free_from_bani: Number.MAX_SAFE_INTEGER,
+      }
     }
-    if (editBaselineDeliveryFeeBani != null) {
-      return editBaselineDeliveryFeeBani
-    }
-    return 0
-  }, [
-    deliveryMode,
-    zoneResult,
-    subtotalBani,
-    editBaselineDeliveryFeeBani,
-  ])
+    return null
+  }, [deliveryMode, zoneResult, editBaselineDeliveryFeeBani])
 
-  const totalBani = subtotalBani - discountBani + deliveryFeeBani
-  const redeemBaniApplied = Math.round(bonusesToRedeem * 100)
-  const payableAfterBonusBani = Math.max(0, totalBani - redeemBaniApplied)
+  const fallbackEngineOutput = useMemo(
+    () =>
+      evaluateDiscounts({
+        items: cartForEngine,
+        rules: [],
+        deliveryZone: deliveryZoneForEngine,
+      }),
+    [cartForEngine, deliveryZoneForEngine],
+  )
+
+  const effectiveEngineOutput = engineOutput ?? fallbackEngineOutput
+
+  const totalBani = effectiveEngineOutput.totalBani ?? 0
 
   const posBonusMaxRedeemable = useMemo(() => {
     const balance = posBonusBalance ?? 0
@@ -963,6 +950,9 @@ export function OrderForm({
     const rate = posMaxRedemptionRate ?? 0.3
     return Math.floor(Math.min(balance, orderTotalMdl * rate))
   }, [posBonusBalance, totalBani, posMaxRedemptionRate])
+
+  const redeemBaniApplied = Math.round(bonusesToRedeem * 100)
+  const payableAfterBonusBani = Math.max(0, totalBani - redeemBaniApplied)
 
   const detailsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -972,20 +962,14 @@ export function OrderForm({
   const scheduleDebouncedDetailsSaveRef = useRef(() => {})
 
   const detailsPricingRef = useRef({
-    subtotalBani,
-    discountBani,
-    deliveryFeeBani,
-    promoResult: null as import("@/types/database").PromoCode | null,
-    promoInput: "",
+    engineOutput: fallbackEngineOutput,
+    appliedPromoCode: null as string | null,
     linkedProfileId: undefined as string | null | undefined,
     bonusesToRedeem: 0,
   })
   detailsPricingRef.current = {
-    subtotalBani,
-    discountBani,
-    deliveryFeeBani,
-    promoResult,
-    promoInput,
+    engineOutput: effectiveEngineOutput,
+    appliedPromoCode,
     linkedProfileId,
     bonusesToRedeem,
   }
@@ -1013,12 +997,7 @@ export function OrderForm({
     if (!listOrder || listOrder.id !== posOrderId) return
     if (detailsFormDirty) return
     form.reset(checkoutValuesFromPosListOrder(listOrder))
-    const pc = listOrder.promo_code?.trim() ?? ""
-    setPromoInput(pc)
-    if (!pc) {
-      setPromoResult(null)
-      setPromoError(null)
-    }
+    setAppliedPromoCode(listOrder.promo_code?.trim() || null)
   }, [listOrder, posOrderId, detailsFormDirty, form])
 
   useEffect(() => {
@@ -1147,7 +1126,7 @@ export function OrderForm({
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "delivery_fee, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url))",
+          "delivery_fee, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
         )
         .eq("id", posOrderId)
         .maybeSingle()
@@ -1179,13 +1158,14 @@ export function OrderForm({
           id: string
           item_name: string
           menu_item_id: string | null
+          variant_id: string | null
           size: string | null
           quantity: number
           price: number
           toppings: unknown
           menu_items:
-            | { image_url: string | null }
-            | { image_url: string | null }[]
+            | { image_url: string | null; category_id?: string | null }
+            | { image_url: string | null; category_id?: string | null }[]
             | null
         }> | null
       }
@@ -1197,7 +1177,6 @@ export function OrderForm({
 
       const lines = raw.order_items ?? []
       const cartLines = lines.map(posCartFromOrderLine)
-      const sub = cartLines.reduce((s, c) => s + c.price * c.qty, 0)
 
       setOrderNumber(raw.order_number)
       setExtendError(null)
@@ -1212,9 +1191,8 @@ export function OrderForm({
         setBrandId(null)
         setCart([])
         lastSyncedCartFingerprintRef.current = cartFingerprint([])
-        setPromoInput("")
-        setPromoResult(null)
-        setPromoError(null)
+        setAppliedPromoCode(null)
+        setEngineOutput(null)
         const addr = posCheckoutAddressFieldsFromOrder(raw)
         form.reset({
           userName: raw.user_name?.trim() ?? "",
@@ -1251,36 +1229,7 @@ export function OrderForm({
 
       setCart(cartLines)
       lastSyncedCartFingerprintRef.current = cartFingerprint(cartLines)
-      setPromoInput(raw.promo_code?.trim() ?? "")
-      setPromoError(null)
-      if (raw.promo_code?.trim() && sub > 0) {
-        let promoBrandId: string | null = cfg.dbId
-        if (!promoBrandId) {
-          const { data: br } = await supabase
-            .from("brands")
-            .select("id")
-            .eq("slug", cfg.slug)
-            .maybeSingle()
-          promoBrandId = (br as { id: string } | null)?.id ?? null
-        }
-        if (!promoBrandId) {
-          if (!cancelled) setPromoResult(null)
-        } else {
-          const res = await validatePromoCode(
-            raw.promo_code.trim(),
-            sub,
-            promoBrandId,
-          )
-          if (cancelled) return
-          if (res.valid) {
-            setPromoResult(res.promo)
-          } else {
-            setPromoResult(null)
-          }
-        }
-      } else {
-        setPromoResult(null)
-      }
+      setAppliedPromoCode(raw.promo_code?.trim() || null)
 
       const addr = posCheckoutAddressFieldsFromOrder(raw)
       form.reset({
@@ -1383,7 +1332,7 @@ export function OrderForm({
     const { data, error } = await supabase
       .from("orders")
       .select(
-        "order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url))",
+        "order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
       )
       .eq("id", posOrderId)
       .maybeSingle()
@@ -1405,8 +1354,8 @@ export function OrderForm({
             price: number
             toppings: unknown
             menu_items:
-              | { image_url: string | null }
-              | { image_url: string | null }[]
+              | { image_url: string | null; category_id?: string | null }
+              | { image_url: string | null; category_id?: string | null }[]
               | null
           }>
         }
@@ -1517,6 +1466,7 @@ export function OrderForm({
         if (price <= 0) return
         void addCartItem({
           menuItemId: row.id,
+          category_id: row.category_id,
           name: row.name_ru,
           size: null,
           variantId: null,
@@ -1676,47 +1626,6 @@ export function OrderForm({
     ],
   )
 
-  const applyPromo = async () => {
-    const code = promoInput.trim()
-    if (!code) {
-      setPromoError("Введите промокод")
-      return
-    }
-    if (!selectedBrand) {
-      setPromoError("Выберите бренд")
-      return
-    }
-    const brandRow = wizardBrands.find((b) => b.slug === selectedBrand.slug)
-    let promoBrandId = brandRow?.dbId ?? brandId
-    if (!promoBrandId) {
-      const supabase = createClient()
-      const { data: br } = await supabase
-        .from("brands")
-        .select("id")
-        .eq("slug", selectedBrand.slug)
-        .maybeSingle()
-      promoBrandId = (br as { id: string } | null)?.id ?? null
-    }
-    if (!promoBrandId) {
-      setPromoError("Не удалось определить бренд заказа")
-      return
-    }
-    setPromoLoading(true)
-    setPromoError(null)
-    const res = await validatePromoCode(code, subtotalBani, promoBrandId)
-    setPromoLoading(false)
-    if (!res.valid) {
-      setPromoResult(null)
-      setPromoError(promoErrorRu(res))
-      return
-    }
-    setPromoResult(res.promo)
-    setPromoError(null)
-    window.setTimeout(() => {
-      scheduleDebouncedDetailsSaveRef.current()
-    }, 0)
-  }
-
   const [closeOrderOpen, setCloseOrderOpen] = useState(false)
   const [closeOrderPreset, setCloseOrderPreset] = useState<string>("")
   const [closeOrderOther, setCloseOrderOther] = useState("")
@@ -1813,11 +1722,8 @@ export function OrderForm({
         return false
       }
       const {
-        subtotalBani: sub,
-        discountBani: disc,
-        deliveryFeeBani: fee,
-        promoResult: pr,
-        promoInput: pi,
+        engineOutput: eng,
+        appliedPromoCode: promoCode,
         linkedProfileId: pid,
       } = detailsPricingRef.current
 
@@ -1825,6 +1731,9 @@ export function OrderForm({
         values.paymentMethod === "cash"
           ? parseLeiToBani(values.changeFromLei ?? "")
           : null
+
+      const totalDiscountBani = eng.totalDiscountBani
+      const feeBani = eng.deliveryFeeBani ?? 0
 
       const res = await updateOrderDetailsPos({
         orderId: posOrderId,
@@ -1842,9 +1751,11 @@ export function OrderForm({
         paymentMethod: values.paymentMethod,
         changeFrom: changeBani ?? undefined,
         comment: values.comment?.trim() || undefined,
-        promoCode: pr ? pi.trim().toUpperCase() : undefined,
-        discount: disc > 0 ? disc : 0,
-        deliveryFee: fee,
+        promoCode: promoCode?.trim() || undefined,
+        discount: totalDiscountBani,
+        discountRulesApplied: JSON.stringify(eng.appliedDiscounts ?? []),
+        giftItems: eng.giftItems ?? [],
+        deliveryFee: feeBani,
         profileId: pid,
         delivery_lat:
           values.deliveryMode === "delivery"
@@ -1854,17 +1765,19 @@ export function OrderForm({
           values.deliveryMode === "delivery"
             ? (posDeliveryGeoRef.current?.lng ?? null)
             : null,
+        bonus_multiplier: eng?.bonusMultiplier ?? 1,
       })
       if (!res.success) {
         if (opts?.forSubmit) setSubmitError(res.error)
         else toast.error("Не удалось сохранить данные")
         return false
       }
-      const safeDiscount = Math.min(disc, sub)
-      const cardTotal = sub - safeDiscount + fee
+      const sub = eng.itemSubtotalBani
+      const safeDiscount = Math.min(totalDiscountBani, sub)
+      const cardTotal = Math.max(0, sub - safeDiscount + feeBani)
       updateOrderLocalState(posOrderId, {
         total: cardTotal,
-        delivery_fee: fee,
+        delivery_fee: feeBani,
         discount: safeDiscount,
         updated_at: new Date().toISOString(),
       })
@@ -1901,7 +1814,6 @@ export function OrderForm({
   const handleBonusRedeemInputChange = useCallback(
     (rawStr: string) => {
       setBonusRedeemTouched(true)
-      const balance = posBonusBalance ?? 0
       const rate = posMaxRedemptionRate ?? 0.3
       const maxRedeemable = posBonusMaxRedeemable
       const t = rawStr.trim().replace(",", ".")
@@ -1924,7 +1836,7 @@ export function OrderForm({
       setBonusRedeemFieldError(msg)
       setBonusesToRedeem(capped)
     },
-    [posBonusBalance, posMaxRedemptionRate, posBonusMaxRedeemable],
+    [posMaxRedemptionRate, posBonusMaxRedeemable],
   )
 
   const applyAddressRowToForm = useCallback(
@@ -2466,9 +2378,8 @@ export function OrderForm({
                     setCart([])
                     setModalItem(null)
                     setCartEditIndex(null)
-                    setPromoInput("")
-                    setPromoResult(null)
-                    setPromoError(null)
+                    setAppliedPromoCode(null)
+                    setEngineOutput(null)
                     const res = await updateOrderBrandPos({
                       orderId: posOrderId,
                       brandSlug: b.slug,
@@ -2611,7 +2522,23 @@ export function OrderForm({
             <CartPanel
               cart={cart}
               cartCount={cartCount}
-              subtotalBani={subtotalBani}
+              totalsSlot={
+                <>
+                  {brandId ? (
+                    <PromoPanel
+                      brandId={brandId}
+                      items={cartForEngine}
+                      deliveryZone={deliveryZoneForEngine}
+                      onDiscountChange={setEngineOutput}
+                      onAppliedPromoCodeChange={setAppliedPromoCode}
+                    />
+                  ) : null}
+                  <DiscountBreakdown
+                    output={effectiveEngineOutput}
+                    deliveryZone={deliveryZoneForEngine}
+                  />
+                </>
+              }
               onUpdateQty={updateQty}
               onRemove={removeLine}
               onOpenLine={(idx) => void openCartLineModal(idx)}
@@ -2663,7 +2590,8 @@ export function OrderForm({
                 runnerAlreadySent ||
                 cart.length === 0 ||
                 extendSubmitting ||
-                !selectedBrand
+                !selectedBrand ||
+                (effectiveEngineOutput.totalBani ?? 0) <= 0
               }
               runnerBusy={runnerBusy}
               runnerAlreadySent={runnerAlreadySent}
@@ -3186,7 +3114,7 @@ export function OrderForm({
                       <DeliveryZoneInfo
                         result={zoneResult}
                         checking={zoneChecking}
-                        subtotalBani={subtotalBani}
+                        subtotalBani={effectiveEngineOutput.discountedSubtotalBani}
                       />
                     </>
                   ) : null}
@@ -3258,46 +3186,11 @@ export function OrderForm({
 
                 {/* ── Дополнительно ── */}
                 <FormSection title="Дополнительно">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="mb-1.5 text-xs text-muted-foreground">Промокод</p>
-                      <div className="flex gap-2">
-                        <Input
-                          value={promoInput}
-                          onChange={(e) => setPromoInput(e.target.value)}
-                          placeholder="Код"
-                          className="flex-1"
-                        />
-                        <button
-                          type="button"
-                          disabled={promoLoading}
-                          onClick={() => void applyPromo()}
-                          className="shrink-0 rounded-lg bg-muted px-3 py-2 text-xs font-bold text-foreground transition-colors hover:bg-[#e8e8e8] disabled:opacity-50"
-                        >
-                          {promoLoading ? (
-                            <Loader2 className="size-3.5 animate-spin" />
-                          ) : (
-                            "Применить"
-                          )}
-                        </button>
-                      </div>
-                      {promoError ? (
-                        <p className="mt-1 text-xs text-destructive">{promoError}</p>
-                      ) : null}
-                      {promoResult && !promoError ? (
-                        <p className="mt-1 text-xs text-emerald-700">
-                          Скидка: {formatMdl(discountBani)}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="invisible" aria-hidden />
-                  </div>
-
                   <FormField
                     control={form.control}
                     name="comment"
                     render={({ field }) => (
-                      <FormItem className="mt-3">
+                      <FormItem>
                         <FormLabel className="text-xs text-muted-foreground">Комментарий</FormLabel>
                         <FormControl>
                           <Textarea {...field} rows={2} />
@@ -3350,51 +3243,37 @@ export function OrderForm({
             </div>
 
             <div className="shrink-0 border-t border-border p-5">
-              <dl className="space-y-1 text-xs">
-                <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">Подытог</dt>
-                  <dd className="font-mono tabular-nums">
-                    {formatMdl(subtotalBani)}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">Доставка</dt>
-                  <dd className="font-mono tabular-nums">
-                    {formatMdl(deliveryFeeBani)}
-                  </dd>
-                </div>
-                {discountBani > 0 ? (
-                  <div className="flex justify-between gap-2 text-emerald-700">
-                    <dt>Скидка</dt>
-                    <dd className="font-mono tabular-nums">
-                      −{formatMdl(discountBani)}
-                    </dd>
-                  </div>
+              <div className="space-y-3">
+                {brandId ? (
+                  <PromoPanel
+                    brandId={brandId}
+                    items={cartForEngine}
+                    deliveryZone={deliveryZoneForEngine}
+                    onDiscountChange={setEngineOutput}
+                    onAppliedPromoCodeChange={setAppliedPromoCode}
+                  />
                 ) : null}
+                <DiscountBreakdown
+                  output={effectiveEngineOutput}
+                  deliveryZone={deliveryZoneForEngine}
+                />
                 {bonusesToRedeem > 0 ? (
-                  <div className="flex justify-between gap-2 text-emerald-700">
-                    <dt>Списание бонусов</dt>
-                    <dd className="font-mono tabular-nums">
+                  <div className="flex justify-between gap-2 border-t border-border pt-2 text-xs text-emerald-700">
+                    <span>Списание бонусов</span>
+                    <span className="font-mono tabular-nums">
                       −{formatMdl(redeemBaniApplied)}
-                    </dd>
+                    </span>
                   </div>
                 ) : null}
-                <Separator className="my-1" />
-                <div className="flex justify-between gap-2 text-sm font-bold">
-                  <dt>Итого</dt>
-                  <dd className="font-mono tabular-nums">
-                    {formatMdl(totalBani)}
-                  </dd>
-                </div>
                 {bonusesToRedeem > 0 ? (
                   <div className="flex justify-between gap-2 text-xs font-semibold text-[#242424]">
-                    <dt>К оплате</dt>
-                    <dd className="font-mono tabular-nums">
+                    <span>К оплате</span>
+                    <span className="font-mono tabular-nums">
                       {formatMdl(payableAfterBonusBani)}
-                    </dd>
+                    </span>
                   </div>
                 ) : null}
-              </dl>
+              </div>
               {showPayOrderCta ? (
                 <button
                   type="button"
@@ -3408,7 +3287,11 @@ export function OrderForm({
                 <button
                   type="submit"
                   form="pos-wizard-details-form"
-                  disabled={runnerAlreadySent || submitting}
+                  disabled={
+                    runnerAlreadySent ||
+                    submitting ||
+                    (effectiveEngineOutput.totalBani ?? 0) <= 0
+                  }
                   className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
                 >
                   {runnerAlreadySent ? (

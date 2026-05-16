@@ -30,6 +30,7 @@ import {
   Gift,
   Megaphone,
   FolderTree,
+  Images,
 } from "lucide-react"
 import { brands } from "@/brands"
 import { BrandSwitcher } from "@/components/admin/brand-switcher"
@@ -123,7 +124,8 @@ const marketingNavGroup: NavGroup = {
   label: "Маркетинг",
   icon: Megaphone,
   items: [
-    { href: "/admin/promotions", label: "Галерея", icon: Tag },
+    { href: "/admin/promotions", label: "Галерея", icon: Images },
+    { href: "/admin/discount-rules", label: "Акции", icon: Tag },
     { href: "/admin/promo-codes", label: "Промокоды", icon: Ticket },
     { href: "/admin/customers", label: "Клиенты", icon: Users },
     {

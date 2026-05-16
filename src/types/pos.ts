@@ -21,6 +21,8 @@ export type PosOrderSource = "website" | "pos"
 /** Позиция корзины POS (цена за единицу в бани, с учётом топпингов). */
 export type PosCartItem = {
   menuItemId: string
+  /** Категория меню (`menu_items.category_id`) — для правил скидок. */
+  category_id: string
   name: string
   /** Снимок для order_items.size: исторически `'s'`/`'l'`, либо подпись варианта */
   size: string | null

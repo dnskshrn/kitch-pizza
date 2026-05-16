@@ -197,6 +197,8 @@ export function ProductModalRoot() {
   )
   const [variants, setVariants] = useState<MenuItemVariant[]>([])
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
+  /** После асинхронной подгрузки вариантов для позиции с размерами (защита от «0 lei» до гидратации). */
+  const [sizesVariantsHydrated, setSizesVariantsHydrated] = useState(false)
   const [selectedToppingIds, setSelectedToppingIds] = useState<string[]>([])
 
   const variantsEffective = useMemo(() => {
@@ -223,6 +225,7 @@ export function ProductModalRoot() {
         setModalItem(null)
         setVariants([])
         setSelectedVariantId(null)
+        setSizesVariantsHydrated(false)
       }, DESKTOP_EXIT_MS)
       return () => clearTimeout(timer)
     }
@@ -232,6 +235,10 @@ export function ProductModalRoot() {
     if (!isOpen || !storeItem) return
     let cancelled = false
     void (async () => {
+      if (storeItem.has_sizes) {
+        setSizesVariantsHydrated(false)
+      }
+
       const pm = useProductModalStore.getState()
       let loadedVariants =
         storeItem.variants?.length ?? 0 ? sortVariants(storeItem.variants ?? []) : []
@@ -256,6 +263,10 @@ export function ProductModalRoot() {
         setSelectedVariantId(id)
       } else {
         setSelectedVariantId(null)
+      }
+
+      if (storeItem.has_sizes && !cancelled) {
+        setSizesVariantsHydrated(true)
       }
 
       if (pm.editingCartItemId) {
@@ -293,6 +304,12 @@ export function ProductModalRoot() {
 
   const handleAddToCart = useCallback(() => {
     if (!panelItem) return
+    if (panelItem.has_sizes) {
+      const selectedVariant = selectedVariantId
+        ? variantsEffective.find((x) => x.id === selectedVariantId)
+        : undefined
+      if (!selectedVariant || selectedVariant.price === 0) return
+    }
     const showVariants =
       panelItem.has_sizes && variantsEffective.length > 0
     const pm = useProductModalStore.getState()
@@ -370,6 +387,31 @@ export function ProductModalRoot() {
     return getWeightPillLabel(panelItem, variantsEffective, selectedVariantId, lang)
   }, [panelItem, variantsEffective, selectedVariantId, lang])
 
+  const selectedVariantResolved =
+    panelItem?.has_sizes && selectedVariantId
+      ? variantsEffective.find((v) => v.id === selectedVariantId)
+      : undefined
+
+  const addToCartDisabled = useMemo(() => {
+    if (!panelItem?.has_sizes) return false
+    if (!sizesVariantsHydrated) return true
+    if (selectedVariantId == null) return true
+    if (selectedVariantResolved == null) return true
+    if (selectedVariantResolved.price === 0) return true
+    if (
+      getBasePriceBani(panelItem, variantsEffective, selectedVariantId) === 0
+    ) {
+      return true
+    }
+    return false
+  }, [
+    panelItem,
+    sizesVariantsHydrated,
+    selectedVariantId,
+    selectedVariantResolved,
+    variantsEffective,
+  ])
+
   const titleName = panelItem ? pickLocalizedName(panelItem, lang) : ""
 
   const descriptionText = panelItem ? pickLocalizedDescription(panelItem, lang) : null
@@ -406,7 +448,8 @@ export function ProductModalRoot() {
       <button
         type="button"
         onClick={handleAddToCart}
-        className="storefront-modal-cta w-full cursor-pointer rounded-full py-3.5 text-[16px] font-bold transition-all duration-200 hover:brightness-110 active:scale-[0.98] active:brightness-95"
+        disabled={addToCartDisabled}
+        className="storefront-modal-cta w-full cursor-pointer rounded-full py-3.5 text-[16px] font-bold transition-all duration-200 hover:brightness-110 active:scale-[0.98] active:brightness-95 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
       >
         {addToCartLabel} · {totalLabel}
       </button>

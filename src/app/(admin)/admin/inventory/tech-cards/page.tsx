@@ -87,7 +87,7 @@ export default async function AdminTechCardsPage() {
     .from("menu_items")
     .select(`
       id, name_ru,
-      product_recipes(
+      product_recipes!product_recipes_menu_item_id_fkey(
         id,
         ingredient_id,
         semi_finished_id,

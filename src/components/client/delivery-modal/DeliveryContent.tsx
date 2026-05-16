@@ -72,7 +72,7 @@ export function DeliveryContent({
     debounceRef.current = setTimeout(() => {
       void (async () => {
         try {
-          const hit = await geocodeAddress(q)
+          const hit = await geocodeAddress(q, zones)
           if (!hit) {
             setGeocoding(false)
             return

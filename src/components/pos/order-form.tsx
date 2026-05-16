@@ -50,7 +50,10 @@ import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zon
 import type { DeliveryZoneCheckResultPos } from "@/lib/actions/pos/check-delivery-zone-pos"
 import { cancelOrderPos } from "@/lib/actions/pos/cancel-order-pos"
 import { sendPosDraftToKitchen } from "@/lib/actions/pos/send-pos-draft-to-kitchen"
-import { updateOrderDetailsPos } from "@/lib/actions/pos/update-order-details-pos"
+import {
+  updateOrderDeliveryModePos,
+  updateOrderDetailsPos,
+} from "@/lib/actions/pos/update-order-details-pos"
 import { updateOrderBrandPos } from "@/lib/actions/pos/update-order-brand-pos"
 import {
   addOrderItemsPos,
@@ -66,6 +69,7 @@ import {
 } from "@/lib/actions/pos/customers-pos-actions"
 import { evaluateDiscounts } from "@/lib/discount-engine"
 import type { CustomerAddressRow, CustomerWithAddresses } from "@/lib/customers"
+import { usePosMenuCache } from "@/lib/store/pos-menu-cache"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import { orderItemSizeDisplayLabel } from "@/lib/order-item-size-display"
@@ -94,8 +98,6 @@ import {
   Minus,
   MoreVertical,
   Plus,
-  ShoppingBag,
-  Truck,
   XIcon,
 } from "lucide-react"
 import Image from "next/image"
@@ -104,6 +106,123 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { z } from "zod"
+
+/** Добавляет скидку с витрины, если движок её ещё не учёл полностью. */
+function mergePersistedWebsitePromoDiscount(
+  base: DiscountEngineOutput,
+  persistedCodeRaw: string | null | undefined,
+  persistedDiscountBani: number | null | undefined,
+  dz: DeliveryZoneForEngine | null,
+): DiscountEngineOutput {
+  const persistedCode = persistedCodeRaw?.trim() ?? ""
+  const persistedD = Math.round(
+    typeof persistedDiscountBani === "number" &&
+      Number.isFinite(persistedDiscountBani)
+      ? persistedDiscountBani
+      : 0,
+  )
+  if (!persistedCode || persistedD <= 0) return base
+
+  const slack = persistedD - base.totalDiscountBani
+  if (slack <= 0) return base
+
+  const sub = Math.max(0, Math.round(base.itemSubtotalBani))
+  const combinedDisc = Math.min(sub, Math.round(base.totalDiscountBani + slack))
+  const discountedSubtotalBaniNew = Math.max(0, sub - combinedDisc)
+  const totalDiscountBaniNew = sub - discountedSubtotalBaniNew
+
+  const hasFreeDelivery = base.appliedDiscounts.some(
+    (d) => d.effect_type === "free_delivery",
+  )
+
+  if (!dz || base.deliveryFeeBani === null) {
+    const feeBani = Math.max(0, Math.round(base.deliveryFeeBani ?? 0))
+    const extraLine = {
+      rule_id: `__website_promo__${persistedCode.toUpperCase()}`,
+      effect_type: "order_fixed" as const,
+      label_ru: `Промокод ${persistedCode}:`,
+      discount_bani: slack,
+    }
+    return {
+      ...base,
+      appliedDiscounts: [...base.appliedDiscounts, extraLine],
+      discountedSubtotalBani: discountedSubtotalBaniNew,
+      totalDiscountBani: totalDiscountBaniNew,
+      deliveryFeeBani: base.deliveryFeeBani === null ? feeBani : base.deliveryFeeBani,
+      totalBani: discountedSubtotalBaniNew + feeBani,
+    }
+  }
+
+  let deliveryFeeBaniNew: number | null = base.deliveryFeeBani
+  let totalBaniNew = base.totalBani
+  if (hasFreeDelivery) {
+    deliveryFeeBaniNew = 0
+  } else if (discountedSubtotalBaniNew >= dz.free_from_bani) {
+    deliveryFeeBaniNew = 0
+  } else {
+    deliveryFeeBaniNew = dz.price_bani
+  }
+  totalBaniNew = discountedSubtotalBaniNew + deliveryFeeBaniNew
+
+  const extraLine = {
+    rule_id: `__website_promo__${persistedCode.toUpperCase()}`,
+    effect_type: "order_fixed" as const,
+    label_ru: `Промокод ${persistedCode}:`,
+    discount_bani: slack,
+  }
+
+  return {
+    ...base,
+    appliedDiscounts: [...base.appliedDiscounts, extraLine],
+    totalDiscountBani: totalDiscountBaniNew,
+    discountedSubtotalBani: discountedSubtotalBaniNew,
+    deliveryFeeBani: deliveryFeeBaniNew,
+    totalBani: totalBaniNew,
+  }
+}
+
+/** Снимок сумм из сохранённого заказа (витрина), пока активные правила / зона подгружаются. */
+function buildPersistedDiscountEngineSeed(
+  cart: PosCartItem[],
+  persistedDiscountBani: number,
+  deliveryMode: "delivery" | "pickup",
+  deliveryFeeBani: number,
+): DiscountEngineOutput | null {
+  const discRound = Math.max(0, Math.round(persistedDiscountBani))
+  if (discRound <= 0) return null
+
+  let itemSubtotalBani = 0
+  for (const line of cart) {
+    itemSubtotalBani += Math.round(line.price) * line.qty
+  }
+  if (itemSubtotalBani <= 0) return null
+
+  const totalDiscountBani = Math.min(itemSubtotalBani, discRound)
+  const discountedSubtotalBani = itemSubtotalBani - totalDiscountBani
+
+  let deliveryFeeOut: number | null
+  let totalBaniOut: number | null
+
+  if (deliveryMode === "pickup") {
+    deliveryFeeOut = 0
+    totalBaniOut = discountedSubtotalBani
+  } else {
+    const fee = Math.max(0, Math.round(deliveryFeeBani))
+    deliveryFeeOut = fee
+    totalBaniOut = discountedSubtotalBani + fee
+  }
+
+  return {
+    appliedDiscounts: [],
+    giftItems: [],
+    itemSubtotalBani,
+    totalDiscountBani,
+    discountedSubtotalBani,
+    deliveryFeeBani: deliveryFeeOut,
+    totalBani: totalBaniOut,
+    bonusMultiplier: 1,
+  }
+}
 
 type MenuCategoryRow = {
   id: string
@@ -748,6 +867,8 @@ export function OrderForm({
   const [cartEditIndex, setCartEditIndex] = useState<number | null>(null)
   const cartModalBusyRef = useRef(false)
   const [cartActionBusy, setCartActionBusy] = useState(false)
+  const loadBrandMenu = usePosMenuCache((s) => s.loadBrandMenu)
+  const getBrandMenu = usePosMenuCache((s) => s.getBrandMenu)
 
   const [engineOutput, setEngineOutput] = useState<DiscountEngineOutput | null>(
     null,
@@ -763,6 +884,7 @@ export function OrderForm({
   )
   const [posCustomerLoading, setPosCustomerLoading] = useState(false)
   const [posCustomerLookupDone, setPosCustomerLookupDone] = useState(false)
+  const lastCustomerLookupPhoneRef = useRef<string | null>(null)
   /** saved: из справочника; new: ввод вручную */
   const [addressBookMode, setAddressBookMode] = useState<"saved" | "new">("saved")
   const [selectedSavedAddressId, setSelectedSavedAddressId] = useState<string | null>(
@@ -775,7 +897,9 @@ export function OrderForm({
   )
   const [saveCustomerBusy, setSaveCustomerBusy] = useState(false)
   /** Сумма списания бонусов в MDL (шаг «Детали» → сводка перед отправкой). */
-  const [bonusesToRedeem, setBonusesToRedeem] = useState(0)
+  const [bonusesToRedeem, setBonusesToRedeem] = useState(
+    Math.max(0, Math.floor(listOrder?.bonuses_redeemed ?? 0)),
+  )
   const [bonusRedeemFieldError, setBonusRedeemFieldError] = useState<
     string | null
   >(null)
@@ -846,8 +970,10 @@ export function OrderForm({
     [listOrder],
   )
   const [clearCartBusy, setClearCartBusy] = useState(false)
+  const [deliveryModeBusy, setDeliveryModeBusy] = useState(false)
+  const [orderMenuOpen, setOrderMenuOpen] = useState(false)
   const cartInteractionDisabled =
-    cartActionBusy || extendSubmitting || clearCartBusy || runnerBusy
+    cartActionBusy || extendSubmitting || clearCartBusy || deliveryModeBusy || runnerBusy
   const [extendError, setExtendError] = useState<string | null>(null)
   const [editBaselineDeliveryFeeBani, setEditBaselineDeliveryFeeBani] =
     useState<number | null>(null)
@@ -940,9 +1066,101 @@ export function OrderForm({
     [cartForEngine, deliveryZoneForEngine],
   )
 
-  const effectiveEngineOutput = engineOutput ?? fallbackEngineOutput
+  const rawEngineOutput = engineOutput ?? fallbackEngineOutput
+  const effectiveEngineOutput = useMemo(
+    () =>
+      mergePersistedWebsitePromoDiscount(
+        rawEngineOutput,
+        listOrder?.promo_code,
+        listOrder?.discount,
+        deliveryZoneForEngine,
+      ),
+    [
+      rawEngineOutput,
+      listOrder?.promo_code,
+      listOrder?.discount,
+      deliveryZoneForEngine,
+    ],
+  )
 
   const totalBani = effectiveEngineOutput.totalBani ?? 0
+
+  const skipWebsitePromoSeedResolve = Boolean(
+    listOrder?.source === "website" && listOrder?.promo_code?.trim(),
+  )
+
+  const persistedOrderBonusPts = useMemo(() => {
+    if (!listOrder || listOrder.id !== posOrderId) return 0
+    return Math.max(0, Math.floor(listOrder.bonuses_redeemed ?? 0))
+  }, [listOrder, posOrderId])
+
+  const effectiveBonusPoints = useMemo(() => {
+    const uiPoints = Math.max(0, Math.floor(bonusesToRedeem || 0))
+    return bonusRedeemTouched
+      ? uiPoints
+      : Math.max(persistedOrderBonusPts, uiPoints)
+  }, [bonusRedeemTouched, bonusesToRedeem, persistedOrderBonusPts])
+
+  useEffect(() => {
+    if (!listOrder || listOrder.id !== posOrderId || cart.length === 0) return
+    const d = Math.max(0, Math.round(listOrder.discount ?? 0))
+    if (d <= 0) return
+    setEngineOutput((prev) => {
+      if (prev !== null) return prev
+      return (
+        buildPersistedDiscountEngineSeed(
+          cart,
+          d,
+          listOrder.delivery_mode,
+          Math.max(0, Math.round(listOrder.delivery_fee ?? 0)),
+        ) ?? prev
+      )
+    })
+  }, [listOrder, posOrderId, cart])
+
+  /** Левый список читает `orders.total/discount`; на шаге 2 они могли не совпасть с движком — подтягиваем только в локальный снимок панели (без БД). */
+  useEffect(() => {
+    if (step !== 2) return
+    if (!listOrder || listOrder.id !== posOrderId) return
+
+    const pay = effectiveEngineOutput.totalBani
+    if (pay == null) return
+
+    const bonusBani = effectiveBonusPoints * 100
+    const disc = Math.min(
+      effectiveEngineOutput.itemSubtotalBani,
+      Math.max(0, Math.round(effectiveEngineOutput.totalDiscountBani)),
+    )
+    const roundedPay = Math.max(0, Math.round(pay) - bonusBani)
+
+    const t0 = Math.round(listOrder.total ?? 0)
+    const d0 = Math.round(listOrder.discount ?? 0)
+
+    if (
+      Math.abs(t0 - roundedPay) <= 2 &&
+      Math.abs(d0 - disc) <= 2
+    ) {
+      return
+    }
+
+    updateOrderLocalState(posOrderId, {
+      total: roundedPay,
+      discount: disc,
+      bonuses_redeemed: effectiveBonusPoints,
+      updated_at: new Date().toISOString(),
+    })
+  }, [
+    step,
+    posOrderId,
+    listOrder?.id,
+    listOrder?.total,
+    listOrder?.discount,
+    effectiveEngineOutput.totalBani,
+    effectiveEngineOutput.totalDiscountBani,
+    effectiveEngineOutput.itemSubtotalBani,
+    effectiveBonusPoints,
+    updateOrderLocalState,
+  ])
 
   const posBonusMaxRedeemable = useMemo(() => {
     const balance = posBonusBalance ?? 0
@@ -951,8 +1169,56 @@ export function OrderForm({
     return Math.floor(Math.min(balance, orderTotalMdl * rate))
   }, [posBonusBalance, totalBani, posMaxRedemptionRate])
 
-  const redeemBaniApplied = Math.round(bonusesToRedeem * 100)
+  const redeemBaniApplied = effectiveBonusPoints * 100
   const payableAfterBonusBani = Math.max(0, totalBani - redeemBaniApplied)
+
+  const optimisticCartOrderPatch = useCallback(
+    (lines: PosCartItem[]): Partial<PosOrder> => {
+      const subtotal = lines.reduce((sum, line) => sum + line.price * line.qty, 0)
+      const discount = Math.min(
+        subtotal,
+        Math.max(0, Math.round(effectiveEngineOutput.totalDiscountBani ?? 0)),
+      )
+      const deliveryFee = Math.max(
+        0,
+        Math.round(
+          effectiveEngineOutput.deliveryFeeBani ?? listOrder?.delivery_fee ?? 0,
+        ),
+      )
+      const bonusBani = effectiveBonusPoints * 100
+
+      return {
+        item_count: lines.reduce((sum, line) => sum + line.qty, 0),
+        total: Math.max(0, subtotal - discount + deliveryFee - bonusBani),
+        discount,
+        delivery_fee: deliveryFee,
+        bonuses_redeemed: effectiveBonusPoints,
+        updated_at: new Date().toISOString(),
+      }
+    },
+    [
+      effectiveBonusPoints,
+      effectiveEngineOutput.deliveryFeeBani,
+      effectiveEngineOutput.totalDiscountBani,
+      listOrder?.delivery_fee,
+    ],
+  )
+
+  const applyOptimisticCart = useCallback(
+    (lines: PosCartItem[]) => {
+      setCart(lines)
+      updateOrderLocalState(posOrderId, optimisticCartOrderPatch(lines))
+    },
+    [optimisticCartOrderPatch, posOrderId, updateOrderLocalState],
+  )
+
+  const rollbackOptimisticCart = useCallback(
+    (snapshot: PosCartItem[], message: string) => {
+      applyOptimisticCart(snapshot)
+      toast.error(message)
+    },
+    [applyOptimisticCart],
+  )
 
   const detailsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -971,7 +1237,7 @@ export function OrderForm({
     engineOutput: effectiveEngineOutput,
     appliedPromoCode,
     linkedProfileId,
-    bonusesToRedeem,
+    bonusesToRedeem: effectiveBonusPoints,
   }
 
   const clearDetailsDebounce = useCallback(() => {
@@ -997,6 +1263,7 @@ export function OrderForm({
     if (!listOrder || listOrder.id !== posOrderId) return
     if (detailsFormDirty) return
     form.reset(checkoutValuesFromPosListOrder(listOrder))
+    setBonusesToRedeem(Math.max(0, Math.floor(listOrder.bonuses_redeemed ?? 0)))
     setAppliedPromoCode(listOrder.promo_code?.trim() || null)
   }, [listOrder, posOrderId, detailsFormDirty, form])
 
@@ -1014,30 +1281,62 @@ export function OrderForm({
     setSelectedSavedAddressId(null)
     setSaveNewAddressOnSubmit(false)
     setLinkedProfileId(undefined)
-    setBonusesToRedeem(0)
     setBonusRedeemFieldError(null)
     setPosMaxRedemptionRate(null)
     setBonusRedeemTouched(false)
+    lastCustomerLookupPhoneRef.current = null
   }, [posOrderId])
+
+  useEffect(() => {
+    if (!listOrder || listOrder.id !== posOrderId) return
+    const pid = listOrder.profile_id?.trim()
+    if (!pid) return
+    setLinkedProfileId((prev) => (prev === undefined ? pid : prev))
+  }, [listOrder?.profile_id, listOrder?.id, posOrderId])
 
   const posBonusRedeemAllowed =
     typeof linkedProfileId === "string" &&
     (posBonusBalance ?? 0) > 0 &&
     totalBani > 0
 
+  const showBonusRedeemUi =
+    posBonusRedeemAllowed || persistedOrderBonusPts > 0
+
   useEffect(() => {
-    if (!posBonusRedeemAllowed) {
+    if (bonusRedeemTouched) return
+    if (!listOrder || listOrder.id !== posOrderId) {
       setBonusesToRedeem(0)
-      setBonusRedeemFieldError(null)
+      return
     }
-  }, [posBonusRedeemAllowed])
+    setBonusesToRedeem(Math.max(0, Math.floor(listOrder.bonuses_redeemed ?? 0)))
+  }, [listOrder, posOrderId, bonusRedeemTouched])
+
+  useEffect(() => {
+    if (posBonusRedeemAllowed) return
+    const persisted =
+      listOrder?.id === posOrderId
+        ? Math.max(0, Math.floor(listOrder.bonuses_redeemed ?? 0))
+        : 0
+    if (persisted > 0) return
+    setBonusesToRedeem(0)
+    setBonusRedeemFieldError(null)
+  }, [posBonusRedeemAllowed, listOrder?.id, listOrder?.bonuses_redeemed, posOrderId])
 
   useEffect(() => {
     if (!posBonusRedeemAllowed) return
-    setBonusesToRedeem((prev) =>
-      prev > posBonusMaxRedeemable ? posBonusMaxRedeemable : prev,
-    )
-  }, [posBonusRedeemAllowed, posBonusMaxRedeemable])
+    const persisted =
+      listOrder?.id === posOrderId
+        ? Math.max(0, Math.floor(listOrder.bonuses_redeemed ?? 0))
+        : 0
+    const cap = Math.max(posBonusMaxRedeemable, persisted)
+    setBonusesToRedeem((prev) => (prev > cap ? cap : prev))
+  }, [
+    posBonusRedeemAllowed,
+    posBonusMaxRedeemable,
+    listOrder?.id,
+    listOrder?.bonuses_redeemed,
+    posOrderId,
+  ])
 
   useEffect(() => {
     setBonusRedeemTouched(false)
@@ -1120,13 +1419,14 @@ export function OrderForm({
     let cancelled = false
     lastSyncedCartFingerprintRef.current = ""
     setOrderPrep({ loading: true, error: null })
+    setEngineOutput(null)
 
     void (async () => {
       const supabase = createClient()
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "delivery_fee, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
+          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
         )
         .eq("id", posOrderId)
         .maybeSingle()
@@ -1145,6 +1445,7 @@ export function OrderForm({
         delivery_mode: "delivery" | "pickup"
         delivery_address: string | null
         delivery_fee: number
+        discount: number
         payment_method: "cash" | "card"
         change_from: number | null
         comment: string | null
@@ -1231,6 +1532,15 @@ export function OrderForm({
       lastSyncedCartFingerprintRef.current = cartFingerprint(cartLines)
       setAppliedPromoCode(raw.promo_code?.trim() || null)
 
+      const seedDiscount = Math.max(0, Math.round(raw.discount ?? 0))
+      const seeded = buildPersistedDiscountEngineSeed(
+        cartLines,
+        seedDiscount,
+        raw.delivery_mode,
+        Math.max(0, Math.round(raw.delivery_fee ?? 0)),
+      )
+      setEngineOutput(seeded ?? null)
+
       const addr = posCheckoutAddressFieldsFromOrder(raw)
       form.reset({
         userName: raw.user_name?.trim() ?? "",
@@ -1261,7 +1571,9 @@ export function OrderForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- prefetch только при смене заказа; в deps `{form}` давал повторную загрузку и сброс модалки
   }, [posOrderId])
 
-  const loadCategories = useCallback(async (bid: string): Promise<boolean> => {
+  const loadCategoriesFallback = useCallback(async (
+    bid: string,
+  ): Promise<boolean> => {
     const supabase = createClient()
     const { data, error } = await supabase
       .from("menu_categories")
@@ -1286,6 +1598,27 @@ export function OrderForm({
     return true
   }, [])
 
+  const loadCategories = useCallback(
+    async (bid: string): Promise<boolean> => {
+      const cached = getBrandMenu(bid)
+      const menu = cached ?? ((await loadBrandMenu(bid)) ? getBrandMenu(bid) : null)
+
+      if (!menu) {
+        return loadCategoriesFallback(bid)
+      }
+
+      const rows = menu.categories
+      setCategories(rows)
+      setActiveCategoryId((prev) => {
+        if (!rows.length) return ""
+        if (prev && rows.some((c) => c.id === prev)) return prev
+        return rows[0]!.id
+      })
+      return true
+    },
+    [getBrandMenu, loadBrandMenu, loadCategoriesFallback],
+  )
+
   useEffect(() => {
     if (step !== 2 || !brandId) return
     if (categoriesReadyBrandRef.current === brandId) return
@@ -1295,7 +1628,7 @@ export function OrderForm({
     })()
   }, [step, brandId, loadCategories])
 
-  const loadMenuItems = useCallback(async (): Promise<boolean> => {
+  const loadMenuItemsFallback = useCallback(async (): Promise<boolean> => {
     if (!brandId || !activeCategoryId) return false
     setMenuLoading(true)
     const supabase = createClient()
@@ -1316,6 +1649,28 @@ export function OrderForm({
     setMenuItems((data ?? []) as MenuItemRow[])
     return true
   }, [brandId, activeCategoryId])
+
+  const loadMenuItems = useCallback(async (): Promise<boolean> => {
+    if (!brandId || !activeCategoryId) return false
+
+    const cached = getBrandMenu(brandId)
+    const menu =
+      cached ?? ((await loadBrandMenu(brandId)) ? getBrandMenu(brandId) : null)
+
+    if (!menu) {
+      return loadMenuItemsFallback()
+    }
+
+    setMenuLoading(false)
+    setMenuItems((menu.itemsByCategory[activeCategoryId] ?? []) as MenuItemRow[])
+    return true
+  }, [
+    activeCategoryId,
+    brandId,
+    getBrandMenu,
+    loadBrandMenu,
+    loadMenuItemsFallback,
+  ])
 
   useEffect(() => {
     if (step !== 2 || !brandId || !activeCategoryId) return
@@ -1370,6 +1725,11 @@ export function OrderForm({
       toast.message("Корзина уже пуста")
       return
     }
+    const snapshot = cart
+    const nextCart: PosCartItem[] = []
+    setModalItem(null)
+    setCartEditIndex(null)
+    applyOptimisticCart(nextCart)
     setClearCartBusy(true)
     try {
       const res = await replaceOrderItemsPos({
@@ -1377,17 +1737,78 @@ export function OrderForm({
         lines: [],
       })
       if (!res.success) {
-        toast.error(res.error ?? "Не удалось очистить корзину")
+        rollbackOptimisticCart(
+          snapshot,
+          res.error ?? "Не удалось очистить корзину",
+        )
         return
       }
-      setModalItem(null)
-      setCartEditIndex(null)
-      await refreshCartFromDb()
-      await refetchOrdersPanel()
+      lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
     } finally {
       setClearCartBusy(false)
     }
-  }, [cart.length, posOrderId, refreshCartFromDb, refetchOrdersPanel])
+  }, [
+    applyOptimisticCart,
+    cart,
+    posOrderId,
+    rollbackOptimisticCart,
+  ])
+
+  const handleChangeDeliveryMode = useCallback(
+    async (nextMode: "delivery" | "pickup") => {
+      if (deliveryMode === nextMode || deliveryModeBusy) return
+
+      setOrderMenuOpen(false)
+      setDeliveryModeBusy(true)
+      try {
+        const res = await updateOrderDeliveryModePos(posOrderId, nextMode)
+        if (!res.success) {
+          toast.error(res.error)
+          return
+        }
+
+        form.setValue("deliveryMode", res.deliveryMode, {
+          shouldDirty: true,
+          shouldTouch: true,
+          shouldValidate: true,
+        })
+        form.setValue(
+          "deliveryAddress",
+          res.deliveryMode === "delivery" ? (res.deliveryAddress ?? "") : "",
+          {
+            shouldDirty: true,
+            shouldTouch: true,
+            shouldValidate: true,
+          },
+        )
+        if (res.deliveryMode === "pickup") {
+          setZoneResult(null)
+          setEditBaselineDeliveryFeeBani(0)
+        }
+        updateOrderLocalState(posOrderId, {
+          delivery_mode: res.deliveryMode,
+          delivery_address: res.deliveryAddress,
+          delivery_fee: res.deliveryFee,
+          total: res.total,
+          updated_at: new Date().toISOString(),
+        })
+        toast.success(
+          res.deliveryMode === "delivery"
+            ? "Тип заказа изменён на доставку"
+            : "Тип заказа изменён на навынос",
+        )
+      } finally {
+        setDeliveryModeBusy(false)
+      }
+    },
+    [
+      deliveryMode,
+      deliveryModeBusy,
+      form,
+      posOrderId,
+      updateOrderLocalState,
+    ],
+  )
 
   const cartCount = useMemo(
     () => cart.reduce((n, it) => n + it.qty, 0),
@@ -1405,6 +1826,7 @@ export function OrderForm({
     async (entry: PosCartItem) => {
       if (entry.price <= 0 || entry.qty < 1) return
       if (cartInteractionDisabled) return
+      const snapshot = cart
       const idx = cart.findIndex(
         (x) =>
           x.menuItemId === entry.menuItemId &&
@@ -1412,6 +1834,13 @@ export function OrderForm({
           (x.size ?? "") === (entry.size ?? "") &&
           toppingsSignature(x.toppings) === toppingsSignature(entry.toppings),
       )
+      const nextCart =
+        idx >= 0
+          ? cart.map((line, lineIdx) =>
+              lineIdx === idx ? { ...line, qty: line.qty + entry.qty } : line,
+            )
+          : [...cart, entry]
+      applyOptimisticCart(nextCart)
       setCartActionBusy(true)
       try {
         if (idx >= 0) {
@@ -1423,11 +1852,11 @@ export function OrderForm({
               quantity: existing.qty + entry.qty,
             })
             if (!res.success) {
-              toast.error("Не удалось обновить количество")
+              rollbackOptimisticCart(snapshot, "Не удалось обновить количество")
               return
             }
           } else {
-            toast.error("Некорректное состояние корзины")
+            rollbackOptimisticCart(snapshot, "Некорректное состояние корзины")
             return
           }
         } else {
@@ -1436,23 +1865,24 @@ export function OrderForm({
             lines: [posLinePayloadFromCartItem(entry)],
           })
           if (!res.success) {
-            toast.error("Не удалось добавить позицию")
+            rollbackOptimisticCart(snapshot, "Не удалось добавить позицию")
             return
           }
+          void refreshCartFromDb()
         }
-        await refreshCartFromDb()
-        await refetchOrdersPanel()
+        lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
       } finally {
         setCartActionBusy(false)
       }
     },
     [
+      applyOptimisticCart,
       cart,
       cartInteractionDisabled,
       posOrderId,
       refreshCartFromDb,
+      rollbackOptimisticCart,
       toppingsSignature,
-      refetchOrdersPanel,
     ],
   )
 
@@ -1488,6 +1918,14 @@ export function OrderForm({
       const row = cart[idx]
       if (!row?.orderItemId) return
       const q = row.qty + delta
+      const snapshot = cart
+      const nextCart =
+        q < 1
+          ? cart.filter((_, lineIdx) => lineIdx !== idx)
+          : cart.map((line, lineIdx) =>
+              lineIdx === idx ? { ...line, qty: q } : line,
+            )
+      applyOptimisticCart(nextCart)
       setCartActionBusy(true)
       try {
         if (q < 1) {
@@ -1496,7 +1934,7 @@ export function OrderForm({
             itemId: row.orderItemId,
           })
           if (!res.success) {
-            toast.error("Не удалось удалить позицию")
+            rollbackOptimisticCart(snapshot, "Не удалось удалить позицию")
             return
           }
         } else {
@@ -1506,22 +1944,21 @@ export function OrderForm({
             quantity: q,
           })
           if (!res.success) {
-            toast.error("Не удалось обновить количество")
+            rollbackOptimisticCart(snapshot, "Не удалось обновить количество")
             return
           }
         }
-        await refreshCartFromDb()
-        await refetchOrdersPanel()
+        lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
       } finally {
         setCartActionBusy(false)
       }
     },
     [
+      applyOptimisticCart,
       cart,
       cartInteractionDisabled,
       posOrderId,
-      refreshCartFromDb,
-      refetchOrdersPanel,
+      rollbackOptimisticCart,
     ],
   )
 
@@ -1530,8 +1967,11 @@ export function OrderForm({
       if (cartInteractionDisabled) return
       const row = cart[idx]
       if (!row) return
+      const snapshot = cart
+      const nextCart = cart.filter((_, lineIdx) => lineIdx !== idx)
+      applyOptimisticCart(nextCart)
       if (!row.orderItemId) {
-        setCart((prev) => prev.filter((_, i) => i !== idx))
+        lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
         return
       }
       setCartActionBusy(true)
@@ -1541,16 +1981,21 @@ export function OrderForm({
           itemId: row.orderItemId,
         })
         if (!res.success) {
-          toast.error("Не удалось удалить позицию")
+          rollbackOptimisticCart(snapshot, "Не удалось удалить позицию")
           return
         }
-        await refreshCartFromDb()
-        await refetchOrdersPanel()
+        lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
       } finally {
         setCartActionBusy(false)
       }
     },
-    [cart, cartInteractionDisabled, posOrderId, refreshCartFromDb, refetchOrdersPanel],
+    [
+      applyOptimisticCart,
+      cart,
+      cartInteractionDisabled,
+      posOrderId,
+      rollbackOptimisticCart,
+    ],
   )
 
   const closeProductModal = useCallback(() => {
@@ -1558,29 +2003,44 @@ export function OrderForm({
     setCartEditIndex(null)
   }, [])
 
-  const openCartLineModal = useCallback(async (idx: number) => {
-    if (cartModalBusyRef.current) return
-    const line = cart[idx]
-    if (!line) return
-    cartModalBusyRef.current = true
-    try {
-      const supabase = createClient()
-      const { data, error } = await supabase
-        .from("menu_items")
-        .select(POS_MENU_ITEM_FOR_MODAL_SELECT)
-        .eq("id", line.menuItemId)
-        .maybeSingle()
+  const openCartLineModal = useCallback(
+    async (idx: number) => {
+      if (cartModalBusyRef.current) return
+      const line = cart[idx]
+      if (!line) return
+      cartModalBusyRef.current = true
+      try {
+        const cachedMenu = brandId ? getBrandMenu(brandId) : null
+        const menu =
+          cachedMenu ??
+          (brandId && (await loadBrandMenu(brandId)) ? getBrandMenu(brandId) : null)
+        const cachedItem = menu?.itemsById[line.menuItemId]
 
-      if (error || !data) {
-        console.error("[order-form] cart line modal", error?.message ?? "empty")
-        return
+        if (cachedItem) {
+          setCartEditIndex(idx)
+          setModalItem(posMenuRowForModal(cachedItem as MenuItemRow))
+          return
+        }
+
+        const supabase = createClient()
+        const { data, error } = await supabase
+          .from("menu_items")
+          .select(POS_MENU_ITEM_FOR_MODAL_SELECT)
+          .eq("id", line.menuItemId)
+          .maybeSingle()
+
+        if (error || !data) {
+          console.error("[order-form] cart line modal", error?.message ?? "empty")
+          return
+        }
+        setCartEditIndex(idx)
+        setModalItem(posMenuRowForModal(data as MenuItemRow))
+      } finally {
+        cartModalBusyRef.current = false
       }
-      setCartEditIndex(idx)
-      setModalItem(posMenuRowForModal(data as MenuItemRow))
-    } finally {
-      cartModalBusyRef.current = false
-    }
-  }, [cart])
+    },
+    [brandId, cart, getBrandMenu, loadBrandMenu],
+  )
 
   const saveCartLineFromModal = useCallback(
     async (cartIndex: number, c: PosCartItem) => {
@@ -1591,6 +2051,11 @@ export function OrderForm({
       if (!prevLine?.orderItemId) {
         throw new Error("Некорректное состояние корзины")
       }
+      const snapshot = cart
+      const nextCart = cart.map((line, idx) =>
+        idx === cartIndex ? { ...c, orderItemId: prevLine.orderItemId } : line,
+      )
+      applyOptimisticCart(nextCart)
       setCartActionBusy(true)
       try {
         const linePayload = posLinePayloadFromCartItem(c)
@@ -1609,20 +2074,23 @@ export function OrderForm({
           })),
         })
         if (!res.success) {
+          rollbackOptimisticCart(
+            snapshot,
+            res.error ?? "Не удалось сохранить позицию",
+          )
           throw new Error(res.error ?? "Не удалось сохранить позицию")
         }
-        await refreshCartFromDb()
-        await refetchOrdersPanel()
+        lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
       } finally {
         setCartActionBusy(false)
       }
     },
     [
+      applyOptimisticCart,
       cart,
       cartInteractionDisabled,
       posOrderId,
-      refreshCartFromDb,
-      refetchOrdersPanel,
+      rollbackOptimisticCart,
     ],
   )
 
@@ -1633,7 +2101,6 @@ export function OrderForm({
   const [cancelOrderFeedback, setCancelOrderFeedback] = useState<string | null>(
     null,
   )
-  const [orderMenuOpen, setOrderMenuOpen] = useState(false)
 
   const persistBrandOrError = async (): Promise<boolean> => {
     if (!selectedBrand) {
@@ -1735,6 +2202,18 @@ export function OrderForm({
       const totalDiscountBani = eng.totalDiscountBani
       const feeBani = eng.deliveryFeeBani ?? 0
 
+      const fromOrderBonuses =
+        listOrder?.id === posOrderId
+          ? Math.max(0, Math.floor(listOrder.bonuses_redeemed ?? 0))
+          : 0
+      const uiBonuses = Math.max(
+        0,
+        Math.floor(detailsPricingRef.current.bonusesToRedeem ?? 0),
+      )
+      const bonusesRedeemedPoints = bonusRedeemTouched
+        ? uiBonuses
+        : Math.max(fromOrderBonuses, uiBonuses)
+
       const res = await updateOrderDetailsPos({
         orderId: posOrderId,
         userName: values.userName,
@@ -1766,6 +2245,7 @@ export function OrderForm({
             ? (posDeliveryGeoRef.current?.lng ?? null)
             : null,
         bonus_multiplier: eng?.bonusMultiplier ?? 1,
+        bonusesRedeemedPoints,
       })
       if (!res.success) {
         if (opts?.forSubmit) setSubmitError(res.error)
@@ -1774,17 +2254,21 @@ export function OrderForm({
       }
       const sub = eng.itemSubtotalBani
       const safeDiscount = Math.min(totalDiscountBani, sub)
-      const cardTotal = Math.max(0, sub - safeDiscount + feeBani)
+      const cardTotal = Math.max(
+        0,
+        sub - safeDiscount + feeBani - bonusesRedeemedPoints * 100,
+      )
       updateOrderLocalState(posOrderId, {
         total: cardTotal,
         delivery_fee: feeBani,
         discount: safeDiscount,
+        bonuses_redeemed: bonusesRedeemedPoints,
         updated_at: new Date().toISOString(),
       })
       if (opts?.forSubmit) setSubmitError(null)
       return true
     },
-    [selectedBrand, form, posOrderId, updateOrderLocalState],
+    [selectedBrand, form, posOrderId, updateOrderLocalState, listOrder, bonusRedeemTouched],
   )
 
   const scheduleDebouncedDetailsSave = useCallback(() => {
@@ -1815,7 +2299,7 @@ export function OrderForm({
     (rawStr: string) => {
       setBonusRedeemTouched(true)
       const rate = posMaxRedemptionRate ?? 0.3
-      const maxRedeemable = posBonusMaxRedeemable
+      const maxAllowed = Math.max(posBonusMaxRedeemable, persistedOrderBonusPts)
       const t = rawStr.trim().replace(",", ".")
       if (t === "") {
         setBonusesToRedeem(0)
@@ -1826,17 +2310,17 @@ export function OrderForm({
       if (!Number.isFinite(raw)) {
         return
       }
-      const capped = Math.max(0, Math.min(raw, maxRedeemable))
+      const capped = Math.max(0, Math.min(raw, maxAllowed))
       let msg: string | null = null
       if (raw < 0) {
         msg = "Сумма не может быть отрицательной"
-      } else if (raw > maxRedeemable) {
-        msg = `Максимум ${maxRedeemable} бонусов (${Math.round(rate * 100)}% от суммы заказа)`
+      } else if (raw > maxAllowed) {
+        msg = `Максимум ${maxAllowed} бонусов (${Math.round(rate * 100)}% от суммы заказа)`
       }
       setBonusRedeemFieldError(msg)
       setBonusesToRedeem(capped)
     },
-    [posMaxRedemptionRate, posBonusMaxRedeemable],
+    [posMaxRedemptionRate, posBonusMaxRedeemable, persistedOrderBonusPts],
   )
 
   const applyAddressRowToForm = useCallback(
@@ -1928,11 +2412,20 @@ export function OrderForm({
 
   useEffect(() => {
     if (step !== 3) return
+    if (!detailsFormDirty) return
+    const normalizedPhone = buildPhoneForSave(userPhoneWatched)
+    const digits = phoneDigitsCount(normalizedPhone)
+    if (digits < 11) {
+      lastCustomerLookupPhoneRef.current = null
+    } else if (lastCustomerLookupPhoneRef.current === normalizedPhone) {
+      return
+    }
     if (phoneLookupDebounceRef.current !== undefined) {
       clearTimeout(phoneLookupDebounceRef.current)
     }
     phoneLookupDebounceRef.current = setTimeout(() => {
       phoneLookupDebounceRef.current = undefined
+      lastCustomerLookupPhoneRef.current = normalizedPhone
       void runPosCustomerLookup(userPhoneWatched)
     }, 500)
     return () => {
@@ -1940,7 +2433,7 @@ export function OrderForm({
         clearTimeout(phoneLookupDebounceRef.current)
       }
     }
-  }, [step, userPhoneWatched, runPosCustomerLookup])
+  }, [step, userPhoneWatched, detailsFormDirty, runPosCustomerLookup])
 
   const handleSaveNewPosCustomer = useCallback(async () => {
     const v = form.getValues()
@@ -2270,7 +2763,13 @@ export function OrderForm({
         <PosHeaderIconButton
           type="button"
           aria-label="Действия с заказом"
-          disabled={clearCartBusy || extendSubmitting || submitting || runnerBusy}
+          disabled={
+            clearCartBusy ||
+            deliveryModeBusy ||
+            extendSubmitting ||
+            submitting ||
+            runnerBusy
+          }
         >
           <MoreVertical className="size-4" strokeWidth={2} />
         </PosHeaderIconButton>
@@ -2282,8 +2781,36 @@ export function OrderForm({
       >
         <button
           type="button"
+          disabled={deliveryMode === "delivery" || deliveryModeBusy}
+          onClick={() => {
+            void handleChangeDeliveryMode("delivery")
+          }}
+          className={cn(
+            "flex w-full items-center rounded-lg px-3 py-2.5 text-left text-[13px] font-medium text-[#242424]",
+            "hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40",
+          )}
+        >
+          Сделать доставкой
+        </button>
+        <button
+          type="button"
+          disabled={deliveryMode === "pickup" || deliveryModeBusy}
+          onClick={() => {
+            void handleChangeDeliveryMode("pickup")
+          }}
+          className={cn(
+            "flex w-full items-center rounded-lg px-3 py-2.5 text-left text-[13px] font-medium text-[#242424]",
+            "hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40",
+          )}
+        >
+          Сделать навыносом
+        </button>
+        <div className="my-1 h-px bg-[#f2f2f2]" />
+        <button
+          type="button"
           disabled={
             clearCartBusy ||
+            deliveryModeBusy ||
             extendSubmitting ||
             runnerBusy ||
             cart.length === 0
@@ -2527,6 +3054,9 @@ export function OrderForm({
                   {brandId ? (
                     <PromoPanel
                       brandId={brandId}
+                      promoSessionKey={posOrderId}
+                      seedPromoCode={listOrder?.promo_code?.trim() ?? null}
+                      skipSeedResolve={skipWebsitePromoSeedResolve}
                       items={cartForEngine}
                       deliveryZone={deliveryZoneForEngine}
                       onDiscountChange={setEngineOutput}
@@ -2536,6 +3066,7 @@ export function OrderForm({
                   <DiscountBreakdown
                     output={effectiveEngineOutput}
                     deliveryZone={deliveryZoneForEngine}
+                    bonusRedeemedBani={redeemBaniApplied}
                   />
                 </>
               }
@@ -2715,50 +3246,6 @@ export function OrderForm({
                 className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4"
                 onSubmit={onSubmit}
               >
-                {/* ── Тип заказа ── */}
-                <FormField
-                  control={form.control}
-                  name="deliveryMode"
-                  render={({ field }) => (
-                    <FormSection title="Тип заказа">
-                      <div className="grid grid-cols-2 gap-2">
-                        <ModeButton
-                          active={field.value === "delivery"}
-                          onClick={() => {
-                            field.onChange("delivery")
-                            updateOrderLocalState(posOrderId, {
-                              delivery_mode: "delivery",
-                              updated_at: new Date().toISOString(),
-                            })
-                            clearDetailsDebounce()
-                            window.setTimeout(() => {
-                              void runDetailsSaveToServer()
-                            }, 0)
-                          }}
-                          icon={<Truck className="size-4 shrink-0" />}
-                          label="Доставка"
-                        />
-                        <ModeButton
-                          active={field.value === "pickup"}
-                          onClick={() => {
-                            field.onChange("pickup")
-                            updateOrderLocalState(posOrderId, {
-                              delivery_mode: "pickup",
-                              updated_at: new Date().toISOString(),
-                            })
-                            clearDetailsDebounce()
-                            window.setTimeout(() => {
-                              void runDetailsSaveToServer()
-                            }, 0)
-                          }}
-                          icon={<ShoppingBag className="size-4 shrink-0" />}
-                          label="Самовывоз"
-                        />
-                      </div>
-                    </FormSection>
-                  )}
-                />
-
                 {/* ── Контактные данные ── */}
                 <FormSection title="Контактные данные">
                   <div className="grid grid-cols-2 gap-3">
@@ -2839,7 +3326,7 @@ export function OrderForm({
                         Бонусы: {posBonusBalance ?? 0}
                       </span>
                     ) : null}
-                    {posBonusRedeemAllowed ? (
+                    {showBonusRedeemUi ? (
                       <div className="mt-2 w-full max-w-[280px] space-y-1">
                         <label
                           htmlFor="pos-bonus-redeem"
@@ -2847,7 +3334,7 @@ export function OrderForm({
                         >
                           Списать бонусов
                         </label>
-                        {!bonusRedeemTouched ? (
+                        {!bonusRedeemTouched && posBonusRedeemAllowed ? (
                           <p className="text-[11px] text-[#808080]">
                             Можно списать до {posBonusMaxRedeemable} бонусов (
                             {Math.round((posMaxRedemptionRate ?? 0.3) * 100)}% от
@@ -2861,7 +3348,13 @@ export function OrderForm({
                           step={0.01}
                           inputMode="decimal"
                           className="h-8 font-mono text-xs tabular-nums"
-                          value={bonusesToRedeem === 0 ? "" : bonusesToRedeem}
+                          value={
+                            bonusesToRedeem === 0 && !bonusRedeemTouched
+                              ? effectiveBonusPoints === 0
+                                ? ""
+                                : effectiveBonusPoints
+                              : bonusesToRedeem
+                          }
                           onChange={(e) =>
                             handleBonusRedeemInputChange(e.target.value)
                           }
@@ -2874,7 +3367,7 @@ export function OrderForm({
                         <p className="text-[11px] text-[#808080]">
                           К оплате: {formatMdlAmount(payableAfterBonusBani)} MDL
                           <span className="mx-1.5 opacity-50">|</span>
-                          Списывается бонусов: {bonusesToRedeem}
+                          Списывается бонусов: {effectiveBonusPoints}
                         </p>
                       </div>
                     ) : null}
@@ -3247,6 +3740,9 @@ export function OrderForm({
                 {brandId ? (
                   <PromoPanel
                     brandId={brandId}
+                    promoSessionKey={posOrderId}
+                    seedPromoCode={listOrder?.promo_code?.trim() ?? null}
+                    skipSeedResolve={skipWebsitePromoSeedResolve}
                     items={cartForEngine}
                     deliveryZone={deliveryZoneForEngine}
                     onDiscountChange={setEngineOutput}
@@ -3256,23 +3752,8 @@ export function OrderForm({
                 <DiscountBreakdown
                   output={effectiveEngineOutput}
                   deliveryZone={deliveryZoneForEngine}
+                  bonusRedeemedBani={redeemBaniApplied}
                 />
-                {bonusesToRedeem > 0 ? (
-                  <div className="flex justify-between gap-2 border-t border-border pt-2 text-xs text-emerald-700">
-                    <span>Списание бонусов</span>
-                    <span className="font-mono tabular-nums">
-                      −{formatMdl(redeemBaniApplied)}
-                    </span>
-                  </div>
-                ) : null}
-                {bonusesToRedeem > 0 ? (
-                  <div className="flex justify-between gap-2 text-xs font-semibold text-[#242424]">
-                    <span>К оплате</span>
-                    <span className="font-mono tabular-nums">
-                      {formatMdl(payableAfterBonusBani)}
-                    </span>
-                  </div>
-                ) : null}
               </div>
               {showPayOrderCta ? (
                 <button

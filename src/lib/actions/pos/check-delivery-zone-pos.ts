@@ -7,6 +7,30 @@ import type { DeliveryZone } from "@/types/database"
 const NOMINATIM = "https://nominatim.openstreetmap.org"
 const USER_AGENT = "KitchPizza/1.0"
 
+function zonesViewbox(zones: DeliveryZone[]): string | null {
+  const points = zones
+    .flatMap((zone) => (Array.isArray(zone.polygon) ? zone.polygon : []))
+    .filter(
+      (point): point is [number, number] =>
+        Array.isArray(point) &&
+        point.length >= 2 &&
+        Number.isFinite(Number(point[0])) &&
+        Number.isFinite(Number(point[1])),
+    )
+
+  if (!points.length) return null
+
+  const lats = points.map((point) => Number(point[0]))
+  const lngs = points.map((point) => Number(point[1]))
+  const pad = 0.01
+  const minLat = Math.min(...lats) - pad
+  const maxLat = Math.max(...lats) + pad
+  const minLng = Math.min(...lngs) - pad
+  const maxLng = Math.max(...lngs) + pad
+
+  return `${minLng},${maxLat},${maxLng},${minLat}`
+}
+
 async function getZonesByBrandSlug(brandSlug: string): Promise<DeliveryZone[]> {
   const supabase = createServiceRoleClient()
 
@@ -53,14 +77,21 @@ export async function checkDeliveryZoneByAddress(
   const q = address.trim()
   if (!q) return { status: "not_found" }
 
+  const zones = await getZonesByBrandSlug(brandSlug)
+  const viewbox = zonesViewbox(zones)
+
   const url = new URL(`${NOMINATIM}/search`)
   url.searchParams.set("q", q)
   url.searchParams.set("format", "json")
-  url.searchParams.set("limit", "1")
+  url.searchParams.set("limit", "5")
   url.searchParams.set("countrycodes", "md")
   url.searchParams.set("addressdetails", "1")
+  if (viewbox) {
+    url.searchParams.set("viewbox", viewbox)
+    url.searchParams.set("bounded", "1")
+  }
 
-  let lat: number, lng: number, display_name: string
+  let candidates: Array<{ lat: number; lng: number; display_name: string }>
 
   try {
     const res = await fetch(url.toString(), {
@@ -74,25 +105,42 @@ export async function checkDeliveryZoneByAddress(
       lon: string
       display_name: string
     }>
-    const first = json[0]
-    if (!first) return { status: "not_found" }
-
-    lat = Number(first.lat)
-    lng = Number(first.lon)
-    display_name = first.display_name
-
-    if (!Number.isFinite(lat) || !Number.isFinite(lng))
-      return { status: "not_found" }
+    candidates = json
+      .map((item) => ({
+        lat: Number(item.lat),
+        lng: Number(item.lon),
+        display_name: item.display_name,
+      }))
+      .filter(
+        (item) =>
+          Number.isFinite(item.lat) &&
+          Number.isFinite(item.lng) &&
+          Boolean(item.display_name),
+      )
+    if (!candidates.length) return { status: "not_found" }
   } catch {
     return { status: "error", message: "Ошибка геокодирования" }
   }
 
-  const zones = await getZonesByBrandSlug(brandSlug)
-  const zone = findZoneForPoint(lat, lng, zones)
-
-  if (zone) {
-    return { status: "in_zone", zone, display_name, lat, lng }
+  for (const candidate of candidates) {
+    const zone = findZoneForPoint(candidate.lat, candidate.lng, zones)
+    if (zone) {
+      return {
+        status: "in_zone",
+        zone,
+        display_name: candidate.display_name,
+        lat: candidate.lat,
+        lng: candidate.lng,
+      }
+    }
   }
 
-  return { status: "out_of_zone", display_name, lat, lng }
+  const first = candidates[0]
+
+  return {
+    status: "out_of_zone",
+    display_name: first.display_name,
+    lat: first.lat,
+    lng: first.lng,
+  }
 }

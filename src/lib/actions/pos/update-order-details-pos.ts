@@ -32,11 +32,106 @@ export type UpdateOrderDetailsPosInput = {
   delivery_lng?: number | null
   /** Множитель начисления бонусов (POS / движок скидок). */
   bonus_multiplier?: number
+  /**
+   * Пункты списания для `orders.total` и `orders.bonuses_redeemed` (1 п. = 100 бань).
+   * Передаётся из POS-мастера; если не указано — только значение из БД (совместимость).
+   */
+  bonusesRedeemedPoints?: number
 }
 
 export type UpdateOrderDetailsPosResult =
   | { success: true }
   | { success: false; error: string }
+
+export type UpdateOrderDeliveryModePosResult =
+  | {
+      success: true
+      deliveryMode: "delivery" | "pickup"
+      deliveryAddress: string | null
+      deliveryFee: number
+      total: number
+    }
+  | { success: false; error: string }
+
+export async function updateOrderDeliveryModePos(
+  orderId: string,
+  deliveryMode: "delivery" | "pickup",
+): Promise<UpdateOrderDeliveryModePosResult> {
+  const staff = await getCurrentStaff()
+  if (!staff) {
+    return { success: false, error: "Сессия кассира недействительна" }
+  }
+
+  let supabase
+  try {
+    supabase = createServiceRoleClient()
+  } catch {
+    return { success: false, error: "Сервер временно недоступен" }
+  }
+
+  const { data: orderRow, error: loadError } = await supabase
+    .from("orders")
+    .select("id, delivery_address, delivery_fee, discount, bonuses_redeemed")
+    .eq("id", orderId)
+    .maybeSingle()
+
+  if (loadError || !orderRow) {
+    console.error("[updateOrderDeliveryModePos] load", loadError?.message)
+    return { success: false, error: "Заказ не найден" }
+  }
+
+  const { data: itemRows, error: itemsError } = await supabase
+    .from("order_items")
+    .select("price")
+    .eq("order_id", orderId)
+
+  if (itemsError) {
+    console.error("[updateOrderDeliveryModePos] items", itemsError.message)
+    return { success: false, error: "Не удалось пересчитать заказ" }
+  }
+
+  const subtotalBani = (itemRows ?? []).reduce(
+    (s, r) => s + Math.round((r as { price: number }).price ?? 0),
+    0,
+  )
+  const row = orderRow as {
+    delivery_address: string | null
+    delivery_fee: number | null
+    discount: number | null
+    bonuses_redeemed: number | null
+  }
+  const safeDiscount = Math.min(
+    Math.max(0, Math.round(row.discount ?? 0)),
+    subtotalBani,
+  )
+  const bonusBani = Math.max(0, Math.floor(row.bonuses_redeemed ?? 0)) * 100
+  const deliveryFee = deliveryMode === "pickup" ? 0 : Math.max(0, row.delivery_fee ?? 0)
+  const deliveryAddress =
+    deliveryMode === "pickup"
+      ? "Самовывоз — bd. Dacia 27"
+      : row.delivery_address === "Самовывоз — bd. Dacia 27"
+        ? null
+        : row.delivery_address
+  const total = Math.max(0, subtotalBani - safeDiscount + deliveryFee - bonusBani)
+
+  const { error: updateError } = await supabase
+    .from("orders")
+    .update({
+      delivery_mode: deliveryMode,
+      delivery_address: deliveryAddress,
+      delivery_fee: deliveryFee,
+      total,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+
+  if (updateError) {
+    console.error("[updateOrderDeliveryModePos] update", updateError.message)
+    return { success: false, error: "Не удалось сменить тип заказа" }
+  }
+
+  return { success: true, deliveryMode, deliveryAddress, deliveryFee, total }
+}
 
 export async function updateOrderDetailsPos(
   input: UpdateOrderDetailsPosInput,
@@ -77,7 +172,7 @@ export async function updateOrderDetailsPos(
 
   const { data: orderRow, error: loadError } = await supabase
     .from("orders")
-    .select("id, brand_id")
+    .select("id, brand_id, bonuses_redeemed")
     .eq("id", input.orderId)
     .maybeSingle()
 
@@ -85,6 +180,24 @@ export async function updateOrderDetailsPos(
     console.error("[updateOrderDetailsPos] load", loadError?.message)
     return { success: false, error: "Заказ не найден" }
   }
+
+  const existingBonusPointsRaw = (orderRow as { bonuses_redeemed: unknown })
+    .bonuses_redeemed
+  const bonusPtsFromDb =
+    typeof existingBonusPointsRaw === "number" &&
+    Number.isFinite(existingBonusPointsRaw)
+      ? Math.max(0, Math.floor(existingBonusPointsRaw))
+      : Math.max(0, Math.floor(Number(existingBonusPointsRaw) || 0))
+
+  const bonusPtsFromInput =
+    input.bonusesRedeemedPoints !== undefined
+      ? Math.max(0, Math.floor(Number(input.bonusesRedeemedPoints)))
+      : null
+
+  const bonusPointsForTotal =
+    bonusPtsFromInput !== null ? bonusPtsFromInput : bonusPtsFromDb
+
+  const bonusesRedeemedBani = bonusPointsForTotal * 100
 
   const { data: itemRows, error: itemsError } = await supabase
     .from("order_items")
@@ -102,11 +215,10 @@ export async function updateOrderDetailsPos(
   )
 
   const safeDiscount = Math.min(discountBani, subtotalBani)
-  const totalBani = subtotalBani - safeDiscount + deliveryFeeBani
-  if (totalBani < 0) {
-    return { success: false, error: "Некорректная сумма заказа" }
-  }
-
+  const totalBani = Math.max(
+    0,
+    subtotalBani - safeDiscount + deliveryFeeBani - bonusesRedeemedBani,
+  )
   let delivery_lat: number | null = null
   let delivery_lng: number | null = null
   if (input.deliveryMode === "delivery") {
@@ -162,6 +274,10 @@ export async function updateOrderDetailsPos(
     delivery_lat,
     delivery_lng,
     bonus_multiplier: input.bonus_multiplier ?? 1,
+  }
+
+  if (bonusPtsFromInput !== null) {
+    patch.bonuses_redeemed = bonusPtsFromInput
   }
 
   if (input.profileId !== undefined) {

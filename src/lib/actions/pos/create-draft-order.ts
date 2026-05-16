@@ -1,5 +1,6 @@
 "use server"
 
+import { normalizePosBrandSlug } from "@/brands/index"
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
@@ -7,13 +8,21 @@ export type CreateDraftOrderResult =
   | { success: true; orderId: string }
   | { success: false; error: string }
 
-export async function createDraftOrder(): Promise<CreateDraftOrderResult> {
+export type CreateDraftOrderOptions = {
+  brandSlug?: string | null
+  userPhone?: string | null
+  profileId?: string | null
+  userName?: string | null
+  deliveryMode?: "delivery" | "pickup"
+}
+
+export async function createDraftOrder(
+  options?: CreateDraftOrderOptions,
+): Promise<CreateDraftOrderResult> {
   const staff = await getCurrentStaff()
   if (!staff) {
     return { success: false, error: "Сессия кассира недействительна" }
   }
-
-  console.log("[createDraftOrderPos] session ok, inserting draft...")
 
   let supabase
   try {
@@ -22,18 +31,46 @@ export async function createDraftOrder(): Promise<CreateDraftOrderResult> {
     return { success: false, error: "Сервер временно недоступен" }
   }
 
+  let brand_id: string | null = null
+  const rawSlug = options?.brandSlug?.trim()
+  if (rawSlug) {
+    const slug = normalizePosBrandSlug(rawSlug)
+    const { data: brandRow, error: brandErr } = await supabase
+      .from("brands")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle()
+
+    if (brandErr) {
+      console.error("[createDraftOrder] brands lookup", brandErr.message)
+      return { success: false, error: brandErr.message ?? "Бренд не найден" }
+    }
+    if (!brandRow) {
+      return { success: false, error: "Бренд не найден" }
+    }
+    brand_id = (brandRow as { id: string }).id
+  }
+
+  const user_phone = options?.userPhone?.trim() || null
+  const user_name = options?.userName?.trim() || null
+  const profile_id =
+    typeof options?.profileId === "string" && options.profileId.trim()
+      ? options.profileId.trim()
+      : null
+
   const insertRow = {
     status: "draft" as const,
     source: "pos" as const,
     operator_id: staff.id,
     total: 0,
-    delivery_mode: "delivery" as const,
+    delivery_mode: options?.deliveryMode ?? ("delivery" as const),
     payment_method: "cash" as const,
     delivery_fee: 0,
     discount: 0,
-    brand_id: null,
-    user_name: null,
-    user_phone: null,
+    brand_id,
+    user_name,
+    user_phone,
+    profile_id,
     delivery_address: null,
     promo_code: null,
     scheduled_time: null,
@@ -46,8 +83,7 @@ export async function createDraftOrder(): Promise<CreateDraftOrderResult> {
     address_intercom: null,
   }
 
-  const { data, error } = await supabase
-    .from("orders")
+  const { data, error } = await (supabase.from("orders") as any)
     .insert(insertRow)
     .select("id")
     .single()

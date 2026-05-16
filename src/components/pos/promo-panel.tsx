@@ -9,7 +9,7 @@ import type {
   DiscountRule,
 } from '@/types/promotions'
 import { Check, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 function matchesTargets(item: CartItemForEngine, rule: DiscountRule): boolean {
   const ti = rule.target_item_ids
@@ -34,6 +34,12 @@ function totalQualifyingForRule(items: CartItemForEngine[], rule: DiscountRule):
 
 export type PromoPanelProps = {
   brandId: string
+  /** Очередной заказ мастера: скидывает блокировку сева и промо-only флаг */
+  promoSessionKey: string
+  /** Промокод из `orders.promo_code` (витрина) — тихое `resolvePromoCode` при открытии */
+  seedPromoCode?: string | null
+  /** Из `orders.promo_code`; при true — синхронно показать код без серверного `resolvePromoCode` (витрина). */
+  skipSeedResolve?: boolean
   items: CartItemForEngine[]
   deliveryZone: DeliveryZoneForEngine | null
   onDiscountChange: (output: DiscountEngineOutput) => void
@@ -43,6 +49,9 @@ export type PromoPanelProps = {
 
 export function PromoPanel({
   brandId,
+  promoSessionKey,
+  seedPromoCode,
+  skipSeedResolve = false,
   items,
   deliveryZone,
   onDiscountChange,
@@ -54,7 +63,18 @@ export function PromoPanel({
   const [promoStatus, setPromoStatus] = useState<
     'idle' | 'loading' | 'applied' | 'error'
   >('idle')
+  const [websitePromoOnly, setWebsitePromoOnly] = useState(false)
   const [promoError, setPromoError] = useState('')
+
+  /** Не переинициализировать промо с заказа после того как оператор снял это же значение вручную. */
+  const suppressSeedNormalizedRef = useRef<string | null>(null)
+  const seedTicketRef = useRef(0)
+
+  useEffect(() => {
+    suppressSeedNormalizedRef.current = null
+    if (!skipSeedResolve) setWebsitePromoOnly(false)
+    seedTicketRef.current += 1
+  }, [promoSessionKey, skipSeedResolve])
 
   useEffect(() => {
     let cancelled = false
@@ -66,6 +86,68 @@ export function PromoPanel({
       cancelled = true
     }
   }, [brandId])
+
+  useLayoutEffect(() => {
+    if (!skipSeedResolve) return
+    const codeRaw = seedPromoCode?.trim()
+    if (!codeRaw || !brandId) return
+
+    const normalized = codeRaw.toUpperCase()
+    if (suppressSeedNormalizedRef.current === normalized) return
+
+    seedTicketRef.current += 1
+    suppressSeedNormalizedRef.current = null
+    setPromoCodeRule(null)
+    setPromoInput(normalized)
+    setPromoError('')
+    setPromoStatus('applied')
+    setWebsitePromoOnly(true)
+    onAppliedPromoCodeChange?.(normalized)
+  }, [
+    skipSeedResolve,
+    brandId,
+    promoSessionKey,
+    seedPromoCode,
+    onAppliedPromoCodeChange,
+  ])
+
+  useEffect(() => {
+    if (skipSeedResolve) return
+    const codeRaw = seedPromoCode?.trim()
+    if (!codeRaw || !brandId) return
+    const normalized = codeRaw.toUpperCase()
+    if (suppressSeedNormalizedRef.current === normalized) return
+
+    seedTicketRef.current += 1
+    const ticket = seedTicketRef.current
+
+    void (async () => {
+      const result = await resolvePromoCode(brandId, codeRaw)
+      if (ticket !== seedTicketRef.current) return
+      suppressSeedNormalizedRef.current = null
+
+      if ('error' in result) {
+        setPromoCodeRule(null)
+        setPromoInput(normalized)
+        setPromoError('')
+        setPromoStatus('applied')
+        setWebsitePromoOnly(true)
+        onAppliedPromoCodeChange?.(normalized)
+      } else {
+        setPromoCodeRule(result.rule)
+        setPromoInput(normalized)
+        setPromoError('')
+        setPromoStatus('applied')
+        setWebsitePromoOnly(false)
+        onAppliedPromoCodeChange?.(normalized)
+      }
+    })()
+  }, [
+    brandId,
+    promoSessionKey,
+    seedPromoCode,
+    onAppliedPromoCodeChange,
+  ])
 
   const output = useMemo(
     () =>
@@ -84,25 +166,36 @@ export function PromoPanel({
 
   async function handleApplyPromo() {
     if (!promoInput.trim()) return
+    seedTicketRef.current += 1
+    suppressSeedNormalizedRef.current = null
     setPromoStatus('loading')
     const result = await resolvePromoCode(brandId, promoInput)
     if ('error' in result) {
       setPromoStatus('error')
       setPromoError(result.error)
       setPromoCodeRule(null)
+      setWebsitePromoOnly(false)
       onAppliedPromoCodeChange?.(null)
     } else {
       setPromoStatus('applied')
       setPromoError('')
       setPromoCodeRule(result.rule)
+      setWebsitePromoOnly(false)
       onAppliedPromoCodeChange?.(promoInput.trim().toUpperCase())
     }
   }
 
   function handleRemovePromo() {
+    seedTicketRef.current += 1
+    const up = promoInput.trim().toUpperCase()
+    const seedUp = seedPromoCode?.trim().toUpperCase() ?? ''
+    if (seedUp && up === seedUp) {
+      suppressSeedNormalizedRef.current = seedUp
+    }
     setPromoCodeRule(null)
     setPromoStatus('idle')
     setPromoInput('')
+    setWebsitePromoOnly(false)
     setPromoError('')
     onAppliedPromoCodeChange?.(null)
   }
@@ -198,9 +291,18 @@ export function PromoPanel({
                 strokeWidth={2.5}
                 aria-hidden
               />
-              <span className="truncate text-sm font-medium text-emerald-900">
-                {promoCodeRule?.label_ru ?? promoCodeRule?.name ?? ''}
-              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-emerald-900">
+                  {websitePromoOnly
+                    ? promoInput.trim().toUpperCase()
+                    : promoCodeRule?.label_ru ?? promoCodeRule?.name ?? ''}
+                </p>
+                {websitePromoOnly ? (
+                  <p className="truncate text-[11px] text-emerald-800/90">
+                    Промокод с сайта — применён к сумме заказа
+                  </p>
+                ) : null}
+              </div>
             </div>
             <button
               type="button"

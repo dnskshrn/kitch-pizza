@@ -49,18 +49,11 @@ export async function middleware(request: NextRequest) {
 
   const requestHeaders = buildRequestHeadersWithBrand(request, brand.slug)
 
-  const isPosLogin =
-    pathname === "/pos/login" || pathname === "/pos/login/"
+  const isPosPublic =
+    pathname.startsWith("/pos/manager-login") ||
+    pathname.startsWith("/pos/login")
 
-  if (pathname.startsWith("/pos")) {
-    if (pathname.startsWith("/pos/manager-login")) {
-      return NextResponse.next({
-        request: {
-          headers: requestHeaders,
-        },
-      })
-    }
-
+  if (pathname.startsWith("/pos") && !isPosPublic) {
     const response = NextResponse.next({
       request: {
         headers: requestHeaders,
@@ -92,14 +85,20 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL("/pos/manager-login", request.url))
     }
 
-    if (!isPosLogin) {
-      const token = request.cookies.get("pos-session")?.value
-      if (!(await posSessionIsValid(token))) {
-        return NextResponse.redirect(new URL("/pos/login", request.url))
-      }
+    const token = request.cookies.get("pos-session")?.value
+    if (!(await posSessionIsValid(token))) {
+      return NextResponse.redirect(new URL("/pos/login", request.url))
     }
 
     return response
+  }
+
+  if (pathname.startsWith("/pos")) {
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    })
   }
 
   const isAdminApiRoute = pathname.startsWith("/api/admin")

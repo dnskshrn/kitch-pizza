@@ -2,6 +2,7 @@
 
 import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
+import { refreshCourierOrderTelegramMessage } from "@/lib/actions/pos/courier-telegram-message"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { GiftCartItem } from "@/types/promotions"
 
@@ -129,6 +130,8 @@ export async function updateOrderDeliveryModePos(
     console.error("[updateOrderDeliveryModePos] update", updateError.message)
     return { success: false, error: "Не удалось сменить тип заказа" }
   }
+
+  await refreshCourierOrderTelegramMessage(orderId, "delivery_mode")
 
   return { success: true, deliveryMode, deliveryAddress, deliveryFee, total }
 }
@@ -329,6 +332,8 @@ export async function updateOrderDetailsPos(
       return { success: false, error: "Не удалось сохранить подарочные позиции" }
     }
   }
+
+  await refreshCourierOrderTelegramMessage(input.orderId, "details")
 
   return { success: true }
 }

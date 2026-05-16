@@ -14,9 +14,14 @@ import {
 } from "@/lib/pos/fetch-orders"
 import { updateOrderStatusPos } from "@/lib/actions/pos/update-order-status-pos"
 import { usePosOrderMutations } from "@/hooks/use-pos-order-mutations"
+import {
+  isPosAlertSoundUnlocked,
+  playPosAlertSound,
+  unlockPosAlertSound,
+} from "@/lib/pos/alert-sound"
 import { createClient } from "@/lib/supabase/client"
 import type { PosOrder, PosOrderStatus } from "@/types/pos"
-import { CheckCheck, ChevronLeft, Phone } from "lucide-react"
+import { Bell, CheckCheck, ChevronLeft, Phone } from "lucide-react"
 
 /** Если join `brands` в выборке заказа пустой, не теряем уже показанный slug после reload/realtime. */
 function mergeOrdersPreserveBrandSlug(
@@ -44,20 +49,6 @@ import {
   useImperativeHandle,
   useState,
 } from "react"
-
-const POS_NEW_ORDER_CHIME_URL = "/pos-new-order-chime.wav"
-
-function playNewOrderChime() {
-  try {
-    const audio = new Audio(POS_NEW_ORDER_CHIME_URL)
-    audio.volume = 0.85
-    void audio.play().catch(() => {
-      // автовоспроизведение может быть заблокировано до жеста пользователя
-    })
-  } catch {
-    // Audio API недоступен
-  }
-}
 
 function incomingCallBrandLabel(brandSlug: string | null): string {
   switch (brandSlug) {
@@ -104,8 +95,17 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
     )
     const [incomingCallBanner, setIncomingCallBanner] =
       useState<IncomingCallBannerState | null>(null)
+    const [soundUnlocked, setSoundUnlocked] = useState(false)
     const { updateStatus, isStatusPending } =
       usePosOrderMutations(setMainOrders)
+
+    const enableSound = useCallback(async () => {
+      const ok = await unlockPosAlertSound()
+      if (ok) {
+        setSoundUnlocked(true)
+        void playPosAlertSound()
+      }
+    }, [])
 
     const reloadOrders = useCallback(async () => {
       const [main, completed] = await Promise.all([
@@ -136,6 +136,7 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
 
     useEffect(() => {
       void reloadOrders()
+      setSoundUnlocked(isPosAlertSoundUnlocked())
     }, [reloadOrders])
 
     useEffect(() => {
@@ -152,7 +153,9 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
           { event: "*", schema: "public", table: "orders" },
           (payload) => {
             if (payload.eventType === "INSERT") {
-              playNewOrderChime()
+              void playPosAlertSound().then((ok) => {
+                if (!ok) setSoundUnlocked(false)
+              })
             }
             void reloadOrders()
           },
@@ -311,6 +314,26 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
             <p className="text-center font-mono text-[11px] font-semibold uppercase tracking-[0.35em] text-[#808080]">
               Заказы
             </p>
+            <button
+              type="button"
+              aria-label="Включить звук уведомлений"
+              onClick={() => void enableSound()}
+              className="absolute top-1/2 left-1 flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-[#808080] transition-colors hover:text-[#242424] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#242424]"
+              title={soundUnlocked ? "Проверить звук" : "Включить звук"}
+            >
+              <span
+                className={
+                  soundUnlocked
+                    ? "absolute size-8 rounded-full bg-[#ccff00]/0"
+                    : "absolute size-8 animate-ping rounded-full bg-[#ccff00]/40"
+                }
+                aria-hidden
+              />
+              <Bell
+                className={soundUnlocked ? "relative size-5" : "relative size-5 text-[#242424]"}
+                strokeWidth={2}
+              />
+            </button>
             <button
               type="button"
               aria-label="Выданные заказы"

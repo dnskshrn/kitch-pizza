@@ -1,6 +1,7 @@
 "use server"
 
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
+import { refreshCourierOrderTelegramMessage } from "@/lib/actions/pos/courier-telegram-message"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
 type UpdateOrderItemsResult =
@@ -107,6 +108,8 @@ export async function updateOrderItemQuantityPos({
     return { success: false, error: "Не удалось обновить сумму заказа" }
   }
 
+  await refreshCourierOrderTelegramMessage(orderId, "items")
+
   return { success: true }
 }
 
@@ -151,6 +154,8 @@ export async function removeOrderItemPos({
     console.error("[updateOrderItems] order total", orderError.message)
     return { success: false, error: "Не удалось обновить сумму заказа" }
   }
+
+  await refreshCourierOrderTelegramMessage(orderId, "items")
 
   return { success: true }
 }
@@ -257,6 +262,8 @@ export async function addOrderItemsPos({
     return { success: false, error: "Не удалось обновить сумму заказа" }
   }
 
+  await refreshCourierOrderTelegramMessage(orderId, "items")
+
   return { success: true }
 }
 
@@ -344,6 +351,8 @@ export async function replaceOrderItemsPos({
     console.error("[updateOrderItems] replace total", orderError.message)
     return { success: false, error: "Не удалось обновить сумму заказа" }
   }
+
+  await refreshCourierOrderTelegramMessage(orderId, "items")
 
   return { success: true }
 }
@@ -433,6 +442,8 @@ export async function updateOrderItemCompositionPos({
     console.error("[updateOrderItems] total after composition", orderError.message)
     return { success: false, error: "Не удалось обновить сумму заказа" }
   }
+
+  await refreshCourierOrderTelegramMessage(orderId, "items")
 
   return { success: true }
 }

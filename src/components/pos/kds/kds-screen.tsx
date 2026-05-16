@@ -30,10 +30,15 @@ import {
   readPosBrandSlugFromCookie,
   writePosBrandSlugCookie,
 } from "@/lib/pos/pos-brand-slug-cookie"
+import {
+  isPosAlertSoundUnlocked,
+  playPosAlertSound,
+  unlockPosAlertSound,
+} from "@/lib/pos/alert-sound"
 import { updateOrderStatusKds } from "@/lib/actions/pos/update-order-status-kds"
 import { createClient } from "@/lib/supabase/client"
 import { Toaster } from "@/components/ui/sonner"
-import { MoreVertical } from "lucide-react"
+import { Bell, MoreVertical } from "lucide-react"
 import { toast } from "sonner"
 import {
   useCallback,
@@ -150,8 +155,8 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     Record<string, number>
   >({})
   const [removingIds, setRemovingIds] = useState<Set<string>>(() => new Set())
+  const [soundUnlocked, setSoundUnlocked] = useState(false)
 
-  const audioCtxRef = useRef<AudioContext | null>(null)
   const knownOrderIdsRef = useRef<Set<string>>(new Set())
 
   const activeBrandConfig = useMemo(
@@ -306,37 +311,21 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
   }, [])
 
   const unlockAudio = useCallback(() => {
-    if (!audioCtxRef.current) {
-      const win = window as typeof window & {
-        webkitAudioContext?: typeof AudioContext
-      }
-      const Ctor = window.AudioContext ?? win.webkitAudioContext
-      if (Ctor) {
-        audioCtxRef.current = new Ctor()
-      }
-    }
-    const ctx = audioCtxRef.current
-    if (ctx?.state === "suspended") {
-      void ctx.resume()
+    void unlockPosAlertSound().then((ok) => setSoundUnlocked(ok))
+  }, [])
+
+  const enableSound = useCallback(async () => {
+    const ok = await unlockPosAlertSound()
+    if (ok) {
+      setSoundUnlocked(true)
+      void playPosAlertSound()
     }
   }, [])
 
   const playNewOrderBeep = useCallback(() => {
-    const ctx = audioCtxRef.current
-    if (!ctx || ctx.state !== 'running') return
-    const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(880, now)
-    osc.frequency.setValueAtTime(1100, now + 0.12)
-    gain.gain.setValueAtTime(0.0001, now)
-    gain.gain.exponentialRampToValueAtTime(0.35, now + 0.02)
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45)
-    osc.start(now)
-    osc.stop(now + 0.45)
+    void playPosAlertSound().then((ok) => {
+      if (!ok) setSoundUnlocked(false)
+    })
   }, [])
 
   const reloadCookingOrders = useCallback(async () => {
@@ -359,6 +348,7 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
 
   useEffect(() => {
     void reloadCookingOrders()
+    setSoundUnlocked(isPosAlertSoundUnlocked())
   }, [reloadCookingOrders])
 
   useEffect(() => {
@@ -504,7 +494,9 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     <div
       className="fixed inset-0 z-[200] flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#111]"
       onClick={unlockAudio}
+      onPointerDown={unlockAudio}
       onTouchStart={unlockAudio}
+      onTouchEnd={unlockAudio}
     >
       <div className="shrink-0 px-4 pt-2 pb-0 sm:px-5 sm:pt-2.5">
         <nav
@@ -518,7 +510,31 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
             <KdsClock />
           </div>
           <div className="flex min-w-0 flex-1 items-center justify-end">
-            <Popover open={kdsSettingsOpen} onOpenChange={onKdsMenuOpenChange}>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="relative size-9 shrink-0 rounded-lg text-white hover:bg-white/10 hover:text-white sm:size-10"
+                aria-label={soundUnlocked ? "Проверить звук" : "Включить звук"}
+                title={soundUnlocked ? "Проверить звук" : "Включить звук"}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void enableSound()
+                }}
+              >
+                {!soundUnlocked ? (
+                  <span
+                    className="absolute size-8 animate-ping rounded-full bg-[#ccff00]/35"
+                    aria-hidden
+                  />
+                ) : null}
+                <Bell
+                  className={soundUnlocked ? "relative size-5" : "relative size-5 text-[#ccff00]"}
+                  strokeWidth={2}
+                />
+              </Button>
+              <Popover open={kdsSettingsOpen} onOpenChange={onKdsMenuOpenChange}>
               <PopoverTrigger asChild>
                 <Button
                   type="button"
@@ -577,7 +593,8 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
                   </div>
                 </section>
               </PopoverContent>
-            </Popover>
+              </Popover>
+            </div>
           </div>
         </nav>
       </div>

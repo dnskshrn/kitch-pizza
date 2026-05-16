@@ -111,7 +111,10 @@ async function sendTelegramNotification(order: {
 }) {
   const token = process.env.TELEGRAM_BOT_TOKEN
   const chatId = process.env.TELEGRAM_CHAT_ID
-  if (!token || !chatId) return
+  if (!token || !chatId) {
+    console.error("[createOrder] telegram env is not configured")
+    return
+  }
 
   const modeLabel =
     order.deliveryMode === "pickup" ? "🏃 Самовывоз" : "🚗 Доставка"
@@ -145,11 +148,23 @@ async function sendTelegramNotification(order: {
     .filter(Boolean)
     .join("\n")
 
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
-  }).catch(() => {}) // не блокируем заказ если телеграм недоступен
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/sendMessage`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    },
+  )
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    console.error(
+      "[createOrder] telegram sendMessage",
+      response.status,
+      body,
+    )
+  }
 }
 
 /** Витрина: `resolveBrandId` = getBrandId; админ/POS: getAdminBrandId. */
@@ -329,39 +344,46 @@ export async function executeCreateOrder(
   const brandName =
     (brandRow as { name: string } | null)?.name ?? "Заказ"
 
-  void sendTelegramNotification({
-    orderNumber,
-    brandName,
-    userPhone: phone,
-    userName: name || null,
-    deliveryAddress: payload.deliveryAddress.trim(),
-    deliveryMode: payload.deliveryMode,
-    paymentMethod: payload.paymentMethod,
-    total: payload.grandTotalBani,
-    discount: payload.discountBani,
-    deliveryFee: payload.deliveryFeeBani,
-    comment: payload.comment?.trim() ?? null,
-    items: payload.items.map((ci) => {
-      const unitBani = getCartItemPrice(ci)
-      const { size } = orderItemSizeAndVariantForInsert(ci)
-      let sizeTelegram: string | undefined
-      if (typeof size === "string" && size.length > 0) {
-        const lower = size.toLowerCase()
-        if (lower === "s" || lower === "l") {
-          sizeTelegram = lower === "s" ? "S" : "L"
-        } else {
-          sizeTelegram = size
+  try {
+    await sendTelegramNotification({
+      orderNumber,
+      brandName,
+      userPhone: phone,
+      userName: name || null,
+      deliveryAddress: payload.deliveryAddress.trim(),
+      deliveryMode: payload.deliveryMode,
+      paymentMethod: payload.paymentMethod,
+      total: payload.grandTotalBani,
+      discount: payload.discountBani,
+      deliveryFee: payload.deliveryFeeBani,
+      comment: payload.comment?.trim() ?? null,
+      items: payload.items.map((ci) => {
+        const unitBani = getCartItemPrice(ci)
+        const { size } = orderItemSizeAndVariantForInsert(ci)
+        let sizeTelegram: string | undefined
+        if (typeof size === "string" && size.length > 0) {
+          const lower = size.toLowerCase()
+          if (lower === "s" || lower === "l") {
+            sizeTelegram = lower === "s" ? "S" : "L"
+          } else {
+            sizeTelegram = size
+          }
         }
-      }
-      return {
-        item_name:
-          lang === "RO" ? ci.menuItem.name_ro : ci.menuItem.name_ru,
-        quantity: ci.quantity,
-        price: unitBani,
-        ...(sizeTelegram ? { size: sizeTelegram } : {}),
-      }
-    }),
-  }).catch(() => {})
+        return {
+          item_name:
+            lang === "RO" ? ci.menuItem.name_ro : ci.menuItem.name_ru,
+          quantity: ci.quantity,
+          price: unitBani,
+          ...(sizeTelegram ? { size: sizeTelegram } : {}),
+        }
+      }),
+    })
+  } catch (e) {
+    console.error(
+      "[createOrder] telegram notification",
+      e instanceof Error ? e.message : e,
+    )
+  }
 
   return { success: true, orderNumber }
 }

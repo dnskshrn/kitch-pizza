@@ -53,6 +53,8 @@ export type PosOrder = {
   total: number
   delivery_fee: number
   discount: number
+  /** Пункты лояльности (1 п. ≈ 1 MDL списано с суммы перед сохранением `total`). */
+  bonuses_redeemed: number
   comment: string | null
   created_at: string
   updated_at: string
@@ -65,4 +67,6 @@ export type PosOrder = {
   courier_id: string | null
   /** Имя из `staff` при непустом `courier_id`; подгружается в `fetchPosOrders`. */
   courier_name: string | null
+  /** Профиль витрины (`orders.profile_id`); для заказов с сайта — до поиска по телефону. */
+  profile_id: string | null
 }

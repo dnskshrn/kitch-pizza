@@ -4,7 +4,7 @@ import type { PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 
 /** Колонки `orders` + вложения для списка/карточек POS (без несуществующих полей). */
 const ORDERS_POS_SELECT =
-  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, delivery_fee, promo_code, discount, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, brands(slug), order_items(count)"
+  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, delivery_fee, promo_code, discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, brands(slug), order_items(count)"
 
 /** Активные заказы левой колонки POS (без завершённых, отмен и отказов сайта). */
 export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
@@ -37,6 +37,7 @@ export type OrderRow = {
   total: number
   delivery_fee: number
   discount: number
+  bonuses_redeemed: number
   comment: string | null
   created_at: string
   updated_at: string
@@ -48,6 +49,7 @@ export type OrderRow = {
   address_apartment?: string | null
   address_intercom?: string | null
   courier_id?: string | null
+  profile_id?: string | null
 }
 
 function brandSlugFromRow(row: OrderRow): string {
@@ -181,7 +183,16 @@ export function mapOrderRowToPosOrder(
     promo_code: row.promo_code ?? null,
     total: row.total,
     delivery_fee: row.delivery_fee,
-    discount: row.discount,
+    discount:
+      typeof row.discount === "number" && Number.isFinite(row.discount)
+        ? Math.max(0, Math.round(row.discount))
+        : 0,
+    bonuses_redeemed: Math.max(
+      0,
+      typeof row.bonuses_redeemed === "number" && Number.isFinite(row.bonuses_redeemed)
+        ? Math.floor(row.bonuses_redeemed)
+        : 0,
+    ),
     comment: row.comment,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -193,6 +204,10 @@ export function mapOrderRowToPosOrder(
     address_intercom: row.address_intercom ?? null,
     courier_id: courierId,
     courier_name: courierName,
+    profile_id:
+      typeof row.profile_id === "string" && row.profile_id.trim()
+        ? row.profile_id.trim()
+        : null,
   }
 }
 

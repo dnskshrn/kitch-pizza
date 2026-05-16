@@ -201,6 +201,7 @@ type OrderDetailRow = {
   total: number
   delivery_fee: number
   discount: number
+  bonuses_redeemed: number | null
   promo_code: string | null
   comment: string | null
   created_at: string
@@ -335,6 +336,10 @@ type OrderDetailProps = {
   onAddItemsToOrder: (orderId: string) => void
   /** Шаг 3 мастера — данные клиента, доставка, оплата. */
   onEditOrderDetails: (orderId: string) => void
+  onStatusChange?: (
+    orderId: string,
+    newStatus: PosOrderStatus,
+  ) => boolean | Promise<boolean>
   /** Только просмотр: без редактирования строк и действий статуса. */
   interactionMode?: "default" | "readonly"
 }
@@ -344,6 +349,7 @@ export function OrderDetail({
   onClose,
   onAddItemsToOrder,
   onEditOrderDetails,
+  onStatusChange,
   interactionMode = "default",
 }: OrderDetailProps) {
   const isReadOnly = interactionMode === "readonly"
@@ -455,19 +461,24 @@ export function OrderDetail({
 
     if (!allowed) return
 
-    setStatusBusy(true)
-    const supabase = createClient()
+    const snapshot = order
     const updatedAt = new Date().toISOString()
-    const { error } = await supabase
-      .from("orders")
-      .update({ status: next, updated_at: updatedAt })
-      .eq("id", order.id)
 
-    if (error) {
-      console.error("[order-detail] status", error.message)
+    setStatusBusy(true)
+    setOrder((prev) =>
+      prev && prev.id === order.id
+        ? { ...prev, status: next, updated_at: updatedAt }
+        : prev,
+    )
+
+    try {
+      const success = (await onStatusChange?.(order.id, next)) ?? false
+      if (!success) {
+        setOrder(snapshot)
+      }
+    } finally {
+      setStatusBusy(false)
     }
-    await loadOrder()
-    setStatusBusy(false)
   }
 
   const handleWebsiteAcceptDetail = async (orderIdParam: string) => {
@@ -907,12 +918,23 @@ export function OrderDetail({
                 <dl className="mt-4 shrink-0 rounded-xl bg-[#f2f2f2] p-4 pt-6">
                   <SummaryRow label="Подытог" value={formatMdl(subtotalBani)} />
                   <SummaryRow label="Доставка" value={formatMdl(order.delivery_fee)} />
+                  {order.promo_code?.trim() ? (
+                    <SummaryRow
+                      label="Промокод"
+                      value={order.promo_code.trim()}
+                    />
+                  ) : null}
                   {order.discount > 0 ? (
                     <SummaryRow
-                      label={
-                        order.promo_code ? `Скидка · ${order.promo_code}` : "Скидка"
-                      }
+                      label="Скидка"
                       value={`−${formatMdl(order.discount)}`}
+                      tone="discount"
+                    />
+                  ) : null}
+                  {(order.bonuses_redeemed ?? 0) > 0 ? (
+                    <SummaryRow
+                      label="Бонусы"
+                      value={`−${formatMdl((order.bonuses_redeemed ?? 0) * 100)}`}
                       tone="discount"
                     />
                   ) : null}
@@ -987,7 +1009,7 @@ export function OrderDetail({
             <Button
               type="button"
               variant="default"
-              className="w-full"
+              className={`w-full ${statusBusy ? "pointer-events-none opacity-50" : ""}`}
               disabled={statusBusy}
               onClick={() => void handleStatus("delivery")}
             >

@@ -49,14 +49,11 @@ export async function middleware(request: NextRequest) {
 
   const requestHeaders = buildRequestHeadersWithBrand(request, brand.slug)
 
-  const isPosRoute = pathname.startsWith("/pos")
-  const isPosManagerLogin =
-    pathname === "/pos/manager-login" || pathname === "/pos/manager-login/"
   const isPosLogin =
     pathname === "/pos/login" || pathname === "/pos/login/"
 
-  if (isPosRoute) {
-    if (isPosManagerLogin) {
+  if (pathname.startsWith("/pos")) {
+    if (pathname.startsWith("/pos/manager-login")) {
       return NextResponse.next({
         request: {
           headers: requestHeaders,
@@ -64,13 +61,13 @@ export async function middleware(request: NextRequest) {
       })
     }
 
-    let posSupabaseResponse = NextResponse.next({
+    let response = NextResponse.next({
       request: {
         headers: requestHeaders,
       },
     })
 
-    const posSupabase = createServerClient(
+    const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
@@ -79,16 +76,8 @@ export async function middleware(request: NextRequest) {
             return request.cookies.getAll()
           },
           setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value }) =>
-              request.cookies.set(name, value),
-            )
-            posSupabaseResponse = NextResponse.next({
-              request: {
-                headers: requestHeaders,
-              },
-            })
             cookiesToSet.forEach(({ name, value, options }) =>
-              posSupabaseResponse.cookies.set(name, value, options),
+              response.cookies.set(name, value, options),
             )
           },
         },
@@ -96,10 +85,10 @@ export async function middleware(request: NextRequest) {
     )
 
     const {
-      data: { user: posUser },
-    } = await posSupabase.auth.getUser()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!posUser) {
+    if (!user) {
       return NextResponse.redirect(new URL("/pos/manager-login", request.url))
     }
 
@@ -110,7 +99,7 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    return posSupabaseResponse
+    return response
   }
 
   const isAdminApiRoute = pathname.startsWith("/api/admin")
@@ -249,6 +238,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|pos/manager-login|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 }

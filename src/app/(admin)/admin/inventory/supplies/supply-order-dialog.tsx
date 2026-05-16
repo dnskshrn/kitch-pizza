@@ -65,6 +65,24 @@ function formatMdl(value: number): string {
   })
 }
 
+function formatDecimalInput(value: number): string {
+  return Number.isFinite(value) ? String(round4(value)) : ""
+}
+
+function priceWithVatFromBase(price: string, vat: string): string {
+  const parsedPrice = parseDecimal(price)
+  if (parsedPrice == null) return ""
+  const parsedVat = parseDecimal(vat) ?? 0
+  return formatDecimalInput(parsedPrice * (1 + parsedVat / 100))
+}
+
+function priceBaseFromWithVat(priceWithVat: string, vat: string): string {
+  const parsedPriceWithVat = parseDecimal(priceWithVat)
+  if (parsedPriceWithVat == null) return ""
+  const parsedVat = parseDecimal(vat) ?? 0
+  return formatDecimalInput(parsedPriceWithVat / (1 + parsedVat / 100))
+}
+
 export type SupplyOrderViewModel = {
   id: string
   supplier_id: string
@@ -100,6 +118,7 @@ type EditableRow = {
   quantityStr: string
   receivedQtyStr: string
   priceStr: string
+  priceWithVatStr: string
   vatStr: string
 }
 
@@ -117,6 +136,7 @@ function emptyRow(): EditableRow {
     quantityStr: "",
     receivedQtyStr: "",
     priceStr: "",
+    priceWithVatStr: "",
     vatStr: "20",
   }
 }
@@ -167,6 +187,9 @@ export function SupplyOrderDialog({
               ? String(toDisplayQty(it.received_qty, it.ingredient.unit))
               : "",
           priceStr: String(toDisplayPrice(it.price_per_unit, it.ingredient.unit)),
+          priceWithVatStr: String(
+            toDisplayPrice(it.price_per_unit_with_vat, it.ingredient.unit),
+          ),
           vatStr: String(it.vat_rate),
         }))
       )
@@ -183,7 +206,8 @@ export function SupplyOrderDialog({
       const qty = parseDecimal(r.quantityStr) ?? 0
       const price = parseDecimal(r.priceStr) ?? 0
       const vat = parseDecimal(r.vatStr) ?? 0
-      const priceWithVat = round4(price * (1 + vat / 100))
+      const priceWithVat =
+        parseDecimal(r.priceWithVatStr) ?? round4(price * (1 + vat / 100))
       const lineEx = qty * price
       const lineInc = qty * priceWithVat
       return { ...r, qty, price, vat, priceWithVat, lineEx, lineInc }
@@ -216,6 +240,54 @@ export function SupplyOrderDialog({
   function updateRow(key: string, patch: Partial<EditableRow>) {
     setRows((prev) =>
       prev.map((r) => (r.localKey === key ? { ...r, ...patch } : r))
+    )
+  }
+
+  function updateBasePrice(key: string, priceStr: string) {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.localKey === key
+          ? {
+              ...r,
+              priceStr,
+              priceWithVatStr: priceWithVatFromBase(priceStr, r.vatStr),
+            }
+          : r,
+      ),
+    )
+  }
+
+  function updatePriceWithVat(key: string, priceWithVatStr: string) {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.localKey === key
+          ? {
+              ...r,
+              priceStr: priceBaseFromWithVat(priceWithVatStr, r.vatStr),
+              priceWithVatStr,
+            }
+          : r,
+      ),
+    )
+  }
+
+  function updateVat(key: string, vatStr: string) {
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.localKey !== key) return r
+        if (r.priceWithVatStr.trim()) {
+          return {
+            ...r,
+            vatStr,
+            priceStr: priceBaseFromWithVat(r.priceWithVatStr, vatStr),
+          }
+        }
+        return {
+          ...r,
+          vatStr,
+          priceWithVatStr: priceWithVatFromBase(r.priceStr, vatStr),
+        }
+      }),
     )
   }
 
@@ -304,12 +376,12 @@ export function SupplyOrderDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+      <DialogContent className="flex max-h-[92vh] !w-[calc(100vw-16px)] !max-w-[1280px] flex-col gap-0 overflow-hidden p-0 sm:!max-w-[calc(100vw-32px)] xl:!w-[1280px] xl:!max-w-[1280px]">
         <DialogHeader className="border-b px-6 py-4">
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           <div className="mb-4 grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label>Поставщик</Label>
@@ -375,18 +447,18 @@ export function SupplyOrderDialog({
             )}
           </div>
 
-          <div className="rounded-md border">
-            <Table>
+          <div className="overflow-x-auto rounded-md border">
+            <Table className="min-w-[1160px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[200px]">Ингредиент</TableHead>
-                  <TableHead className="w-36">Заказано</TableHead>
-                  <TableHead className="w-36">Получено</TableHead>
-                  <TableHead className="min-w-[200px]">
+                  <TableHead className="w-[260px]">Ингредиент</TableHead>
+                  <TableHead className="w-[190px]">Заказано</TableHead>
+                  <TableHead className="w-[190px]">Получено</TableHead>
+                  <TableHead className="w-[210px]">
                     Цена за кг / л / шт (без НДС)
                   </TableHead>
-                  <TableHead className="w-24">НДС %</TableHead>
-                  <TableHead className="w-36">С НДС / ед.</TableHead>
+                  <TableHead className="w-[110px]">НДС %</TableHead>
+                  <TableHead className="w-[190px]">С НДС / ед.</TableHead>
                   {!readOnly && <TableHead className="w-12" />}
                 </TableRow>
               </TableHeader>
@@ -432,7 +504,7 @@ export function SupplyOrderDialog({
                         ) : (
                           <div className="flex items-center gap-1">
                             <Input
-                              className="min-w-0 flex-1"
+                              className="min-w-[132px] flex-1"
                               inputMode="decimal"
                               value={r.quantityStr}
                               onChange={(e) =>
@@ -464,7 +536,7 @@ export function SupplyOrderDialog({
                         ) : (
                           <div className="flex items-center gap-1">
                             <Input
-                              className="min-w-0 flex-1"
+                              className="min-w-[132px] flex-1"
                               inputMode="decimal"
                               placeholder="= заказано"
                               value={r.receivedQtyStr}
@@ -485,13 +557,10 @@ export function SupplyOrderDialog({
                           <span className="text-sm">{r.priceStr}</span>
                         ) : (
                           <Input
+                            className="min-w-[170px]"
                             inputMode="decimal"
                             value={r.priceStr}
-                            onChange={(e) =>
-                              updateRow(r.localKey, {
-                                priceStr: e.target.value,
-                              })
-                            }
+                            onChange={(e) => updateBasePrice(r.localKey, e.target.value)}
                           />
                         )}
                       </TableCell>
@@ -500,22 +569,34 @@ export function SupplyOrderDialog({
                           <span className="text-sm">{r.vatStr}</span>
                         ) : (
                           <Input
+                            className="min-w-[80px]"
                             inputMode="decimal"
                             value={r.vatStr}
-                            onChange={(e) =>
-                              updateRow(r.localKey, { vatStr: e.target.value })
-                            }
+                            onChange={(e) => updateVat(r.localKey, e.target.value)}
                           />
                         )}
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {formatMdl(
-                          readOnly && viewItem != null
-                            ? toDisplayPrice(
-                                viewItem.price_per_unit_with_vat,
-                                viewItem.ingredient.unit
-                              )
-                            : r.priceWithVat
+                      <TableCell>
+                        {readOnly ? (
+                          <span className="text-muted-foreground text-sm">
+                            {formatMdl(
+                              viewItem != null
+                                ? toDisplayPrice(
+                                    viewItem.price_per_unit_with_vat,
+                                    viewItem.ingredient.unit
+                                  )
+                                : r.priceWithVat
+                            )}
+                          </span>
+                        ) : (
+                          <Input
+                            className="min-w-[150px]"
+                            inputMode="decimal"
+                            value={r.priceWithVatStr}
+                            onChange={(e) =>
+                              updatePriceWithVat(r.localKey, e.target.value)
+                            }
+                          />
                         )}
                       </TableCell>
                       {!readOnly && (

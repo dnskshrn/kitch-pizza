@@ -42,6 +42,39 @@ export async function sendMessage(
   return { message_id: json.result.message_id }
 }
 
+export async function sendLocation(
+  chatId: number | string,
+  latitude: number,
+  longitude: number,
+  replyToMessageId?: number,
+): Promise<TelegramMessageResult> {
+  const payload: Record<string, unknown> = {
+    chat_id: chatId,
+    latitude,
+    longitude,
+  }
+  if (replyToMessageId !== undefined) {
+    payload.reply_to_message_id = replyToMessageId
+    payload.allow_sending_without_reply = true
+  }
+
+  const res = await fetch(`${telegramBaseUrl()}sendLocation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  const json = (await res.json()) as TelegramApiResponse<TelegramMessageResult>
+  if (!res.ok || json.ok !== true) {
+    throw new Error(
+      json.description ?? `Telegram sendLocation failed: HTTP ${res.status}`,
+    )
+  }
+  if (typeof json.result?.message_id !== "number") {
+    throw new Error("Telegram sendLocation returned no message_id")
+  }
+  return { message_id: json.result.message_id }
+}
+
 export async function editMessageText(
   chatId: number | string,
   messageId: number,

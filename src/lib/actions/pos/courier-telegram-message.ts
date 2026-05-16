@@ -1,6 +1,6 @@
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
-import { editMessageText, sendMessage } from "@/lib/telegram/bot"
+import { editMessageText, sendLocation, sendMessage } from "@/lib/telegram/bot"
 
 export const COURIER_ORDER_ASSIGNMENT_SELECT =
   "id, status, delivery_mode, courier_id, order_number, total, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
@@ -44,39 +44,40 @@ export type SentCourierTelegramMessage = {
   messageId: number
 }
 
-function buildCourierMapButtons(row: CourierOrderTelegramFields) {
+function hasDeliveryCoords(
+  row: CourierOrderTelegramFields,
+): row is CourierOrderTelegramFields & {
+  delivery_lat: number
+  delivery_lng: number
+} {
   const lat = row.delivery_lat
   const lng = row.delivery_lng
-  const hasCoords =
+  return (
     typeof lat === "number" &&
     typeof lng === "number" &&
     Number.isFinite(lat) &&
     Number.isFinite(lng)
-  const addressDestination = row.delivery_address?.trim()
-    ? `${row.delivery_address.trim()}, Chișinău, Moldova`
-    : ""
-  const destination = hasCoords ? `${lat},${lng}` : addressDestination
+  )
+}
 
-  if (!destination) return undefined
-
-  const encodedDestination = encodeURIComponent(destination)
-  const yandexUrl = hasCoords
-    ? `https://yandex.com/maps/?ll=${lng},${lat}&pt=${lng},${lat},pm2rdm&z=17&rtext=~${lat},${lng}&rtt=auto`
-    : `https://yandex.com/maps/?text=${encodedDestination}`
-
-  return {
-    inline_keyboard: [
-      [
-        {
-          text: "Google Maps",
-          url: `https://www.google.com/maps/dir/?api=1&destination=${encodedDestination}`,
-        },
-        {
-          text: "Yandex Maps",
-          url: yandexUrl,
-        },
-      ],
-    ],
+async function sendCourierDeliveryLocation(
+  tgChatId: string | number,
+  row: CourierOrderTelegramFields,
+  replyToMessageId?: number,
+) {
+  if (!hasDeliveryCoords(row)) return
+  try {
+    await sendLocation(
+      tgChatId,
+      row.delivery_lat,
+      row.delivery_lng,
+      replyToMessageId,
+    )
+  } catch (e) {
+    console.error(
+      "[courierTelegram] send location",
+      e instanceof Error ? e.message : e,
+    )
   }
 }
 
@@ -124,6 +125,12 @@ function paymentMethodLabel(row: CourierOrderTelegramFields): string {
   return "Не указан"
 }
 
+function paymentMethodEmoji(row: CourierOrderTelegramFields): string {
+  if (row.payment_method === "card") return "💳"
+  if (row.payment_method === "cash") return "💵"
+  return "💰"
+}
+
 function orderItemsLines(items: CourierOrderTelegramItem[] | null): string[] {
   const rows = (items ?? []).filter((item) => item.item_name?.trim())
   if (!rows.length) return ["—"]
@@ -149,11 +156,11 @@ function buildCourierAssignmentMessage(row: CourierOrderTelegramFields): string 
     `🛵 Новый заказ #${row.order_number}`,
     "",
     `👤 ${row.user_name?.trim() || "Клиент не указан"}`,
-    `💳 ${paymentMethodLabel(row)}`,
+    `${paymentMethodEmoji(row)} ${paymentMethodLabel(row)}`,
     "",
     `📍 ${addressParts}`,
     `📞 ${row.user_phone ?? "не указан"}`,
-    `💵 ${(row.total / 100).toFixed(0)} MDL`,
+    `💰 ${(row.total / 100).toFixed(0)} MDL`,
     "",
     "Состав заказа:",
     ...orderItemsLines(row.order_items),
@@ -191,8 +198,8 @@ export async function sendCourierAssignmentTelegram(
   if (!tgChatId) return null
   const rowWithCoords = await withResolvedDeliveryCoords(row)
   const text = buildCourierAssignmentMessage(rowWithCoords)
-  const replyMarkup = buildCourierMapButtons(rowWithCoords)
-  const message = await sendMessage(tgChatId, text, replyMarkup)
+  const message = await sendMessage(tgChatId, text)
+  await sendCourierDeliveryLocation(tgChatId, rowWithCoords, message.message_id)
   return { chatId: String(tgChatId), messageId: message.message_id }
 }
 
@@ -249,13 +256,16 @@ export async function refreshCourierOrderTelegramMessage(
 
     const rowWithCoords = await withResolvedDeliveryCoords(row)
     const text = buildCourierAssignmentMessage(rowWithCoords)
-    const replyMarkup = buildCourierMapButtons(rowWithCoords)
 
     try {
-      await editMessageText(chatId, messageId, text, replyMarkup)
+      await editMessageText(chatId, messageId, text)
     } catch (e) {
       if (messageNotModified(e)) return
       throw e
+    }
+
+    if (reason === "details") {
+      await sendCourierDeliveryLocation(chatId, rowWithCoords, messageId)
     }
 
     const sendUpdateNotice = shouldSendUpdateNotice(

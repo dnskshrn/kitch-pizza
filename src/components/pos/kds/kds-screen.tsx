@@ -352,12 +352,37 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
   }, [reloadCookingOrders])
 
   useEffect(() => {
+    const refresh = () => {
+      void reloadCookingOrders()
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh()
+    }
+
+    const intervalId = window.setInterval(refresh, 30_000)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    window.addEventListener("online", refresh)
+    window.addEventListener("focus", refresh)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+      window.removeEventListener("online", refresh)
+      window.removeEventListener("focus", refresh)
+    }
+  }, [reloadCookingOrders])
+
+  useEffect(() => {
     const supabase = createClient()
 
-    const upsertCookingOrder = (id: string) => {
+    const syncCookingOrder = (id: string) => {
       void (async () => {
         const full = await fetchOrderFull(id)
-        if (!full || full.status !== "cooking") return
+        if (!full || full.status !== "cooking") {
+          setOrders((prev) => prev.filter((o) => o.id !== id))
+          knownOrderIdsRef.current.delete(id)
+          return
+        }
         setOrders((prev) => {
           const map = new Map(prev.map((o) => [o.id, o]))
           map.set(full.id, full)
@@ -370,7 +395,28 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
       })()
     }
 
-    const channel = supabase
+    const orderIdFromPayloadRow = (
+      row: Record<string, unknown> | undefined,
+      key: "id" | "order_id",
+    ) => {
+      const raw = row?.[key]
+      return typeof raw === "string" ? raw : raw != null ? String(raw) : ""
+    }
+
+    const handleRealtimeStatus = (channelName: string) => {
+      return (status: string, error?: Error) => {
+        if (status === "SUBSCRIBED") {
+          void reloadCookingOrders()
+          return
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error(`[kds] ${channelName} realtime`, status, error)
+          void reloadCookingOrders()
+        }
+      }
+    }
+
+    const ordersChannel = supabase
       .channel("kds-orders")
       .on(
         "postgres_changes",
@@ -387,21 +433,13 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
           }
 
           if (p.eventType === "DELETE") {
-            const oldId = p.old?.id
-            const oid =
-              typeof oldId === "string"
-                ? oldId
-                : oldId != null
-                  ? String(oldId)
-                  : ""
+            const oid = orderIdFromPayloadRow(p.old, "id")
             if (oid) scheduleRemoveOrder(oid)
             return
           }
 
           const row = p.new ?? {}
-          const idRaw = row.id
-          const id =
-            typeof idRaw === "string" ? idRaw : idRaw != null ? String(idRaw) : ""
+          const id = orderIdFromPayloadRow(row, "id")
           if (!id) return
 
           const status = String(row.status ?? "")
@@ -426,16 +464,44 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
             p.eventType === "INSERT" ||
             (p.eventType === "UPDATE" && status === "cooking")
           ) {
-            upsertCookingOrder(id)
+            syncCookingOrder(id)
           }
         },
       )
-      .subscribe()
+      .subscribe(handleRealtimeStatus("orders"))
+
+    const itemsChannel = supabase
+      .channel("kds-order-items")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "order_items",
+        },
+        (payload) => {
+          const p = payload as {
+            new?: Record<string, unknown>
+            old?: Record<string, unknown>
+          }
+          const id =
+            orderIdFromPayloadRow(p.new, "order_id") ||
+            orderIdFromPayloadRow(p.old, "order_id")
+          if (id) syncCookingOrder(id)
+        },
+      )
+      .subscribe(handleRealtimeStatus("order_items"))
 
     return () => {
-      void supabase.removeChannel(channel)
+      void supabase.removeChannel(ordersChannel)
+      void supabase.removeChannel(itemsChannel)
     }
-  }, [fetchOrderFull, scheduleRemoveOrder, playNewOrderBeep])
+  }, [
+    fetchOrderFull,
+    reloadCookingOrders,
+    scheduleRemoveOrder,
+    playNewOrderBeep,
+  ])
 
   const handleMarkReady = useCallback((orderId: string) => {
     setUndoExpiresByOrderId((prev) => ({

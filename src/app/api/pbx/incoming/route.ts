@@ -1,3 +1,7 @@
+import {
+  brandSlugFromPbxBody,
+  diversionFieldFromPbxBody,
+} from "@/lib/pbx/diversion-brand-slug"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
 export const dynamic = "force-dynamic"
@@ -46,6 +50,7 @@ async function insertPbxCall(
     caller: string | null
     raw_body: Record<string, unknown>
     profile_id: string | null
+    brand_slug: string | null
   },
 ): Promise<void> {
   const { error } = await (supabase.from("pbx_calls") as any).insert({
@@ -55,6 +60,7 @@ async function insertPbxCall(
     caller: row.caller,
     raw_body: row.raw_body,
     profile_id: row.profile_id,
+    brand_slug: row.brand_slug,
   })
   if (error) {
     console.error("[pbx/incoming] pbx_calls insert", error.message)
@@ -145,6 +151,19 @@ export async function POST(req: Request) {
       const phoneRaw = strField(body, "phone") ?? ""
       const callid = strField(body, "callid")
 
+      const brand_slug = brandSlugFromPbxBody(body)
+      if (!brand_slug && !diversionFieldFromPbxBody(body)) {
+        console.error(
+          "[pbx/incoming] contact: нет diversion/called/to, ключи:",
+          Object.keys(body),
+        )
+      } else if (!brand_slug && diversionFieldFromPbxBody(body)) {
+        console.error(
+          "[pbx/incoming] contact: diversion не сопоставлен с брендом, raw_body:",
+          JSON.stringify(body),
+        )
+      }
+
       let profile: { id: string; name: string | null } | null = null
       try {
         profile = await findProfileForPbxPhone(supabase, phoneRaw)
@@ -159,6 +178,7 @@ export async function POST(req: Request) {
         caller: phoneRaw || null,
         raw_body: body,
         profile_id: profile?.id ?? null,
+        brand_slug,
       })
 
       const displayPhone = phoneRaw.trim() || phoneRaw
@@ -173,6 +193,19 @@ export async function POST(req: Request) {
     }
 
     if (cmdRaw === "event") {
+      const brand_slug = brandSlugFromPbxBody(body)
+      if (!brand_slug && !diversionFieldFromPbxBody(body)) {
+        console.error(
+          "[pbx/incoming] event: нет diversion/called/to, ключи:",
+          Object.keys(body),
+        )
+      } else if (!brand_slug && diversionFieldFromPbxBody(body)) {
+        console.error(
+          "[pbx/incoming] event: diversion не сопоставлен с брендом, raw_body:",
+          JSON.stringify(body),
+        )
+      }
+
       await insertPbxCall(supabase, {
         callid: strField(body, "callid"),
         cmd: "event",
@@ -180,6 +213,7 @@ export async function POST(req: Request) {
         caller: strField(body, "phone"),
         raw_body: body,
         profile_id: null,
+        brand_slug,
       })
       return textOk()
     }
@@ -191,6 +225,7 @@ export async function POST(req: Request) {
       caller: strField(body, "phone"),
       raw_body: body,
       profile_id: null,
+      brand_slug: null,
     })
     return textOk()
   } catch (e) {

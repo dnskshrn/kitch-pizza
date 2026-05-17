@@ -8,10 +8,21 @@ import { PosClockWidget } from "@/components/pos/pos-clock-widget"
 import { PosFoodServiceLogo } from "@/components/pos/pos-food-service-logo"
 import { PosLogoutButton } from "@/components/pos/pos-logout-button"
 import { PosShiftTimer } from "@/components/pos/pos-shift-timer"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { brands, normalizePosBrandSlug } from "@/brands/index"
 import type { IncomingCallEvent } from "@/lib/pos/use-incoming-call"
 import { useIncomingCall } from "@/lib/pos/use-incoming-call"
-import { MapPin, Phone, X } from "lucide-react"
-import { useCallback, useMemo, useState } from "react"
+import { usePosOrderFromCallBridge } from "@/lib/store/pos-order-from-call-bridge"
+import { MapPin, Phone } from "lucide-react"
+import { useCallback, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 
 type PosAppShellProps = {
   children: React.ReactNode
@@ -22,60 +33,86 @@ type PosAppShellProps = {
   cashSessionId: string | null
 }
 
-/** Плавающий стек карточек входящего (Realtime `pbx_calls`, cmd=event / INCOMING). */
-function IncomingCallsStack({
-  entries,
-  onDismiss,
+function incomingCallBrandDisplayName(brandSlug: string | null): string {
+  const raw = brandSlug?.trim()
+  if (!raw) return "Не определён"
+  const n = normalizePosBrandSlug(raw)
+  const cfg = brands.find((b) => b.slug === n)
+  return cfg?.name ?? raw
+}
+
+/** Окно подтверждения входящего (Realtime `pbx_calls`, cmd=event / INCOMING). */
+function IncomingCallDialog({
+  call,
+  open,
+  createBusy,
+  onCancel,
+  onCreateOrder,
 }: {
-  entries: IncomingCallEvent[]
-  onDismiss: (callid: string) => void
+  call: IncomingCallEvent | null
+  open: boolean
+  createBusy: boolean
+  onCancel: () => void
+  onCreateOrder: () => void
 }) {
-  if (entries.length === 0) return null
+  const callerLine = useMemo(() => {
+    if (!call) return "—"
+    const name = call.profile_name?.trim()
+    if (name) return name
+    return call.caller?.trim() || "—"
+  }, [call])
+
+  const brandLine = useMemo(
+    () => incomingCallBrandDisplayName(call?.brand_slug ?? null),
+    [call?.brand_slug],
+  )
 
   return (
-    <div className="pointer-events-none fixed bottom-6 right-6 z-[90] flex max-h-[min(520px,calc(100vh-140px))] w-[min(calc(100vw-24px),320px)] flex-col gap-2 overflow-y-auto pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-      {entries.map((ev) => {
-        const callid =
-          typeof ev.callid === "string" && ev.callid.trim()
-            ? ev.callid.trim()
-            : ev.id
-        return (
-          <div
-            key={callid}
-            className="pointer-events-auto flex shrink-0 flex-col gap-2 rounded-2xl border border-[#3a3a3a] bg-[#242424] p-4 text-white shadow-xl"
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onCancel()
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#ccff00] text-[#242424]">
+              <Phone className="size-[18px]" aria-hidden />
+            </span>
+            Входящий звонок
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2 text-sm">
+          <p>
+            <span className="text-muted-foreground">Звонит: </span>
+            <span className="font-medium text-foreground">{callerLine}</span>
+          </p>
+          <p>
+            <span className="text-muted-foreground">Бренд: </span>
+            <span className="font-medium text-foreground">{brandLine}</span>
+          </p>
+        </div>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={createBusy}
           >
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#ccff00] text-[#242424]">
-                  <Phone className="size-[18px]" aria-hidden />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-[13px] font-bold leading-tight text-[#ccff00]">
-                    Входящий звонок
-                  </p>
-                  <p className="truncate font-mono text-[17px] font-bold tabular-nums">
-                    {ev.caller?.trim() || "—"}
-                  </p>
-                  {ev.profile_name ? (
-                    <p className="truncate text-[13px] font-medium text-[#e4e4e4]">
-                      {ev.profile_name}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Скрыть"
-                className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white transition-colors hover:bg-white/20"
-                onClick={() => onDismiss(callid)}
-              >
-                <X className="size-[18px]" />
-              </button>
-            </div>
-          </div>
-        )
-      })}
-    </div>
+            Отмена
+          </Button>
+          <Button
+            type="button"
+            className="bg-[#242424] text-white hover:bg-[#242424]/90"
+            onClick={onCreateOrder}
+            disabled={createBusy}
+          >
+            {createBusy ? "Создание…" : "Создать заказ"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -90,27 +127,28 @@ export function PosAppShell({
 }: PosAppShellProps) {
   const [sessionId, setSessionId] = useState<string | null>(cashSessionId)
   const [courierMapOpen, setCourierMapOpen] = useState(false)
-  const [incomingCallsByCallId, setIncomingCallsByCallId] = useState<
-    Map<string, IncomingCallEvent>
-  >(() => new Map())
+  const [modalCall, setModalCall] = useState<IncomingCallEvent | null>(null)
+  const queueRef = useRef<IncomingCallEvent[]>([])
+  const [createFromCallBusy, setCreateFromCallBusy] = useState(false)
 
   const handleIncomingCall = useCallback((ev: IncomingCallEvent) => {
-    const key =
-      typeof ev.callid === "string" && ev.callid.trim()
-        ? ev.callid.trim()
-        : ev.id
-    setIncomingCallsByCallId((prev) => {
-      const next = new Map(prev)
-      next.set(key, ev)
-      return next
+    setModalCall((cur) => {
+      if (!cur) return ev
+      queueRef.current.push(ev)
+      return cur
     })
   }, [])
 
   const handleDismissCall = useCallback((callid: string) => {
-    setIncomingCallsByCallId((prev) => {
-      const next = new Map(prev)
-      next.delete(callid)
-      return next
+    setModalCall((m) => {
+      const k = m?.callid?.trim()
+      if (k === callid) {
+        return queueRef.current.shift() ?? null
+      }
+      queueRef.current = queueRef.current.filter(
+        (e) => (e.callid?.trim() ?? e.id) !== callid,
+      )
+      return m
     })
   }, [])
 
@@ -119,11 +157,33 @@ export function PosAppShell({
     onDismiss: handleDismissCall,
   })
 
-  const incomingSorted = useMemo(() => {
-    return [...incomingCallsByCallId.values()].sort((a, b) =>
-      String(b.created_at).localeCompare(String(a.created_at)),
-    )
-  }, [incomingCallsByCallId])
+  const handleModalCancel = useCallback(() => {
+    if (!modalCall) return
+    handleDismissCall(modalCall.callid?.trim() || modalCall.id)
+  }, [modalCall, handleDismissCall])
+
+  const handleCreateOrderFromCall = useCallback(async () => {
+    if (!modalCall) return
+    const createFromCall = usePosOrderFromCallBridge.getState().createFromCall
+    if (!createFromCall) {
+      toast.error("Откройте страницу заказов POS")
+      return
+    }
+    setCreateFromCallBusy(true)
+    try {
+      await createFromCall({
+        brandSlug: modalCall.brand_slug,
+        userPhone: modalCall.caller,
+        profileId: modalCall.profile_id,
+        userName: modalCall.profile_name,
+      })
+      handleDismissCall(modalCall.callid?.trim() || modalCall.id)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось создать заказ")
+    } finally {
+      setCreateFromCallBusy(false)
+    }
+  }, [modalCall, handleDismissCall])
 
   if (!sessionId) {
     return (
@@ -172,9 +232,12 @@ export function PosAppShell({
           {children}
         </CashSessionProvider>
       </main>
-      <IncomingCallsStack
-        entries={incomingSorted}
-        onDismiss={handleDismissCall}
+      <IncomingCallDialog
+        call={modalCall}
+        open={modalCall !== null}
+        createBusy={createFromCallBusy}
+        onCancel={handleModalCancel}
+        onCreateOrder={() => void handleCreateOrderFromCall()}
       />
       <CourierMapModal
         isOpen={courierMapOpen}

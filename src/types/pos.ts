@@ -18,6 +18,9 @@ export type PosOrderStatus =
 
 export type PosOrderSource = "website" | "pos"
 
+/** Тип нового заказа в POS (шаг выбора перед мастером). */
+export type OrderType = "pickup" | "delivery" | "aggregator"
+
 /** Позиция корзины POS (цена за единицу в бани, с учётом топпингов). */
 export type PosCartItem = {
   menuItemId: string
@@ -45,9 +48,9 @@ export type PosOrder = {
   status: PosOrderStatus
   user_name: string | null
   user_phone: string | null
-  delivery_mode: "delivery" | "pickup"
+  delivery_mode: "delivery" | "pickup" | "aggregator"
   delivery_address: string | null
-  payment_method: "cash" | "card"
+  payment_method: "cash" | "card" | "aggregator_card"
   change_from: number | null
   promo_code: string | null
   total: number
@@ -64,6 +67,8 @@ export type PosOrder = {
   address_floor: string | null
   address_apartment: string | null
   address_intercom: string | null
+  aggregator: "glovo" | null
+  prep_deadline_at: string | null
   courier_id: string | null
   /** Имя из `staff` при непустом `courier_id`; подгружается в `fetchPosOrders`. */
   courier_name: string | null

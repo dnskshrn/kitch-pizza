@@ -27,12 +27,6 @@ export type CreateOrderPayload = {
   deliveryFeeBani: number
   grandTotalBani: number
   items: CartItem[]
-  condimentOrderLines?: Array<{
-    menu_item_id: string
-    item_name: string
-    quantity: number
-    price: number
-  }>
   /** Пункты лояльности, вычтенные из итога (1 п. = 100 bani); итог уже с вычетом в `grandTotalBani`. */
   bonuses_redeemed?: number
   /** Профиль витрины (если пользователь залогинен); нужен для списания бонусов при создании заказа. */
@@ -90,6 +84,13 @@ function deliveryCoordsAreUsable(
   )
 }
 
+function formatTelegramMdl(bani: number): string {
+  return (Math.round(bani) / 100).toLocaleString("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
 async function sendTelegramNotification(order: {
   orderNumber: number
   brandName: string
@@ -101,6 +102,8 @@ async function sendTelegramNotification(order: {
   total: number
   discount: number
   deliveryFee: number
+  /** Пункты лояльности, списанные при оформлении (1 п. = 100 бани). */
+  bonusesRedeemed?: number
   comment: string | null
   items: Array<{
     item_name: string
@@ -127,6 +130,27 @@ async function sendTelegramNotification(order: {
     )
     .join("\n")
 
+  const payableBani = Math.max(0, Math.round(order.total))
+  const discountBani = Math.max(0, Math.round(order.discount))
+  const bonusPts = Math.max(
+    0,
+    Math.floor(Number(order.bonusesRedeemed ?? 0) || 0),
+  )
+
+  const summaryPieces: string[] = []
+
+  if (discountBani > 0) {
+    const afterDiscountBani = Math.max(0, payableBani - discountBani)
+    summaryPieces.push(
+      `💰 После скидки: ${formatTelegramMdl(afterDiscountBani)} MDL`,
+    )
+  }
+  if (bonusPts > 0) {
+    summaryPieces.push(`🎁 Бонусы: -${bonusPts} MDL`)
+  }
+  /** Итого в заказе (уже с учётом скидки, доставки и бонусов). */
+  summaryPieces.push(`💳 К оплате: ${formatTelegramMdl(payableBani)} MDL`)
+
   const text = [
     `🆕 Заказ #${order.orderNumber} — ${order.brandName}`,
     ``,
@@ -137,13 +161,10 @@ async function sendTelegramNotification(order: {
     ``,
     itemLines,
     ``,
-    order.discount > 0
-      ? `🏷 Скидка: -${(order.discount / 100).toFixed(0)} MDL`
-      : null,
     order.deliveryFee > 0
-      ? `🚚 Доставка: ${(order.deliveryFee / 100).toFixed(0)} MDL`
+      ? `🚚 Доставка: ${formatTelegramMdl(order.deliveryFee)} MDL`
       : null,
-    `💰 Итого: ${(order.total / 100).toFixed(0)} MDL`,
+    summaryPieces.join("\n"),
   ]
     .filter(Boolean)
     .join("\n")
@@ -276,21 +297,9 @@ export async function executeCreateOrder(
     }
   })
 
-  const condimentRows = (payload.condimentOrderLines ?? []).map((line) => ({
-    order_id: orderId,
-    menu_item_id: line.menu_item_id,
-    lunch_set_id: null as string | null,
-    variant_id: null as string | null,
-    item_name: line.item_name,
-    size: null as null,
-    quantity: line.quantity,
-    toppings: [] as { name: string; price: number }[],
-    price: line.price,
-  }))
-
   const { error: itemsError } = await supabase
     .from("order_items")
-    .insert([...rows, ...condimentRows])
+    .insert(rows)
 
   if (itemsError) {
     console.error("[createOrder] order_items insert", itemsError.message)
@@ -356,6 +365,7 @@ export async function executeCreateOrder(
       total: payload.grandTotalBani,
       discount: payload.discountBani,
       deliveryFee: payload.deliveryFeeBani,
+      bonusesRedeemed: redeemed,
       comment: payload.comment?.trim() ?? null,
       items: payload.items.map((ci) => {
         const unitBani = getCartItemPrice(ci)

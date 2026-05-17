@@ -73,7 +73,7 @@ export function splitCompositeDeliveryAddress(
 }
 
 type OrderAddressSlice = {
-  delivery_mode: "delivery" | "pickup"
+  delivery_mode: "delivery" | "pickup" | "aggregator"
   delivery_address: string | null
   address_entrance: string | null
   address_floor: string | null
@@ -88,7 +88,7 @@ export function posCheckoutAddressFieldsFromOrder(
   SplitCompositeDeliveryAddressResult,
   "entrance" | "floor" | "apartment" | "intercom"
 > & { deliveryAddress: string } {
-  if (o.delivery_mode !== "delivery") {
+  if (o.delivery_mode === "pickup") {
     return {
       deliveryAddress: "",
       entrance: "",

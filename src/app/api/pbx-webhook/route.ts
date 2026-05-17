@@ -1,25 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
+import { brandSlugFromPbxBody } from "@/lib/pbx/diversion-brand-slug"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
-
-function normalizeDiversionDigits(input: string): string {
-  const noSpace = input.replace(/\s+/g, "")
-  let d = noSpace.replace(/\D/g, "")
-  if (d.startsWith("373")) d = d.slice(3)
-  if (d.startsWith("0")) d = d.slice(1)
-  return d
-}
-
-function diversionToBrandSlug(diversion: unknown): string | null {
-  if (typeof diversion !== "string") return null
-  const key = normalizeDiversionDigits(diversion)
-  if (!key) return null
-  const map: Record<string, string> = {
-    "79700290": "kitch-pizza",
-    "79200190": "losos",
-    "79200120": "the-spot",
-  }
-  return map[key] ?? null
-}
 
 function okResponse() {
   return new Response("OK", {
@@ -66,7 +47,7 @@ export async function POST(req: NextRequest) {
   const caller_phone = typeof body.phone === "string" ? body.phone : null
   const diversion =
     typeof body.diversion === "string" ? body.diversion : null
-  const brand_slug = diversionToBrandSlug(body.diversion)
+  const brand_slug = brandSlugFromPbxBody(body)
   const updated_at = new Date().toISOString()
 
   const supabase = createServiceRoleClient()

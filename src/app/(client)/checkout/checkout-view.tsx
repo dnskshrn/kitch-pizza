@@ -1,7 +1,6 @@
 "use client"
 
 import { createOrder } from "@/lib/actions/create-order"
-import { buildCondimentOrderLines } from "@/lib/cart-helpers"
 import { BonusRedeemBlock } from "@/components/client/bonus-redeem-block"
 import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
@@ -415,11 +414,6 @@ export function CheckoutView({
             ? deliveryLng
             : null,
         items,
-        condimentOrderLines: buildCondimentOrderLines(
-          useCartStore.getState().condimentQuantities,
-          useCartStore.getState().condimentsMeta,
-          lang,
-        ),
       })
       if (result.success) {
         router.push(

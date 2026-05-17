@@ -428,6 +428,7 @@ type OrderPayRow = {
 type PayOrderLoadedRow = OrderPayRow & {
   profile_id: string | null
   bonus_multiplier?: number | null
+  delivery_mode?: string | null
 }
 
 export type PayOrderInput = {
@@ -439,7 +440,7 @@ export type PayOrderInput = {
 
 export type PayOrderResult =
   | {
-      data: { order: OrderPayRow; transaction: CashTransactionRow }
+      data: { order: OrderPayRow; transaction: CashTransactionRow | null }
       error: null
     }
   | { data: null; error: string }
@@ -455,7 +456,9 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
   const { data: orderRow, error: orderErr } = await (
     supabase.from("orders") as any
   )
-    .select("id, total, status, paid_at, profile_id, bonus_multiplier")
+    .select(
+      "id, total, status, paid_at, profile_id, bonus_multiplier, delivery_mode",
+    )
     .eq("id", input.orderId)
     .maybeSingle()
 
@@ -469,7 +472,9 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
 
   const order = orderRow as PayOrderLoadedRow
 
-  if (order.status !== "delivery") {
+  const canPayFromReadyGlovo =
+    order.status === "ready" && order.delivery_mode === "aggregator"
+  if (order.status !== "delivery" && !canPayFromReadyGlovo) {
     return { data: null, error: "invalid_order_status" }
   }
   if (order.paid_at != null) {
@@ -495,15 +500,27 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
   }
 
   const paidAt = new Date().toISOString()
+  const isAggregator = order.delivery_mode === "aggregator"
+  const skipCashTransaction =
+    isAggregator && input.paymentMethod === "card"
+
+  const orderPatch: Record<string, unknown> = {
+    paid_at: paidAt,
+    status: "done",
+  }
+  if (isAggregator && input.paymentMethod === "card") {
+    orderPatch.payment_method = "aggregator_card"
+  } else if (isAggregator && input.paymentMethod === "cash") {
+    orderPatch.payment_method = "cash"
+  }
+
+  const expectedPayStatus = canPayFromReadyGlovo ? "ready" : "delivery"
 
   const { data: updatedOrders, error: updOrderErr } = await supabase
     .from("orders")
-    .update({
-      paid_at: paidAt,
-      status: "done",
-    })
+    .update(orderPatch)
     .eq("id", input.orderId)
-    .eq("status", "delivery")
+    .eq("status", expectedPayStatus)
     .select("id, total, status, paid_at")
     .maybeSingle()
 
@@ -517,29 +534,33 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
 
   const updatedOrder = updatedOrders as OrderPayRow
 
-  const { data: txIns, error: txErr } = await (
-    supabase.from("cash_transactions")
-  )
-    .insert({
-      cash_session_id: input.cashSessionId,
-      type: "order_payment",
-      direction: "in",
-      amount_bani: updatedOrder.total,
-      payment_method: input.paymentMethod,
-      order_id: input.orderId,
-      created_by_staff_id: input.createdByStaffId ?? null,
-      category: null,
-      description: null,
-    })
-    .select("*")
-    .single()
+  let transaction: CashTransactionRow | null = null
+  if (!skipCashTransaction) {
+    const { data: txIns, error: txErr } = await (
+      supabase.from("cash_transactions")
+    )
+      .insert({
+        cash_session_id: input.cashSessionId,
+        type: "order_payment",
+        direction: "in",
+        amount_bani: updatedOrder.total,
+        payment_method: input.paymentMethod,
+        order_id: input.orderId,
+        created_by_staff_id: input.createdByStaffId ?? null,
+        category: null,
+        description: null,
+      })
+      .select("*")
+      .single()
 
-  if (txErr || !txIns) {
-    console.error("[payOrder] insert tx", txErr?.message)
-    return {
-      data: null,
-      error: txErr?.message ?? "insert_failed",
+    if (txErr || !txIns) {
+      console.error("[payOrder] insert tx", txErr?.message)
+      return {
+        data: null,
+        error: txErr?.message ?? "insert_failed",
+      }
     }
+    transaction = txIns as CashTransactionRow
   }
 
   const orderId = input.orderId
@@ -555,7 +576,7 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
   return {
     data: {
       order: updatedOrder,
-      transaction: txIns as CashTransactionRow,
+      transaction,
     },
     error: null,
   }

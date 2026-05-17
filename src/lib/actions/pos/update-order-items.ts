@@ -18,7 +18,14 @@ type OrderRow = {
   id: string
   delivery_fee: number
   discount: number
+  /** Пункты лояльности; 1 п. = 100 бань к итогу (orders.total — нетто после вычета). */
+  bonuses_redeemed: number | null
   order_items: OrderItemRow[] | null
+}
+
+function bonusesRedeemedToBani(points: number | null | undefined): number {
+  if (typeof points !== "number" || !Number.isFinite(points)) return 0
+  return Math.max(0, Math.floor(points)) * 100
 }
 
 function itemUnitPriceBani(item: OrderItemRow): number {
@@ -36,14 +43,17 @@ function nextTotalBani(
     return sum + row.price
   }, 0)
 
-  return Math.max(0, subtotal - order.discount + order.delivery_fee)
+  const bonusBani = bonusesRedeemedToBani(order.bonuses_redeemed)
+  return Math.max(0, subtotal - order.discount + order.delivery_fee - bonusBani)
 }
 
 async function loadOrder(orderId: string): Promise<OrderRow | null> {
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from("orders")
-    .select("id, delivery_fee, discount, order_items(id, quantity, price)")
+    .select(
+      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
+    )
     .eq("id", orderId)
     .maybeSingle()
 
@@ -164,6 +174,7 @@ type PosOrderTotalsRow = {
   id: string
   delivery_fee: number
   discount: number
+  bonuses_redeemed: number | null
   order_items: OrderItemRow[] | null
 }
 
@@ -171,7 +182,9 @@ async function loadOrderForTotals(orderId: string): Promise<PosOrderTotalsRow | 
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from("orders")
-    .select("id, delivery_fee, discount, order_items(id, quantity, price)")
+    .select(
+      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
+    )
     .eq("id", orderId)
     .maybeSingle()
 
@@ -185,7 +198,8 @@ async function loadOrderForTotals(orderId: string): Promise<PosOrderTotalsRow | 
 
 function recomputedTotalBani(order: PosOrderTotalsRow, items: OrderItemRow[]): number {
   const subtotal = items.reduce((sum, row) => sum + row.price, 0)
-  return Math.max(0, subtotal - order.discount + order.delivery_fee)
+  const bonusBani = bonusesRedeemedToBani(order.bonuses_redeemed)
+  return Math.max(0, subtotal - order.discount + order.delivery_fee - bonusBani)
 }
 
 /** Дополнительные строки к уже сохранённому заказу (шаг POS «добавить к заказу»). */
@@ -237,7 +251,9 @@ export async function addOrderItemsPos({
 
   const { data: refreshed, error: refreshError } = await supabase
     .from("orders")
-    .select("id, delivery_fee, discount, order_items(id, quantity, price)")
+    .select(
+      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
+    )
     .eq("id", orderId)
     .maybeSingle()
 
@@ -327,7 +343,9 @@ export async function replaceOrderItemsPos({
 
   const { data: refreshed, error: refreshError } = await supabase
     .from("orders")
-    .select("id, delivery_fee, discount, order_items(id, quantity, price)")
+    .select(
+      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
+    )
     .eq("id", orderId)
     .maybeSingle()
 
@@ -419,7 +437,9 @@ export async function updateOrderItemCompositionPos({
 
   const { data: refreshed, error: refreshError } = await supabase
     .from("orders")
-    .select("id, delivery_fee, discount, order_items(id, quantity, price)")
+    .select(
+      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
+    )
     .eq("id", orderId)
     .maybeSingle()
 

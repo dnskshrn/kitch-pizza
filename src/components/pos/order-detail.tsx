@@ -28,6 +28,7 @@ import { createClient } from "@/lib/supabase/client"
 import type { MenuItem, MenuItemVariant } from "@/types/database"
 import type { PosCartItem, PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 import {
+  Bike,
   CalendarDays,
   CreditCard,
   Minus,
@@ -190,13 +191,13 @@ type OrderDetailRow = {
   status: PosOrderStatus
   user_name: string | null
   user_phone: string | null
-  delivery_mode: "delivery" | "pickup"
+  delivery_mode: "delivery" | "pickup" | "aggregator"
   delivery_address: string | null
   address_entrance: string | null
   address_floor: string | null
   address_apartment: string | null
   address_intercom: string | null
-  payment_method: "cash" | "card"
+  payment_method: "cash" | "card" | "aggregator_card"
   change_from: number | null
   total: number
   delivery_fee: number
@@ -217,8 +218,10 @@ function brandSlugFromRow(row: OrderDetailRow): string {
   return b.slug ?? ""
 }
 
-function paymentLabel(m: "cash" | "card"): string {
-  return m === "cash" ? "Наличные" : "Карта"
+function paymentLabel(m: OrderDetailRow["payment_method"]): string {
+  if (m === "cash") return "Наличные"
+  if (m === "aggregator_card") return "Карта Glovo"
+  return "Карта"
 }
 
 function changeFromDisplay(bani: number | null): string {
@@ -649,6 +652,11 @@ export function OrderDetail({
             <h2 className="text-[22px] font-bold leading-none tracking-[-0.03em] text-[#242424]">
               Заказ #{order.order_number}
             </h2>
+            {order.delivery_mode === "aggregator" ? (
+              <span className="inline-flex shrink-0 rounded-md bg-orange-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                GLOVO
+              </span>
+            ) : null}
             {brandSlug ? (
               <PosBrandMark brandSlug={brandSlug} size="md" />
             ) : null}
@@ -673,37 +681,58 @@ export function OrderDetail({
       <div className="@container min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-5">
         <div className="flex flex-col gap-4 @[640px]:grid @[640px]:grid-cols-12 @[640px]:gap-4">
           <div className="flex min-w-0 flex-col gap-4 @[640px]:col-span-5">
-            <DetailCard title="Данные клиента" icon={<User className="size-4" />}>
-              <dl className="grid gap-3">
-                <InfoRow label="Имя" value={order.user_name?.trim() || "—"} />
-                <InfoRow label="Телефон">
-                  {order.user_phone?.trim() ? (
-                    <a
-                      href={`tel:${order.user_phone.replace(/\s/g, "")}`}
-                      className="inline-flex min-w-0 items-center gap-2 text-[#242424] hover:underline"
-                    >
-                      <Phone className="size-4 shrink-0 text-[#808080]" aria-hidden />
-                      <span className="truncate">{order.user_phone}</span>
-                    </a>
-                  ) : (
-                    <span className="text-[#808080]">—</span>
-                  )}
-                </InfoRow>
-              </dl>
-            </DetailCard>
+            {order.delivery_mode !== "aggregator" ? (
+              <DetailCard title="Данные клиента" icon={<User className="size-4" />}>
+                <dl className="grid gap-3">
+                  <InfoRow label="Имя" value={order.user_name?.trim() || "—"} />
+                  <InfoRow label="Телефон">
+                    {order.user_phone?.trim() ? (
+                      <a
+                        href={`tel:${order.user_phone.replace(/\s/g, "")}`}
+                        className="inline-flex min-w-0 items-center gap-2 text-[#242424] hover:underline"
+                      >
+                        <Phone className="size-4 shrink-0 text-[#808080]" aria-hidden />
+                        <span className="truncate">{order.user_phone}</span>
+                      </a>
+                    ) : (
+                      <span className="text-[#808080]">—</span>
+                    )}
+                  </InfoRow>
+                </dl>
+              </DetailCard>
+            ) : null}
 
-            <DetailCard title="Доставка и оплата" icon={<Truck className="size-4" />}>
+            <DetailCard
+              title="Доставка и оплата"
+              icon={
+                order.delivery_mode === "aggregator" ? (
+                  <Bike className="size-4" />
+                ) : (
+                  <Truck className="size-4" />
+                )
+              }
+            >
               <dl className="grid gap-3">
                 <InfoRow
                   label="Режим"
                   value={
-                    order.delivery_mode === "delivery" ? "Доставка" : "Самовывоз"
+                    order.delivery_mode === "aggregator"
+                      ? "Glovo"
+                      : order.delivery_mode === "delivery"
+                        ? "Доставка"
+                        : "Самовывоз"
                   }
                 />
                 <InfoRow label="Адрес">
-                  <span className="break-words">
-                    {order.delivery_address?.trim() || "—"}
-                  </span>
+                  {order.delivery_mode === "aggregator" ? (
+                    <span className="inline-flex rounded-md bg-orange-500 px-2 py-0.5 text-xs font-bold uppercase text-white">
+                      GLOVO
+                    </span>
+                  ) : (
+                    <span className="break-words">
+                      {order.delivery_address?.trim() || "—"}
+                    </span>
+                  )}
                 </InfoRow>
                 {order.delivery_mode === "delivery" ? (
                   <>
@@ -977,6 +1006,7 @@ export function OrderDetail({
           orderId={order.id}
           orderTotal={order.total}
           paymentMethod={order.payment_method}
+          isAggregatorOrder={order.delivery_mode === "aggregator"}
           cashSessionId={cashSession.cashSessionId}
           staffId={cashSession.staffId}
           onClose={() => setPayModalOpen(false)}
@@ -1016,7 +1046,9 @@ export function OrderDetail({
               Передать курьеру
             </Button>
           ) : null}
-          {order.status === "delivery" ? (
+          {order.status === "delivery" ||
+          (order.status === "ready" &&
+            order.delivery_mode === "aggregator") ? (
             <Button
               type="button"
               variant="default"

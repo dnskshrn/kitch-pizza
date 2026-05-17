@@ -10,14 +10,14 @@ export type UpdateOrderDetailsPosInput = {
   orderId: string
   userName: string
   userPhone: string
-  deliveryMode: "delivery" | "pickup"
+  deliveryMode: "delivery" | "pickup" | "aggregator"
   /** Улица и дом */
   deliveryAddress?: string
   addressEntrance?: string | null
   addressFloor?: string | null
   addressApartment?: string | null
   addressIntercom?: string | null
-  paymentMethod: "cash" | "card"
+  paymentMethod: "cash" | "card" | "aggregator_card"
   changeFrom?: number
   comment?: string
   promoCode?: string
@@ -72,7 +72,9 @@ export async function updateOrderDeliveryModePos(
 
   const { data: orderRow, error: loadError } = await supabase
     .from("orders")
-    .select("id, delivery_address, delivery_fee, discount, bonuses_redeemed")
+    .select(
+      "id, delivery_address, delivery_fee, discount, bonuses_redeemed, payment_method",
+    )
     .eq("id", orderId)
     .maybeSingle()
 
@@ -100,6 +102,7 @@ export async function updateOrderDeliveryModePos(
     delivery_fee: number | null
     discount: number | null
     bonuses_redeemed: number | null
+    payment_method: string | null
   }
   const safeDiscount = Math.min(
     Math.max(0, Math.round(row.discount ?? 0)),
@@ -115,6 +118,11 @@ export async function updateOrderDeliveryModePos(
         : row.delivery_address
   const total = Math.max(0, subtotalBani - safeDiscount + deliveryFee - bonusBani)
 
+  let payment_method: string = typeof row.payment_method === "string" ? row.payment_method : "cash"
+  if (payment_method === "aggregator_card") {
+    payment_method = "cash"
+  }
+
   const { error: updateError } = await supabase
     .from("orders")
     .update({
@@ -122,6 +130,9 @@ export async function updateOrderDeliveryModePos(
       delivery_address: deliveryAddress,
       delivery_fee: deliveryFee,
       total,
+      aggregator: null,
+      prep_deadline_at: null,
+      payment_method,
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
@@ -146,18 +157,22 @@ export async function updateOrderDetailsPos(
 
   const name = input.userName.trim()
   const phone = input.userPhone.trim()
-  if (!name) return { success: false, error: "Укажите имя" }
-  if (!phone) return { success: false, error: "Укажите телефон" }
+  if (input.deliveryMode !== "aggregator") {
+    if (!name) return { success: false, error: "Укажите имя" }
+    if (!phone) return { success: false, error: "Укажите телефон" }
+  }
 
   const deliveryFeeBani = Math.max(0, Math.round(input.deliveryFee))
   const discountBani = Math.max(0, Math.round(input.discount))
 
-  const deliveryAddress =
+  const deliveryAddress: string | null =
     input.deliveryMode === "pickup"
       ? "Самовывоз — bd. Dacia 27"
-      : (input.deliveryAddress?.trim() ?? "")
+      : input.deliveryMode === "aggregator"
+        ? null
+        : (input.deliveryAddress?.trim() ?? "")
 
-  if (input.deliveryMode === "delivery" && !deliveryAddress) {
+  if (input.deliveryMode === "delivery" && !deliveryAddress?.trim()) {
     return { success: false, error: "Укажите адрес доставки" }
   }
 
@@ -237,7 +252,9 @@ export async function updateOrderDetailsPos(
       delivery_lng = Number(lngIn)
     } else {
       try {
-        const hit = await geocodeAddress(deliveryAddress)
+        const addrForGeo =
+          typeof deliveryAddress === "string" ? deliveryAddress : ""
+        const hit = await geocodeAddress(addrForGeo)
         if (hit) {
           delivery_lat = hit.lat
           delivery_lng = hit.lng
@@ -251,9 +268,21 @@ export async function updateOrderDetailsPos(
 
   const updatedAt = new Date().toISOString()
 
+  let paymentMethod = input.paymentMethod
+  if (
+    input.deliveryMode !== "aggregator" &&
+    paymentMethod === "aggregator_card"
+  ) {
+    paymentMethod = "cash"
+  }
+
   const patch: Record<string, unknown> = {
-    user_name: name,
-    user_phone: phone,
+    ...(input.deliveryMode === "aggregator"
+      ? {
+          ...(name ? { user_name: name } : {}),
+          ...(phone ? { user_phone: phone } : {}),
+        }
+      : { user_name: name, user_phone: phone }),
     delivery_mode: input.deliveryMode,
     delivery_address: deliveryAddress,
     address_entrance:
@@ -266,7 +295,7 @@ export async function updateOrderDetailsPos(
         : null,
     address_intercom:
       input.addressIntercom != null ? String(input.addressIntercom).trim() || null : null,
-    payment_method: input.paymentMethod,
+    payment_method: paymentMethod,
     change_from: changeFromBani,
     total: totalBani,
     delivery_fee: deliveryFeeBani,
@@ -285,6 +314,13 @@ export async function updateOrderDetailsPos(
 
   if (input.profileId !== undefined) {
     patch.profile_id = input.profileId
+  }
+
+  if (input.deliveryMode === "aggregator") {
+    patch.aggregator = "glovo"
+  } else {
+    patch.aggregator = null
+    patch.prep_deadline_at = null
   }
 
   if (input.discountRulesApplied !== undefined) {

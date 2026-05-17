@@ -67,12 +67,18 @@ type CheckoutSuccessViewProps = {
   brandName: string
   brandLogo: string
   brandSlug: string
+  /** Итог и бонусы из `orders` после редиректа с `?order=` */
+  orderTotals?: {
+    totalBani: number
+    bonusesRedeemedPoints: number
+  } | null
 }
 
 export function CheckoutSuccessView({
   brandName,
   brandLogo,
   brandSlug,
+  orderTotals = null,
 }: CheckoutSuccessViewProps) {
   const { lang, t } = useLanguage()
   const router = useRouter()
@@ -116,7 +122,11 @@ export function CheckoutSuccessView({
   }, [])
 
   const deliveryFeeBani = getDeliveryFeeBani(subtotal)
-  const grandTotal = getCartGrandTotalBani()
+  const cartGrandBani = getCartGrandTotalBani()
+  const grandTotalDisplayBani =
+    orderTotals !== null ? orderTotals.totalBani : cartGrandBani
+  const bonusesRedeemedPts =
+    orderTotals !== null ? orderTotals.bonusesRedeemedPoints : 0
 
   function handleBackNav() {
     router.push("/")
@@ -268,7 +278,8 @@ export function CheckoutSuccessView({
               deliveryFeeBani={deliveryFeeBani}
               mode={mode}
               selectedZone={selectedZone}
-              grandTotal={grandTotal}
+              grandTotal={grandTotalDisplayBani}
+              bonusesRedeemed={bonusesRedeemedPts}
             />
           </aside>
         </div>

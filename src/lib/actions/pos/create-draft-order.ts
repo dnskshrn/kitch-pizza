@@ -13,7 +13,7 @@ export type CreateDraftOrderOptions = {
   userPhone?: string | null
   profileId?: string | null
   userName?: string | null
-  deliveryMode?: "delivery" | "pickup"
+  deliveryMode?: "delivery" | "pickup" | "aggregator"
 }
 
 export async function createDraftOrder(
@@ -58,35 +58,72 @@ export async function createDraftOrder(
       ? options.profileId.trim()
       : null
 
-  const insertRow = {
-    status: "draft" as const,
-    source: "pos" as const,
-    operator_id: staff.id,
-    total: 0,
-    delivery_mode: options?.deliveryMode ?? ("delivery" as const),
-    payment_method: "cash" as const,
-    delivery_fee: 0,
-    discount: 0,
-    brand_id,
-    user_name,
-    user_phone,
-    profile_id,
-    delivery_address: null,
-    promo_code: null,
-    scheduled_time: null,
-    comment: null,
-    change_from: null,
-    cancel_reason: null,
-    address_entrance: null,
-    address_floor: null,
-    address_apartment: null,
-    address_intercom: null,
-  }
+  let data: { id: string } | null
+  let error: { message?: string } | null
 
-  const { data, error } = await (supabase.from("orders") as any)
-    .insert(insertRow)
-    .select("id")
-    .single()
+  if (options?.deliveryMode === "aggregator") {
+    const res = await (supabase.from("orders") as any)
+      .insert({
+        status: "draft" as const,
+        source: "pos" as const,
+        operator_id: staff.id,
+        total: 0,
+        delivery_mode: "aggregator" as const,
+        aggregator: "glovo" as const,
+        payment_method: "aggregator_card" as const,
+        prep_deadline_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        delivery_fee: 0,
+        discount: 0,
+        brand_id,
+        user_name,
+        user_phone,
+        profile_id,
+        delivery_address: null,
+        promo_code: null,
+        scheduled_time: null,
+        comment: null,
+        change_from: null,
+        cancel_reason: null,
+        address_entrance: null,
+        address_floor: null,
+        address_apartment: null,
+        address_intercom: null,
+      })
+      .select("id")
+      .single()
+    data = res.data as { id: string } | null
+    error = res.error
+  } else {
+    const res = await (supabase.from("orders") as any)
+      .insert({
+        status: "draft" as const,
+        source: "pos" as const,
+        operator_id: staff.id,
+        total: 0,
+        delivery_mode: options?.deliveryMode ?? ("delivery" as const),
+        payment_method: "cash" as const,
+        delivery_fee: 0,
+        discount: 0,
+        brand_id,
+        user_name,
+        user_phone,
+        profile_id,
+        delivery_address: null,
+        promo_code: null,
+        scheduled_time: null,
+        comment: null,
+        change_from: null,
+        cancel_reason: null,
+        address_entrance: null,
+        address_floor: null,
+        address_apartment: null,
+        address_intercom: null,
+      })
+      .select("id")
+      .single()
+    data = res.data as { id: string } | null
+    error = res.error
+  }
 
   if (error) {
     console.error(
@@ -101,7 +138,7 @@ export async function createDraftOrder(
     return { success: false, error: "Не удалось создать черновик заказа" }
   }
 
-  return { success: true, orderId: (data as { id: string }).id }
+  return { success: true, orderId: data.id }
 }
 
 /** Alias for POS UI (то же самое, что `createDraftOrder`). */

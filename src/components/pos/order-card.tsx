@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import type { PosOrder, PosOrderStatus } from "@/types/pos"
-import { MapPin, Phone, Store, Truck, User, CircleUser } from "lucide-react"
+import { MapPin, Phone, Store, Truck, Tag, User, CircleUser, Bike } from "lucide-react"
 import { useEffect, useState } from "react"
 
 function formatOrderTime(iso: string): string {
@@ -50,13 +50,10 @@ export function compactCardDeliveryAddress(order: PosOrder): string {
 
   if (hasStructured) return raw
 
-  const dot = raw.indexOf(".")
   const comma = raw.indexOf(",")
-  const stops = [dot, comma].filter((i) => i >= 0)
-  if (stops.length === 0) return raw
+  if (comma < 0) return raw
 
-  const cut = Math.min(...stops)
-  return raw.slice(0, cut).trim() || raw
+  return raw.slice(0, comma).trim() || raw
 }
 
 function StatusBadge({ status }: { status: PosOrderStatus }) {
@@ -233,6 +230,7 @@ export function OrderCard({
   const orderTime = formatOrderTime(order.created_at)
   const displayName = order.user_name?.trim() || "—"
   const addressLine = compactCardDeliveryAddress(order)
+  const promoTrim = order.promo_code?.trim() ?? ""
 
   return (
     <div
@@ -259,6 +257,8 @@ export function OrderCard({
         <div className="flex items-center gap-2">
           {order.delivery_mode === "pickup" ? (
             <Store className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
+          ) : order.delivery_mode === "aggregator" ? (
+            <Bike className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
           ) : (
             <Truck className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
           )}
@@ -278,12 +278,41 @@ export function OrderCard({
           <StatusBadge status={order.status} />
         </div>
 
-        {/* ── Строка 2: адрес на сером фоне ── */}
-        <div className="flex items-center gap-2 rounded-lg bg-[#f2f2f2] px-3 py-2.5">
-          <MapPin className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#242424]">
-            {addressLine}
-          </span>
+        {promoTrim !== "" || order.discount > 0 ? (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] text-[11px] leading-snug text-emerald-700">
+            {promoTrim !== "" ? (
+              <span className="inline-flex items-center gap-1 font-semibold">
+                <Tag className="size-3 shrink-0 opacity-90" aria-hidden />
+                Промо: {promoTrim}
+              </span>
+            ) : null}
+            {order.discount > 0 ? (
+              <span className="font-mono font-semibold tabular-nums">
+                −{formatMdl(order.discount)}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* ── Строка 2: адрес на сером фоне / Glovo ── */}
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-lg bg-[#f2f2f2] px-3 py-2.5",
+            order.delivery_mode === "aggregator" && "justify-center",
+          )}
+        >
+          {order.delivery_mode === "aggregator" ? (
+            <span className="rounded-md bg-orange-500 px-2 py-1 text-xs font-bold uppercase text-white">
+              GLOVO
+            </span>
+          ) : (
+            <>
+              <MapPin className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#242424]">
+                {addressLine}
+              </span>
+            </>
+          )}
         </div>
 
         {order.delivery_mode === "delivery" &&
@@ -305,15 +334,16 @@ export function OrderCard({
           </div>
         ) : null}
 
-        {/* ── Строка 3: имя · телефон ── */}
-        <div className="flex items-center gap-2">
-          <User className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
-          <span className="text-[13px] text-[#242424]">{displayName}</span>
-          <Phone className="ml-1 size-3.5 shrink-0 text-[#808080]" aria-hidden />
-          <span className="text-[13px] text-[#808080]">
-            {order.user_phone?.trim() || "—"}
-          </span>
-        </div>
+        {order.delivery_mode !== "aggregator" ? (
+          <div className="flex items-center gap-2">
+            <User className="size-3.5 shrink-0 text-[#808080]" aria-hidden />
+            <span className="text-[13px] text-[#242424]">{displayName}</span>
+            <Phone className="ml-1 size-3.5 shrink-0 text-[#808080]" aria-hidden />
+            <span className="text-[13px] text-[#808080]">
+              {order.user_phone?.trim() || "—"}
+            </span>
+          </div>
+        ) : null}
 
         {/* ── Строка 4: позиции · сумма ── */}
         <div className="flex items-center justify-between">
@@ -321,7 +351,7 @@ export function OrderCard({
             {formatPositionCount(order.item_count)}
           </span>
           <span className="font-mono text-[14px] font-bold tabular-nums text-[#242424]">
-            {formatMdl(order.total)}
+            {formatMdl(order.total ?? 0)}
           </span>
         </div>
       </div>

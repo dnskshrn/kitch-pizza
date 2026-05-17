@@ -92,6 +92,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Banknote,
+  Bike,
   CreditCard,
   Loader2,
   MapPin,
@@ -185,7 +186,7 @@ function mergePersistedWebsitePromoDiscount(
 function buildPersistedDiscountEngineSeed(
   cart: PosCartItem[],
   persistedDiscountBani: number,
-  deliveryMode: "delivery" | "pickup",
+  deliveryMode: "delivery" | "pickup" | "aggregator",
   deliveryFeeBani: number,
 ): DiscountEngineOutput | null {
   const discRound = Math.max(0, Math.round(persistedDiscountBani))
@@ -246,19 +247,35 @@ type MenuItemRow = Pick<
 
 const checkoutSchema = z
   .object({
-    userName: z.string().min(1, "Введите имя"),
-    userPhone: z.string().min(1, "Введите телефон"),
-    deliveryMode: z.enum(["delivery", "pickup"]),
+    userName: z.string(),
+    userPhone: z.string(),
+    deliveryMode: z.enum(["delivery", "pickup", "aggregator"]),
     deliveryAddress: z.string().optional(),
     addressEntrance: z.string().optional(),
     addressFloor: z.string().optional(),
     addressApartment: z.string().optional(),
     addressIntercom: z.string().optional(),
-    paymentMethod: z.enum(["cash", "card"]),
+    paymentMethod: z.enum(["cash", "card", "aggregator_card"]),
     changeFromLei: z.string().optional(),
     comment: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    if (data.deliveryMode !== "aggregator") {
+      if (!data.userName.trim()) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Введите имя",
+          path: ["userName"],
+        })
+      }
+      if (!data.userPhone.trim()) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Введите телефон",
+          path: ["userPhone"],
+        })
+      }
+    }
     if (data.deliveryMode === "delivery" && !data.deliveryAddress?.trim()) {
       ctx.addIssue({
         code: "custom",
@@ -934,14 +951,24 @@ export function OrderForm({
   const runnerAlreadySent = listOrder?.status === "cooking"
   const readyForCourierAssign =
     listOrder?.status === "ready" && listOrder?.delivery_mode === "delivery"
-  const showPayOrderCta = listOrder?.status === "delivery"
+  const showPayOrderCta =
+    // 1) обычная доставка после передачи курьеру
+    listOrder?.status === "delivery" ||
+    // 2) самовывоз готов — сразу оплата, без статуса delivery
+    (listOrder?.status === "ready" &&
+      listOrder?.delivery_mode === "pickup") ||
+    // 3) Glovo готов — сразу оплата
+    (listOrder?.status === "ready" &&
+      listOrder?.delivery_mode === "aggregator")
   const courierButtonGate = useMemo(() => {
     if (!listOrder) {
       return { disabled: false as boolean, hints: [] as string[] }
     }
     const isPickup = listOrder.delivery_mode === "pickup"
-    const missingPhone = !listOrder.user_phone?.trim()
-    const missingAddress = !isPickup && !listOrder.delivery_address?.trim()
+    const isAggregator = listOrder.delivery_mode === "aggregator"
+    const missingPhone = !isAggregator && !listOrder.user_phone?.trim()
+    const missingAddress =
+      !isPickup && !isAggregator && !listOrder.delivery_address?.trim()
     const disabled = missingPhone || missingAddress
     const hints = [
       missingPhone ? "Укажите телефон клиента" : null,
@@ -958,8 +985,10 @@ export function OrderForm({
         return
       }
       const isPickup = listOrder.delivery_mode === "pickup"
-      const missingPhone = !listOrder.user_phone?.trim()
-      const missingAddress = !isPickup && !listOrder.delivery_address?.trim()
+      const isAggregator = listOrder.delivery_mode === "aggregator"
+      const missingPhone = !isAggregator && !listOrder.user_phone?.trim()
+      const missingAddress =
+        !isPickup && !isAggregator && !listOrder.delivery_address?.trim()
       if (missingPhone || missingAddress) {
         return
       }
@@ -1007,8 +1036,10 @@ export function OrderForm({
   useEffect(() => {
     if (!listOrder) return
     const isPickup = listOrder.delivery_mode === "pickup"
-    const missingAddress = !isPickup && !listOrder.delivery_address?.trim()
-    const missingPhone = !listOrder.user_phone?.trim()
+    const isAggregator = listOrder.delivery_mode === "aggregator"
+    const missingAddress =
+      !isPickup && !isAggregator && !listOrder.delivery_address?.trim()
+    const missingPhone = !isAggregator && !listOrder.user_phone?.trim()
     if (!missingAddress && !missingPhone) {
       setCourierContactWarnings([])
     }
@@ -1016,8 +1047,10 @@ export function OrderForm({
 
   useEffect(() => {
     const isPickupForm = deliveryMode === "pickup"
-    const addrOk = isPickupForm || Boolean(deliveryAddress?.trim())
-    const phoneOk = Boolean(userPhoneWatched?.trim())
+    const isAggForm = deliveryMode === "aggregator"
+    const addrOk =
+      isPickupForm || isAggForm || Boolean(deliveryAddress?.trim())
+    const phoneOk = isAggForm || Boolean(userPhoneWatched?.trim())
     if (addrOk && phoneOk) {
       setCourierContactWarnings([])
     }
@@ -1381,7 +1414,9 @@ export function OrderForm({
 
   /* Сбрасываем зону при переключении режима */
   useEffect(() => {
-    if (deliveryMode !== "delivery") setZoneResult(null)
+    if (deliveryMode === "pickup" || deliveryMode === "aggregator") {
+      setZoneResult(null)
+    }
   }, [deliveryMode])
 
   const resolveBrandId = useCallback(async (slug: string) => {
@@ -1427,7 +1462,7 @@ export function OrderForm({
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
+          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
         )
         .eq("id", posOrderId)
         .maybeSingle()
@@ -1443,11 +1478,13 @@ export function OrderForm({
         order_number: number
         user_name: string | null
         user_phone: string | null
-        delivery_mode: "delivery" | "pickup"
+        delivery_mode: "delivery" | "pickup" | "aggregator"
         delivery_address: string | null
         delivery_fee: number
         discount: number
-        payment_method: "cash" | "card"
+        payment_method: "cash" | "card" | "aggregator_card"
+        aggregator: "glovo" | null
+        prep_deadline_at: string | null
         change_from: number | null
         comment: string | null
         promo_code: string | null
@@ -1775,7 +1812,7 @@ export function OrderForm({
         })
         form.setValue(
           "deliveryAddress",
-          res.deliveryMode === "delivery" ? (res.deliveryAddress ?? "") : "",
+          res.deliveryMode === "pickup" ? "" : (res.deliveryAddress ?? ""),
           {
             shouldDirty: true,
             shouldTouch: true,
@@ -1794,9 +1831,9 @@ export function OrderForm({
           updated_at: new Date().toISOString(),
         })
         toast.success(
-          res.deliveryMode === "delivery"
-            ? "Тип заказа изменён на доставку"
-            : "Тип заказа изменён на навынос",
+          res.deliveryMode === "pickup"
+            ? "Тип заказа изменён на навынос"
+            : "Тип заказа изменён на доставку",
         )
       } finally {
         setDeliveryModeBusy(false)
@@ -2170,9 +2207,12 @@ export function OrderForm({
   }
 
   function detailsArePersistable(values: CheckoutFormValues): boolean {
+    if (values.deliveryMode === "aggregator") {
+      return true
+    }
     if (!values.userName.trim() || !values.userPhone.trim()) return false
     if (
-      values.deliveryMode === "delivery" &&
+      values.deliveryMode !== "pickup" &&
       !values.deliveryAddress?.trim()
     ) {
       return false
@@ -2219,20 +2259,39 @@ export function OrderForm({
         ? uiBonuses
         : Math.max(fromOrderBonuses, uiBonuses)
 
+      const paymentMethodForSave =
+        values.deliveryMode === "aggregator" &&
+        values.paymentMethod === "card"
+          ? ("aggregator_card" as const)
+          : values.paymentMethod
+
       const res = await updateOrderDetailsPos({
         orderId: posOrderId,
         userName: values.userName,
         userPhone: buildPhoneForSave(values.userPhone),
         deliveryMode: values.deliveryMode,
         deliveryAddress:
-          values.deliveryMode === "delivery"
-            ? values.deliveryAddress
-            : undefined,
-        addressEntrance: values.addressEntrance?.trim() || null,
-        addressFloor: values.addressFloor?.trim() || null,
-        addressApartment: values.addressApartment?.trim() || null,
-        addressIntercom: values.addressIntercom?.trim() || null,
-        paymentMethod: values.paymentMethod,
+          values.deliveryMode === "pickup" ||
+          values.deliveryMode === "aggregator"
+            ? undefined
+            : values.deliveryAddress,
+        addressEntrance:
+          values.deliveryMode === "aggregator"
+            ? null
+            : values.addressEntrance?.trim() || null,
+        addressFloor:
+          values.deliveryMode === "aggregator"
+            ? null
+            : values.addressFloor?.trim() || null,
+        addressApartment:
+          values.deliveryMode === "aggregator"
+            ? null
+            : values.addressApartment?.trim() || null,
+        addressIntercom:
+          values.deliveryMode === "aggregator"
+            ? null
+            : values.addressIntercom?.trim() || null,
+        paymentMethod: paymentMethodForSave,
         changeFrom: changeBani ?? undefined,
         comment: values.comment?.trim() || undefined,
         promoCode: promoCode?.trim() || undefined,
@@ -2242,13 +2301,15 @@ export function OrderForm({
         deliveryFee: feeBani,
         profileId: pid,
         delivery_lat:
-          values.deliveryMode === "delivery"
-            ? (posDeliveryGeoRef.current?.lat ?? null)
-            : null,
+          values.deliveryMode === "pickup" ||
+          values.deliveryMode === "aggregator"
+            ? null
+            : (posDeliveryGeoRef.current?.lat ?? null),
         delivery_lng:
-          values.deliveryMode === "delivery"
-            ? (posDeliveryGeoRef.current?.lng ?? null)
-            : null,
+          values.deliveryMode === "pickup" ||
+          values.deliveryMode === "aggregator"
+            ? null
+            : (posDeliveryGeoRef.current?.lng ?? null),
         bonus_multiplier: eng?.bonusMultiplier ?? 1,
         bonusesRedeemedPoints,
       })
@@ -2681,7 +2742,8 @@ export function OrderForm({
       const profileForAddr = detailsPricingRef.current.linkedProfileId
       if (
         saveNewAddressOnSubmit &&
-        values.deliveryMode === "delivery" &&
+        values.deliveryMode !== "pickup" &&
+        values.deliveryMode !== "aggregator" &&
         profileForAddr &&
         addressBookMode === "new" &&
         values.deliveryAddress?.trim()
@@ -2974,8 +3036,15 @@ export function OrderForm({
                   <ArrowLeft className="size-4" />
                 </PosHeaderIconButton>
                 {orderNumber != null ? (
-                  <span className="min-w-0 truncate text-sm font-bold text-foreground">
-                    {`Заказ #${orderNumber}`}
+                  <span className="flex min-w-0 max-w-full items-center gap-2">
+                    <span className="min-w-0 truncate text-sm font-bold text-foreground">
+                      {`Заказ #${orderNumber}`}
+                    </span>
+                    {deliveryMode === "aggregator" ? (
+                      <span className="shrink-0 rounded-md bg-orange-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                        GLOVO
+                      </span>
+                    ) : null}
                   </span>
                 ) : (
                   <PosBrandMark brandSlug={selectedBrand.slug} size="md" />
@@ -3103,21 +3172,21 @@ export function OrderForm({
               payOrderDisabled={!cashSession}
               assignedCourierId={
                 showPayOrderCta &&
-                listOrder?.delivery_mode === "delivery" &&
+                listOrder?.delivery_mode !== "pickup" &&
                 listOrder?.courier_id
                   ? listOrder.courier_id
                   : null
               }
               assignedCourierName={
                 showPayOrderCta &&
-                listOrder?.delivery_mode === "delivery" &&
+                listOrder?.delivery_mode !== "pickup" &&
                 listOrder?.courier_id
                   ? listOrder.courier_name
                   : null
               }
               onChangeAssignedCourier={
                 showPayOrderCta &&
-                listOrder?.delivery_mode === "delivery" &&
+                listOrder?.delivery_mode !== "pickup" &&
                 listOrder?.courier_id
                   ? () => {
                       openCourierModalWithContactWarnings("reassign")
@@ -3206,6 +3275,7 @@ export function OrderForm({
             orderId={posOrderId}
             orderTotal={listOrder.total}
             paymentMethod={listOrder.payment_method}
+            isAggregatorOrder={listOrder.delivery_mode === "aggregator"}
             cashSessionId={cashSession.cashSessionId}
             staffId={cashSession.staffId}
             onClose={() => setPayModalOpen(false)}
@@ -3235,10 +3305,17 @@ export function OrderForm({
               >
                 <ArrowLeft className="size-4" />
               </PosHeaderIconButton>
-              <span className="min-w-0 truncate text-sm font-bold text-foreground">
-                {orderNumber != null
-                  ? `Заказ #${orderNumber} · Детали`
-                  : "Детали"}
+              <span className="flex min-w-0 max-w-full items-center gap-2">
+                <span className="min-w-0 truncate text-sm font-bold text-foreground">
+                  {orderNumber != null
+                    ? `Заказ #${orderNumber} · Детали`
+                    : "Детали"}
+                </span>
+                {deliveryMode === "aggregator" ? (
+                  <span className="shrink-0 rounded-md bg-orange-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                    GLOVO
+                  </span>
+                ) : null}
               </span>
             </>
           }
@@ -3253,8 +3330,25 @@ export function OrderForm({
         {/* ── ЦЕНТР: форма — белая карточка в сером острове ── */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 pr-0">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
-            <p className="text-muted-foreground shrink-0 px-4 pt-4 pb-3 text-center text-[11px] font-normal uppercase tracking-[0.08em]">
-              Детали заказа
+            {deliveryMode === "aggregator" ? (
+              <div className="flex shrink-0 items-center justify-center gap-2 px-4 pt-4 pb-2">
+                <div className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 px-3 py-2.5 text-white shadow-sm">
+                  <Bike className="size-4 shrink-0" aria-hidden />
+                  <span className="text-sm font-semibold tracking-tight">
+                    🚴 Заказ Glovo
+                  </span>
+                </div>
+              </div>
+            ) : null}
+            <p
+              className={cn(
+                "text-muted-foreground shrink-0 px-4 pb-3 text-center text-[11px] font-normal uppercase tracking-[0.08em]",
+                deliveryMode === "aggregator" ? "pt-2" : "pt-4",
+              )}
+            >
+              {deliveryMode === "aggregator"
+                ? "Детали заказа Glovo"
+                : "Детали заказа"}
             </p>
             <Form {...form}>
               <form
@@ -3262,6 +3356,8 @@ export function OrderForm({
                 className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4"
                 onSubmit={onSubmit}
               >
+                {deliveryMode !== "aggregator" ? (
+                <>
                 {/* ── Контактные данные ── */}
                 <FormSection title="Контактные данные">
                   <div className="grid grid-cols-2 gap-3">
@@ -3411,7 +3507,7 @@ export function OrderForm({
                     ) : null}
                   </div>
 
-                  {deliveryMode === "delivery" ? (
+                  {deliveryMode !== "pickup" ? (
                     <>
                       {posCustomerData &&
                       posCustomerData.addresses.length > 1 &&
@@ -3629,6 +3725,8 @@ export function OrderForm({
                   ) : null}
 
                 </FormSection>
+                </>
+                ) : null}
 
                 {/* ── Метод оплаты ── */}
                 <FormField
@@ -3637,33 +3735,65 @@ export function OrderForm({
                   render={({ field }) => (
                     <FormSection title="Метод оплаты">
                       <div className="grid grid-cols-2 gap-2">
-                        <ModeButton
-                          active={field.value === "cash"}
-                          onClick={() => {
-                            field.onChange("cash")
-                            clearDetailsDebounce()
-                            window.setTimeout(() => {
-                              void runDetailsSaveToServer()
-                            }, 0)
-                          }}
-                          icon={<Banknote className="size-4 shrink-0" />}
-                          label="Наличными"
-                        />
-                        <ModeButton
-                          active={field.value === "card"}
-                          onClick={() => {
-                            field.onChange("card")
-                            clearDetailsDebounce()
-                            window.setTimeout(() => {
-                              void runDetailsSaveToServer()
-                            }, 0)
-                          }}
-                          icon={<CreditCard className="size-4 shrink-0" />}
-                          label="Картой курьеру"
-                        />
+                        {deliveryMode === "aggregator" ? (
+                          <>
+                            <ModeButton
+                              active={field.value === "cash"}
+                              onClick={() => {
+                                field.onChange("cash")
+                                clearDetailsDebounce()
+                                window.setTimeout(() => {
+                                  void runDetailsSaveToServer()
+                                }, 0)
+                              }}
+                              icon={<Banknote className="size-4 shrink-0" />}
+                              label="Наличные"
+                            />
+                            <ModeButton
+                              active={field.value === "aggregator_card"}
+                              onClick={() => {
+                                field.onChange("aggregator_card")
+                                clearDetailsDebounce()
+                                window.setTimeout(() => {
+                                  void runDetailsSaveToServer()
+                                }, 0)
+                              }}
+                              icon={<CreditCard className="size-4 shrink-0" />}
+                              label="Карта Glovo"
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <ModeButton
+                              active={field.value === "cash"}
+                              onClick={() => {
+                                field.onChange("cash")
+                                clearDetailsDebounce()
+                                window.setTimeout(() => {
+                                  void runDetailsSaveToServer()
+                                }, 0)
+                              }}
+                              icon={<Banknote className="size-4 shrink-0" />}
+                              label="Наличными"
+                            />
+                            <ModeButton
+                              active={field.value === "card"}
+                              onClick={() => {
+                                field.onChange("card")
+                                clearDetailsDebounce()
+                                window.setTimeout(() => {
+                                  void runDetailsSaveToServer()
+                                }, 0)
+                              }}
+                              icon={<CreditCard className="size-4 shrink-0" />}
+                              label="Картой курьеру"
+                            />
+                          </>
+                        )}
                       </div>
 
-                      {paymentMethod === "cash" ? (
+                      {paymentMethod === "cash" &&
+                      deliveryMode !== "aggregator" ? (
                         <FormField
                           control={form.control}
                           name="changeFromLei"
@@ -3780,7 +3910,7 @@ export function OrderForm({
                 >
                   Принять оплату
                 </button>
-              ) : (
+              ) : listOrder?.status === "draft" ? (
                 <button
                   type="submit"
                   form="pos-wizard-details-form"
@@ -3803,7 +3933,7 @@ export function OrderForm({
                     "Отправить бегунок"
                   )}
                 </button>
-              )}
+              ) : null}
             </div>
           </aside>
         </div>
@@ -3839,6 +3969,7 @@ export function OrderForm({
           orderId={posOrderId}
           orderTotal={listOrder.total}
           paymentMethod={listOrder.payment_method}
+          isAggregatorOrder={listOrder.delivery_mode === "aggregator"}
           cashSessionId={cashSession.cashSessionId}
           staffId={cashSession.staffId}
           onClose={() => setPayModalOpen(false)}

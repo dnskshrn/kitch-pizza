@@ -2,8 +2,8 @@
 
 import { OrderDetail } from "@/components/pos/order-detail"
 import { OrderForm } from "@/components/pos/order-form"
+import { OrderTypeSelectModal } from "@/components/pos/order-type-select-modal"
 import { OrdersPanel, type OrdersPanelHandle } from "@/components/pos/orders-panel"
-import { Button } from "@/components/ui/button"
 import { brands as staticBrandConfigs, normalizePosBrandSlug } from "@/brands/index"
 import { createDraftOrderPos } from "@/lib/actions/pos/create-draft-order"
 import { fetchPosOrderById } from "@/lib/pos/fetch-orders"
@@ -17,7 +17,12 @@ import {
 } from "@/lib/store/pos-order-from-call-bridge"
 import { usePosMenuCache } from "@/lib/store/pos-menu-cache"
 import { createClient } from "@/lib/supabase/client"
-import type { PosOrder, PosOrderStatus, PosWizardBrandOption } from "@/types/pos"
+import type {
+  OrderType,
+  PosOrder,
+  PosOrderStatus,
+  PosWizardBrandOption,
+} from "@/types/pos"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -25,44 +30,6 @@ export type RightPanelState =
   | { mode: "idle" }
   | { mode: "detail"; orderId: string }
   | { mode: "wizard"; orderId: string }
-
-function PosRightIdle({
-  onNewOrder,
-  busy,
-  error,
-}: {
-  onNewOrder: (deliveryMode: "delivery" | "pickup") => void
-  busy: boolean
-  error: string | null
-}) {
-  return (
-    <aside className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-4 overflow-hidden p-6 text-center">
-      <p className="text-muted-foreground text-sm">
-        Выберите заказ или создайте новый
-      </p>
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <Button
-          type="button"
-          onClick={() => onNewOrder("delivery")}
-          disabled={busy}
-        >
-          {busy ? "Создание…" : "Новый заказ Доставка"}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => onNewOrder("pickup")}
-          disabled={busy}
-        >
-          {busy ? "Создание…" : "Новый заказ Навынос"}
-        </Button>
-      </div>
-      {error ? (
-        <p className="text-destructive max-w-sm text-sm">{error}</p>
-      ) : null}
-    </aside>
-  )
-}
 
 type BrandTableRow = { id: string; slug: string; name: string }
 
@@ -172,11 +139,11 @@ export default function PosHomePage() {
     }
   }, [openNewOrderFromCall])
 
-  const handleNewOrder = useCallback(async (deliveryMode: "delivery" | "pickup") => {
+  const handleNewOrder = useCallback(async (orderType: OrderType) => {
     setNewOrderError(null)
     setNewOrderBusy(true)
     try {
-      const res = await createDraftOrderPos({ deliveryMode })
+      const res = await createDraftOrderPos({ deliveryMode: orderType })
       if (!res.success) {
         setNewOrderError(res.error ?? "Не удалось создать черновик")
         return
@@ -232,8 +199,8 @@ export default function PosHomePage() {
 
         <div className="col-span-9 flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-[#f2f2f2]">
           {panel.mode === "idle" ? (
-            <PosRightIdle
-              onNewOrder={(deliveryMode) => void handleNewOrder(deliveryMode)}
+            <OrderTypeSelectModal
+              onSelect={(orderType) => void handleNewOrder(orderType)}
               busy={newOrderBusy}
               error={newOrderError}
             />

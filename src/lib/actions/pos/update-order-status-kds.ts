@@ -11,51 +11,54 @@ export type UpdateOrderStatusKdsResult =
 export async function updateOrderStatusKds(
   orderId: string,
 ): Promise<UpdateOrderStatusKdsResult> {
-  const staff = await getCurrentStaff()
-  if (!staff) {
-    return { success: false, error: "Сессия кассира недействительна" }
-  }
-
-  let supabase
   try {
-    supabase = createServiceRoleClient()
-  } catch {
-    return { success: false, error: "Сервер временно недоступен" }
-  }
+    const staff = await getCurrentStaff()
+    if (!staff) {
+      return { success: false, error: "Сессия кассира недействительна" }
+    }
 
-  const { data: row, error: loadError } = await supabase
-    .from("orders")
-    .select("id, status")
-    .eq("id", orderId)
-    .maybeSingle()
+    const supabase = createServiceRoleClient()
 
-  if (loadError || !row) {
-    console.error("[updateOrderStatusKds] load", loadError?.message)
-    return { success: false, error: "Заказ не найден" }
-  }
+    const { data: row, error: loadError } = await supabase
+      .from("orders")
+      .select("id, status")
+      .eq("id", orderId)
+      .maybeSingle()
 
-  const status = (row as { status: string }).status
-  if (status !== "cooking") {
+    if (loadError || !row) {
+      console.error("[updateOrderStatusKds] load", loadError?.message)
+      return { success: false, error: "Заказ не найден" }
+    }
+
+    const status = (row as { status: string }).status
+    if (status !== "cooking") {
+      return {
+        success: false,
+        error: "Заказ не в статусе «Готовится»",
+      }
+    }
+
+    const updatedAt = new Date().toISOString()
+    const { error: updError } = await supabase
+      .from("orders")
+      .update({
+        status: "ready",
+        updated_at: updatedAt,
+      })
+      .eq("id", orderId)
+      .eq("status", "cooking")
+
+    if (updError) {
+      console.error("[updateOrderStatusKds] update", updError.message)
+      return { success: false, error: "Не удалось обновить статус" }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error("[updateOrderStatusKds]", error)
     return {
       success: false,
-      error: "Заказ не в статусе «Готовится»",
+      error: error instanceof Error ? error.message : "Не удалось обновить статус",
     }
   }
-
-  const updatedAt = new Date().toISOString()
-  const { error: updError } = await supabase
-    .from("orders")
-    .update({
-      status: "ready",
-      updated_at: updatedAt,
-    })
-    .eq("id", orderId)
-    .eq("status", "cooking")
-
-  if (updError) {
-    console.error("[updateOrderStatusKds] update", updError.message)
-    return { success: false, error: "Не удалось обновить статус" }
-  }
-
-  return { success: true }
 }

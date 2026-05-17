@@ -13,7 +13,9 @@ type PayOrderModalProps = {
   open: boolean
   orderId: string
   orderTotal: number
-  paymentMethod: "cash" | "card"
+  paymentMethod: "cash" | "card" | "aggregator_card"
+  /** Заказ Glovo (delivery_mode = aggregator): подписи и оплата «картой» без кассы. */
+  isAggregatorOrder?: boolean
   cashSessionId: string
   staffId: string
   onClose: () => void
@@ -40,20 +42,23 @@ export function PayOrderModal({
   orderId,
   orderTotal,
   paymentMethod,
+  isAggregatorOrder = false,
   cashSessionId,
   staffId,
   onClose,
   onSuccess,
 }: PayOrderModalProps) {
   const [selectedMethod, setSelectedMethod] = useState<"cash" | "card">(
-    paymentMethod,
+    paymentMethod === "aggregator_card" ? "card" : paymentMethod,
   )
   const [error, setError] = useState<string | null>(null)
   const [isPending, setIsPending] = useState(false)
 
   useEffect(() => {
     if (open) {
-      setSelectedMethod(paymentMethod)
+      setSelectedMethod(
+        paymentMethod === "aggregator_card" ? "card" : paymentMethod,
+      )
       setError(null)
     }
   }, [open, paymentMethod])
@@ -108,21 +113,36 @@ export function PayOrderModal({
             <span className="mb-2 block text-sm font-medium text-[#242424]">
               Способ оплаты
             </span>
-            <div className="flex rounded-lg border border-black/10 p-0.5">
-              <button
-                type="button"
-                className={segmentBtn("cash", selectedMethod === "cash")}
-                onClick={() => setSelectedMethod("cash")}
-              >
-                Наличные
-              </button>
-              <button
-                type="button"
-                className={segmentBtn("card", selectedMethod === "card")}
-                onClick={() => setSelectedMethod("card")}
-              >
-                Карта
-              </button>
+            {isAggregatorOrder ? (
+              <span className="mb-2 inline-flex rounded-md border border-orange-300 bg-orange-100 px-2 py-0.5 text-[11px] font-semibold text-orange-900">
+                Заказ Glovo
+              </span>
+            ) : null}
+            <div className="flex flex-col gap-1">
+              <div className="flex rounded-lg border border-black/10 p-0.5">
+                <button
+                  type="button"
+                  className={segmentBtn("cash", selectedMethod === "cash")}
+                  onClick={() => setSelectedMethod("cash")}
+                >
+                  Наличные
+                </button>
+                <button
+                  type="button"
+                  className={segmentBtn("card", selectedMethod === "card")}
+                  onClick={() => setSelectedMethod("card")}
+                >
+                  Карта
+                </button>
+              </div>
+              {isAggregatorOrder ? (
+                <div className="grid grid-cols-2 gap-2 px-0.5">
+                  <span className="block min-h-[2rem] text-center text-[11px] leading-snug text-[#808080]" />
+                  <span className="block text-center text-[11px] leading-snug text-[#808080]">
+                    Карта Glovo (без записи в кассу)
+                  </span>
+                </div>
+              ) : null}
             </div>
           </div>
 

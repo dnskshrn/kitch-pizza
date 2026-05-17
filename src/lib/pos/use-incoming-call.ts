@@ -11,6 +11,8 @@ export type IncomingCallEvent = {
   profile_id: string | null
   /** Из contact-строки по тому же callid или из `profiles.name`. */
   profile_name: string | null
+  /** Линия ОАТС (diversion) → slug бренда, см. `pbx_calls.brand_slug`. */
+  brand_slug: string | null
   created_at: string
 }
 
@@ -21,6 +23,7 @@ type DbPbxCallsRow = {
   event_type?: string | null
   caller?: string | null
   profile_id?: string | null
+  brand_slug?: string | null
   created_at: string
 }
 
@@ -56,12 +59,17 @@ export function useIncomingCall({
               try {
                 const { data } = await supabase
                   .from("pbx_calls")
-                  .select("profile_id, profiles(name)")
+                  .select("profile_id, brand_slug, profiles(name)")
                   .eq("callid", callid)
                   .eq("cmd", "contact")
                   .maybeSingle()
 
                 if (unsubscribed) return
+
+                const rowBrandSlug =
+                  typeof row.brand_slug === "string" && row.brand_slug.trim()
+                    ? row.brand_slug.trim()
+                    : null
 
                 const embedded = data?.profiles as unknown
                 let profileName: string | null = null
@@ -97,6 +105,15 @@ export function useIncomingCall({
 
                 if (unsubscribed) return
 
+                const contactRow = data as {
+                  brand_slug?: string | null
+                } | null
+                const cSlug = contactRow?.brand_slug
+                const contactBrandSlug =
+                  typeof cSlug === "string" && cSlug.trim() ? cSlug.trim() : null
+
+                const brandSlug = rowBrandSlug ?? contactBrandSlug ?? null
+
                 onIncoming({
                   id: row.id,
                   callid,
@@ -104,11 +121,16 @@ export function useIncomingCall({
                   caller: row.caller ?? null,
                   profile_id: profileId,
                   profile_name: profileName,
+                  brand_slug: brandSlug,
                   created_at: row.created_at,
                 })
               } catch (e) {
                 console.error("[useIncomingCall] INCOMING enrich failed", e)
                 if (unsubscribed) return
+                const fallbackSlug =
+                  typeof row.brand_slug === "string" && row.brand_slug.trim()
+                    ? row.brand_slug.trim()
+                    : null
                 onIncoming({
                   id: row.id,
                   callid,
@@ -119,6 +141,7 @@ export function useIncomingCall({
                       ? row.profile_id.trim()
                       : null,
                   profile_name: null,
+                  brand_slug: fallbackSlug,
                   created_at: row.created_at,
                 })
               }

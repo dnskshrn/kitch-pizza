@@ -127,6 +127,14 @@ function normalizeOrderRow(raw: unknown): KdsOrderRow | null {
     status: String(o.status),
     scheduled_time:
       o.scheduled_time == null ? null : String(o.scheduled_time),
+    delivery_mode:
+      o.delivery_mode == null || o.delivery_mode === ""
+        ? null
+        : String(o.delivery_mode),
+    aggregator:
+      o.aggregator == null || o.aggregator === ""
+        ? null
+        : String(o.aggregator),
     updated_at: String(o.updated_at),
     cooking_started_at:
       o.cooking_started_at == null || o.cooking_started_at === ""
@@ -156,6 +164,8 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
   >({})
   const [removingIds, setRemovingIds] = useState<Set<string>>(() => new Set())
   const [soundUnlocked, setSoundUnlocked] = useState(false)
+  /** Смена каждые 60с — пересчёт «пробуждения» предзаказов на карточках без поллинга заказов. */
+  const [wakeTick, setWakeTick] = useState(0)
 
   const knownOrderIdsRef = useRef<Set<string>>(new Set())
 
@@ -350,6 +360,13 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
     void reloadCookingOrders()
     setSoundUnlocked(isPosAlertSoundUnlocked())
   }, [reloadCookingOrders])
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setWakeTick((t) => t + 1)
+    }, 60_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   useEffect(() => {
     const refresh = () => {
@@ -674,7 +691,10 @@ export function KdsScreen({ initialBrandSlug }: KdsScreenProps) {
           </p>
         ) : null}
 
-        <div className="flex min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 [-webkit-overflow-scrolling:touch] sm:px-5 sm:pb-5">
+        <div
+          className="flex min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 [-webkit-overflow-scrolling:touch] sm:px-5 sm:pb-5"
+          data-kds-wake-tick={wakeTick}
+        >
           <div className="flex h-full min-h-0 items-stretch gap-5">
             {visibleOrders.map((order) => (
               <KdsOrderCard

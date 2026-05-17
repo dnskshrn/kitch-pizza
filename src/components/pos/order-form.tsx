@@ -6,6 +6,7 @@ import type { OrdersPanelHandle } from "@/components/pos/orders-panel"
 import { AssignCourierModal } from "@/components/pos/AssignCourierModal"
 import { PayOrderModal } from "@/components/pos/pay-order-modal"
 import { PromoPanel } from "@/components/pos/promo-panel"
+import { ScheduledTimePicker } from "@/components/pos/scheduled-time-picker"
 import { useCashSession } from "@/components/pos/cash-session-context"
 import {
   PosHeaderIconButton,
@@ -265,13 +266,6 @@ const checkoutSchema = z
   })
   .superRefine((data, ctx) => {
     if (data.deliveryMode !== "aggregator") {
-      if (!data.userName.trim()) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Введите имя",
-          path: ["userName"],
-        })
-      }
       if (!data.userPhone.trim()) {
         ctx.addIssue({
           code: "custom",
@@ -939,6 +933,9 @@ export function OrderForm({
   >(null)
   const [bonusRedeemTouched, setBonusRedeemTouched] = useState(false)
 
+  /** Время доставки: `asap` или `HH:MM` (только режим доставки). */
+  const [scheduledTime, setScheduledTime] = useState("asap")
+
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
@@ -1342,6 +1339,8 @@ export function OrderForm({
     form.reset(checkoutValuesFromPosListOrder(listOrder))
     setBonusesToRedeem(Math.max(0, Math.floor(listOrder.bonuses_redeemed ?? 0)))
     setAppliedPromoCode(listOrder.promo_code?.trim() || null)
+    const st = listOrder.scheduled_time?.trim()
+    setScheduledTime(st && st.length > 0 ? st : "asap")
   }, [listOrder, posOrderId, detailsFormDirty, form])
 
   useEffect(() => {
@@ -1362,6 +1361,7 @@ export function OrderForm({
     setPosMaxRedemptionRate(null)
     setBonusRedeemTouched(false)
     lastCustomerLookupPhoneRef.current = null
+    setScheduledTime("asap")
   }, [posOrderId])
 
   useEffect(() => {
@@ -1505,7 +1505,7 @@ export function OrderForm({
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, cash_amount, card_amount, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
+          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, cash_amount, card_amount, comment, scheduled_time, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
         )
         .eq("id", posOrderId)
         .maybeSingle()
@@ -1532,6 +1532,7 @@ export function OrderForm({
         cash_amount: number | null
         card_amount: number | null
         comment: string | null
+        scheduled_time: string | null
         promo_code: string | null
         address_entrance: string | null
         address_floor: string | null
@@ -1598,6 +1599,11 @@ export function OrderForm({
             raw.payment_method === "mixed" ? (raw.card_amount ?? null) : null,
           comment: raw.comment ?? "",
         })
+        setScheduledTime(
+          raw.scheduled_time?.trim()
+            ? raw.scheduled_time.trim()
+            : "asap",
+        )
         if (!cancelled) {
           setOrderPrep({ loading: false, error: null })
           setStep(1)
@@ -1649,6 +1655,11 @@ export function OrderForm({
           raw.payment_method === "mixed" ? (raw.card_amount ?? null) : null,
         comment: raw.comment ?? "",
       })
+      setScheduledTime(
+        raw.scheduled_time?.trim()
+          ? raw.scheduled_time.trim()
+          : "asap",
+      )
 
       if (!cancelled) {
         setOrderPrep({ loading: false, error: null })
@@ -1875,12 +1886,16 @@ export function OrderForm({
         if (res.deliveryMode === "pickup") {
           setZoneResult(null)
           setEditBaselineDeliveryFeeBani(0)
+          setScheduledTime("asap")
         }
         updateOrderLocalState(posOrderId, {
           delivery_mode: res.deliveryMode,
           delivery_address: res.deliveryAddress,
           delivery_fee: res.deliveryFee,
           total: res.total,
+          ...(res.deliveryMode === "pickup"
+            ? { scheduled_time: null }
+            : {}),
           updated_at: new Date().toISOString(),
         })
         toast.success(
@@ -2263,9 +2278,9 @@ export function OrderForm({
     if (values.deliveryMode === "aggregator") {
       return true
     }
-    if (!values.userName.trim() || !values.userPhone.trim()) return false
+    if (!values.userPhone.trim()) return false
     if (
-      values.deliveryMode !== "pickup" &&
+      values.deliveryMode === "delivery" &&
       !values.deliveryAddress?.trim()
     ) {
       return false
@@ -2393,6 +2408,10 @@ export function OrderForm({
             : (posDeliveryGeoRef.current?.lng ?? null),
         bonus_multiplier: eng?.bonusMultiplier ?? 1,
         bonusesRedeemedPoints,
+        scheduled_time:
+          values.deliveryMode === "delivery"
+            ? scheduledTime.trim() || "asap"
+            : null,
       })
       if (!res.success) {
         if (opts?.forSubmit) setSubmitError(res.error)
@@ -2411,7 +2430,15 @@ export function OrderForm({
       if (opts?.forSubmit) setSubmitError(null)
       return true
     },
-    [selectedBrand, form, posOrderId, updateOrderLocalState, listOrder, bonusRedeemTouched],
+    [
+      selectedBrand,
+      form,
+      posOrderId,
+      updateOrderLocalState,
+      listOrder,
+      bonusRedeemTouched,
+      scheduledTime,
+    ],
   )
 
   const scheduleDebouncedDetailsSave = useCallback(() => {
@@ -2795,7 +2822,9 @@ export function OrderForm({
       return
     }
     if (!detailsArePersistable(values)) {
-      setSubmitError("Заполните имя, телефон и адрес при доставке")
+      setSubmitError(
+        "Укажите телефон; для доставки — адрес (улица и дом)",
+      )
       return
     }
 
@@ -4035,6 +4064,27 @@ export function OrderForm({
 
                 {/* ── Дополнительно ── */}
                 <FormSection title="Дополнительно">
+                  {deliveryMode === "delivery" && selectedBrand ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Время доставки
+                      </p>
+                      <ScheduledTimePicker
+                        openHour={selectedBrand.openHour}
+                        closeHour={selectedBrand.closeHour}
+                        value={scheduledTime}
+                        onChange={(v) => {
+                          setScheduledTime(v)
+                          patchDetailsCardAndScheduleSave({
+                            scheduled_time:
+                              form.getValues("deliveryMode") === "delivery"
+                                ? v
+                                : null,
+                          })
+                        }}
+                      />
+                    </div>
+                  ) : null}
                   <FormField
                     control={form.control}
                     name="comment"

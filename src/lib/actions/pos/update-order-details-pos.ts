@@ -24,6 +24,8 @@ export type UpdateOrderDetailsPosInput = {
   /** Бани; только при payment_method = mixed. */
   cardAmount?: number | null
   comment?: string
+  /** Доставка: `asap` или `HH:MM`; для самовывоза/агрегатора не задаётся (NULL в БД). */
+  scheduled_time?: string | null
   promoCode?: string
   discount: number
   deliveryFee: number
@@ -137,6 +139,7 @@ export async function updateOrderDeliveryModePos(
       aggregator: null,
       prep_deadline_at: null,
       payment_method,
+      ...(deliveryMode === "pickup" ? { scheduled_time: null as string | null } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
@@ -162,7 +165,6 @@ export async function updateOrderDetailsPos(
   const name = input.userName.trim()
   const phone = input.userPhone.trim()
   if (input.deliveryMode !== "aggregator") {
-    if (!name) return { success: false, error: "Укажите имя" }
     if (!phone) return { success: false, error: "Укажите телефон" }
   }
 
@@ -280,13 +282,22 @@ export async function updateOrderDetailsPos(
     paymentMethod = "cash"
   }
 
+  let scheduled_time_db: string | null = null
+  if (input.deliveryMode === "delivery") {
+    const st =
+      input.scheduled_time !== undefined && input.scheduled_time !== null
+        ? String(input.scheduled_time).trim()
+        : "asap"
+    scheduled_time_db = st.length > 0 ? st : "asap"
+  }
+
   const patch: Record<string, unknown> = {
     ...(input.deliveryMode === "aggregator"
       ? {
           ...(name ? { user_name: name } : {}),
           ...(phone ? { user_phone: phone } : {}),
         }
-      : { user_name: name, user_phone: phone }),
+      : { user_name: name.length > 0 ? name : null, user_phone: phone }),
     delivery_mode: input.deliveryMode,
     delivery_address: deliveryAddress,
     address_entrance:
@@ -308,6 +319,7 @@ export async function updateOrderDetailsPos(
     discount: safeDiscount,
     promo_code: input.promoCode?.trim() || null,
     comment: input.comment?.trim() || null,
+    scheduled_time: scheduled_time_db,
     updated_at: updatedAt,
     delivery_lat,
     delivery_lng,

@@ -6,6 +6,10 @@ export type BrandConfig = {
   logo: string // path in /public
   phone: string
   hours: string
+  /** Час открытия (локальное время), для слотов предзаказа POS */
+  openHour: number
+  /** Час закрытия; если ≤ openHour — считается следующие сутки (ночная смена) */
+  closeHour: number
   cartKey: string // localStorage key for cart
   deliveryKey: string // localStorage key for delivery
   /** Meta (Facebook) Pixel; пиксель не подключается, если null или пустая строка. */
@@ -27,6 +31,8 @@ export const brands: BrandConfig[] = [
     logo: '/kitch-pizza-logo.svg',
     phone: '079 700 290',
     hours: '11:00 – 03:00',
+    openHour: 11,
+    closeHour: 3,
     cartKey: 'kitch-pizza-cart',
     deliveryKey: 'kitch-pizza-delivery',
     metaPixelId: '342890895314551',
@@ -45,6 +51,8 @@ export const brands: BrandConfig[] = [
     logo: '/Losos_Logo.svg',
     phone: '079 200 190',
     hours: '15:00 – 03:00',
+    openHour: 15,
+    closeHour: 3,
     cartKey: 'losos-cart',
     deliveryKey: 'losos-delivery',
     metaPixelId: '2033954120857667',
@@ -63,6 +71,8 @@ export const brands: BrandConfig[] = [
     logo: '/the-spot-logo.svg',
     phone: '079 200 120',
     hours: '11:00 – 03:00',
+    openHour: 11,
+    closeHour: 3,
     cartKey: 'kitch-pizza-cart', // TODO
     deliveryKey: 'kitch-pizza-delivery', // TODO
     metaPixelId: '910661225331040',

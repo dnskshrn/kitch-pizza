@@ -10,6 +10,8 @@ export const KDS_ORDER_QUERY_SELECT = `
   brand_id,
   status,
   scheduled_time,
+  delivery_mode,
+  aggregator,
   updated_at,
   cooking_started_at,
   brands ( slug ),
@@ -59,6 +61,8 @@ export type KdsOrderRow = {
   brand_id: string
   status: string
   scheduled_time: string | null
+  delivery_mode: string | null
+  aggregator: string | null
   updated_at: string
   cooking_started_at: string | null
   brands: { slug: string } | null

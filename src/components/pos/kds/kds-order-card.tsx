@@ -10,6 +10,7 @@ import {
   parseOrderItemToppings,
   type KdsOrderRow,
 } from "@/components/pos/kds/types"
+import { isKdsCardActive } from "@/lib/pos/kds-wakeup"
 import { cn } from "@/lib/utils"
 import { Clock, Timer } from "lucide-react"
 import { motion } from "motion/react"
@@ -53,6 +54,12 @@ function useCookingElapsedSeconds(
   }, [active, anchorIso])
 
   return elapsed
+}
+
+function kdsScheduledTimeDisplay(raw: string): string {
+  const t = raw.trim()
+  if (/^\d{2}:\d{2}$/.test(t)) return t
+  return formatScheduledTimeLabel(raw)
 }
 
 function ReadySwipeButton({
@@ -163,13 +170,22 @@ export function KdsOrderCard({
   undoExpiresAt,
   removing,
 }: KdsOrderCardProps) {
-  const scheduledOnly = isKdsScheduledOrder(order.scheduled_time)
+  const isScheduledSlot = isKdsScheduledOrder(order.scheduled_time)
+  const isWakeActive = isKdsCardActive(
+    order.scheduled_time,
+    order.delivery_mode,
+  )
+  const showCookingFlow = !isScheduledSlot || isWakeActive
+  const sleepingScheduled = isScheduledSlot && !isWakeActive
+
   const elapsedSec = useCookingElapsedSeconds(
     order.cooking_started_at,
     order.updated_at,
-    !scheduledOnly,
+    showCookingFlow,
   )
-  const palette = kdsTimerPalette(elapsedSec)
+  const palette = showCookingFlow
+    ? kdsTimerPalette(elapsedSec)
+    : { bg: "#e5e5e5", fg: "#111111" }
 
   const items = order.order_items ?? []
 
@@ -199,11 +215,12 @@ export function KdsOrderCard({
     return () => window.clearTimeout(t)
   }, [undoExpiresAt, order.id, onCommitReady])
 
-  const borderColor = scheduledOnly ? "#e5e5e5" : palette.bg
+  const borderColor = sleepingScheduled ? "#e5e5e5" : palette.bg
 
-  const scheduledLabel = order.scheduled_time
-    ? formatScheduledTimeLabel(order.scheduled_time)
-    : "—"
+  const scheduledBanner =
+    isScheduledSlot &&
+    order.scheduled_time &&
+    order.scheduled_time.trim().toLowerCase() !== "asap"
 
   return (
     <motion.article
@@ -212,34 +229,45 @@ export function KdsOrderCard({
       animate={
         removing
           ? { x: -48, opacity: 0, transition: { duration: 0.35 } }
-          : { x: 0, opacity: 1 }
+          : { x: 0 }
       }
-      className="flex h-full min-h-0 w-[min(360px,85vw)] shrink-0 flex-col overflow-hidden rounded-[12px] bg-white"
+      className={cn(
+        "flex h-full min-h-0 w-[min(360px,85vw)] shrink-0 flex-col overflow-hidden rounded-[12px] bg-white transition-[opacity,filter]",
+        sleepingScheduled && "opacity-50 saturate-0",
+      )}
       style={{ borderWidth: 5, borderStyle: "solid", borderColor }}
     >
       <header className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4">
         <PosBrandMark brandSlug={brandSlug} size="md" />
-        <div className="flex min-w-0 flex-1 justify-center">
-          <div
-            className="inline-flex items-center gap-2 rounded-full px-3 py-1.5"
-            style={{ backgroundColor: palette.bg, color: palette.fg }}
-          >
-            {scheduledOnly ? (
-              <>
-                <Clock className="size-4 shrink-0 opacity-70" strokeWidth={2.5} />
-                <span className="font-mono text-[18px] font-bold tabular-nums">
-                  {scheduledLabel}
-                </span>
-              </>
-            ) : (
-              <>
-                <Timer className="size-4 shrink-0 opacity-70" strokeWidth={2.5} />
-                <span className="font-mono text-[18px] font-bold tabular-nums">
-                  {formatElapsedMmSs(elapsedSec)}
-                </span>
-              </>
-            )}
-          </div>
+        <div className="flex min-w-0 flex-1 justify-center px-1">
+          {scheduledBanner ? (
+            <div
+              className={cn(
+                "flex w-full max-w-[min(280px,100%)] items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold",
+                isWakeActive
+                  ? "bg-lime-400 text-black"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <Clock className="size-4 shrink-0" strokeWidth={2.5} />
+                <span className="truncate">Заказ на время</span>
+              </span>
+              <span className="shrink-0 font-mono text-sm font-bold tabular-nums">
+                {kdsScheduledTimeDisplay(order.scheduled_time!)}
+              </span>
+            </div>
+          ) : (
+            <div
+              className="inline-flex items-center gap-2 rounded-full px-3 py-1.5"
+              style={{ backgroundColor: palette.bg, color: palette.fg }}
+            >
+              <Timer className="size-4 shrink-0 opacity-70" strokeWidth={2.5} />
+              <span className="font-mono text-[18px] font-bold tabular-nums">
+                {formatElapsedMmSs(elapsedSec)}
+              </span>
+            </div>
+          )}
         </div>
         <span className="shrink-0 font-mono text-[18px] font-bold tabular-nums text-[#111]/60">
           #{order.order_number}
@@ -265,21 +293,23 @@ export function KdsOrderCard({
       </div>
 
       <div className="shrink-0 px-4 pb-4 pt-2">
-        {scheduledOnly ? (
-          <div className="flex items-center justify-between gap-3 rounded-[100px] bg-[#f2f2f2] px-5 py-4">
-            <span className="text-[24px] font-bold leading-none text-[#111]">
-              Заказ на время
-            </span>
-            <span className="flex items-center gap-2 text-[20px] font-bold tabular-nums text-[#111]">
-              <Clock className="size-6 shrink-0" strokeWidth={2.5} />
-              {scheduledLabel}
-            </span>
-          </div>
-        ) : (
+        {showCookingFlow ? (
           <ReadySwipeButton
             disabled={undoActive}
             onActivate={() => onMarkReady(order.id)}
           />
+        ) : (
+          <div className="flex items-center justify-between gap-3 rounded-[100px] bg-muted/80 px-5 py-4 text-muted-foreground">
+            <span className="text-[20px] font-bold leading-none sm:text-[22px]">
+              Заказ на время
+            </span>
+            <span className="flex items-center gap-2 text-[18px] font-bold tabular-nums sm:text-[20px]">
+              <Clock className="size-6 shrink-0" strokeWidth={2.5} />
+              {order.scheduled_time
+                ? kdsScheduledTimeDisplay(order.scheduled_time)
+                : "—"}
+            </span>
+          </div>
         )}
       </div>
     </motion.article>

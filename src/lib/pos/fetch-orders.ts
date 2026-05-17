@@ -41,6 +41,7 @@ export type OrderRow = {
   discount: number
   bonuses_redeemed: number
   comment: string | null
+  scheduled_time?: string | null
   created_at: string
   updated_at: string
   brands: BrandsEmbed
@@ -213,6 +214,10 @@ export function mapOrderRowToPosOrder(
         : 0,
     ),
     comment: row.comment,
+    scheduled_time:
+      row.scheduled_time != null && String(row.scheduled_time).trim()
+        ? String(row.scheduled_time).trim()
+        : null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     item_count: itemCountFromRow(row),

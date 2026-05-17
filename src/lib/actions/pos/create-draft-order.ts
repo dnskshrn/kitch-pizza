@@ -14,6 +14,8 @@ export type CreateDraftOrderOptions = {
   profileId?: string | null
   userName?: string | null
   deliveryMode?: "delivery" | "pickup" | "aggregator"
+  /** Текст для `orders.scheduled_time` при создании черновика (`asap`, `HH:MM` и т.п.) */
+  scheduledTime?: string | null
 }
 
 export async function createDraftOrder(
@@ -63,6 +65,12 @@ export async function createDraftOrder(
       ? options.profileId.trim()
       : null
 
+  const scheduled_time_raw = options?.scheduledTime?.trim()
+  const scheduled_time_insert =
+    scheduled_time_raw && scheduled_time_raw.length > 0
+      ? scheduled_time_raw
+      : null
+
   let data: { id: string } | null
   let error: { message?: string } | null
 
@@ -85,7 +93,7 @@ export async function createDraftOrder(
         profile_id,
         delivery_address: null,
         promo_code: null,
-        scheduled_time: null,
+        scheduled_time: scheduled_time_insert,
         comment: null,
         change_from: null,
         cancel_reason: null,
@@ -115,7 +123,7 @@ export async function createDraftOrder(
         profile_id,
         delivery_address: null,
         promo_code: null,
-        scheduled_time: null,
+        scheduled_time: scheduled_time_insert,
         comment: null,
         change_from: null,
         cancel_reason: null,

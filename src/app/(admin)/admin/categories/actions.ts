@@ -21,6 +21,7 @@ export async function createCategory(data: {
   is_active: boolean
   image_url: string | null
   show_in_upsell: boolean
+  exclude_from_discounts: boolean
 }) {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
@@ -34,6 +35,7 @@ export async function createCategory(data: {
     slug,
     image_url: data.image_url?.trim() || null,
     show_in_upsell: data.show_in_upsell,
+    exclude_from_discounts: data.exclude_from_discounts,
   })
   if (error) throw new Error(error.message)
   revalidatePath("/admin/categories")
@@ -49,6 +51,7 @@ export async function updateCategory(
     is_active: boolean
     image_url: string | null
     show_in_upsell: boolean
+    exclude_from_discounts: boolean
   }
 ) {
   const brandId = await getAdminBrandId()
@@ -63,6 +66,7 @@ export async function updateCategory(
       is_active: data.is_active,
       image_url: data.image_url?.trim() || null,
       show_in_upsell: data.show_in_upsell,
+      exclude_from_discounts: data.exclude_from_discounts,
     })
     .eq("id", id)
     .eq("brand_id", brandId)

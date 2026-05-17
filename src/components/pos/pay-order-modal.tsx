@@ -13,7 +13,10 @@ type PayOrderModalProps = {
   open: boolean
   orderId: string
   orderTotal: number
-  paymentMethod: "cash" | "card" | "aggregator_card"
+  paymentMethod: "cash" | "card" | "aggregator_card" | "mixed"
+  /** Для split: суммы из заказа (бани). */
+  cashAmount?: number | null
+  cardAmount?: number | null
   /** Заказ Glovo (delivery_mode = aggregator): подписи и оплата «картой» без кассы. */
   isAggregatorOrder?: boolean
   cashSessionId: string
@@ -37,11 +40,21 @@ function formatPayError(error: string): string {
   }
 }
 
+function paymentMethodForToggle(
+  m: PayOrderModalProps["paymentMethod"],
+): "cash" | "card" {
+  if (m === "aggregator_card") return "card"
+  if (m === "mixed") return "cash"
+  return m
+}
+
 export function PayOrderModal({
   open,
   orderId,
   orderTotal,
   paymentMethod,
+  cashAmount = null,
+  cardAmount = null,
   isAggregatorOrder = false,
   cashSessionId,
   staffId,
@@ -49,16 +62,19 @@ export function PayOrderModal({
   onSuccess,
 }: PayOrderModalProps) {
   const [selectedMethod, setSelectedMethod] = useState<"cash" | "card">(
-    paymentMethod === "aggregator_card" ? "card" : paymentMethod,
+    paymentMethodForToggle(paymentMethod),
   )
   const [error, setError] = useState<string | null>(null)
   const [isPending, setIsPending] = useState(false)
 
+  const isSplit =
+    paymentMethod === "mixed" &&
+    (cashAmount ?? 0) > 0 &&
+    (cardAmount ?? 0) > 0
+
   useEffect(() => {
     if (open) {
-      setSelectedMethod(
-        paymentMethod === "aggregator_card" ? "card" : paymentMethod,
-      )
+      setSelectedMethod(paymentMethodForToggle(paymentMethod))
       setError(null)
     }
   }, [open, paymentMethod])
@@ -71,7 +87,7 @@ export function PayOrderModal({
       const result = await payOrder({
         orderId,
         cashSessionId,
-        paymentMethod: selectedMethod,
+        paymentMethod: isSplit ? "cash" : selectedMethod,
         createdByStaffId: staffId,
       })
       if (result.error || !result.data) {
@@ -119,22 +135,43 @@ export function PayOrderModal({
               </span>
             ) : null}
             <div className="flex flex-col gap-1">
-              <div className="flex rounded-lg border border-black/10 p-0.5">
-                <button
-                  type="button"
-                  className={segmentBtn("cash", selectedMethod === "cash")}
-                  onClick={() => setSelectedMethod("cash")}
-                >
-                  Наличные
-                </button>
-                <button
-                  type="button"
-                  className={segmentBtn("card", selectedMethod === "card")}
-                  onClick={() => setSelectedMethod("card")}
-                >
-                  Карта
-                </button>
-              </div>
+              {isSplit ? (
+                <div className="flex flex-col gap-1.5 rounded-lg bg-muted/50 p-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">💵 Наличными</span>
+                    <span className="font-medium">
+                      {(cashAmount! / 100).toFixed(0)} MDL
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">💳 Картой</span>
+                    <span className="font-medium">
+                      {(cardAmount! / 100).toFixed(0)} MDL
+                    </span>
+                  </div>
+                </div>
+              ) : paymentMethod === "mixed" ? (
+                <p className="px-0.5 text-center text-[11px] text-muted-foreground">
+                  Оплата частями по суммам из заказа (наличные + карта)
+                </p>
+              ) : (
+                <div className="flex rounded-lg border border-black/10 p-0.5">
+                  <button
+                    type="button"
+                    className={segmentBtn("cash", selectedMethod === "cash")}
+                    onClick={() => setSelectedMethod("cash")}
+                  >
+                    Наличные
+                  </button>
+                  <button
+                    type="button"
+                    className={segmentBtn("card", selectedMethod === "card")}
+                    onClick={() => setSelectedMethod("card")}
+                  >
+                    Карта
+                  </button>
+                </div>
+              )}
               {isAggregatorOrder ? (
                 <div className="grid grid-cols-2 gap-2 px-0.5">
                   <span className="block min-h-[2rem] text-center text-[11px] leading-snug text-[#808080]" />

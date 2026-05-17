@@ -42,6 +42,8 @@ export type PromoPanelProps = {
   skipSeedResolve?: boolean
   items: CartItemForEngine[]
   deliveryZone: DeliveryZoneForEngine | null
+  /** Категории меню, исключённые из базы расчёта скидок (POS из кэша). */
+  excludedCategoryIds?: string[]
   onDiscountChange: (output: DiscountEngineOutput) => void
   /** Вызывается при применении/снятии промокода (код в верхнем регистре). */
   onAppliedPromoCodeChange?: (code: string | null) => void
@@ -54,6 +56,7 @@ export function PromoPanel({
   skipSeedResolve = false,
   items,
   deliveryZone,
+  excludedCategoryIds,
   onDiscountChange,
   onAppliedPromoCodeChange,
 }: PromoPanelProps) {
@@ -156,8 +159,18 @@ export function PromoPanel({
         rules: activeRules,
         promoCodeRule: promoCodeRule ?? undefined,
         deliveryZone,
+        excludedCategoryIds:
+          excludedCategoryIds && excludedCategoryIds.length > 0
+            ? excludedCategoryIds
+            : undefined,
       }),
-    [items, deliveryZone, activeRules, promoCodeRule],
+    [
+      items,
+      deliveryZone,
+      activeRules,
+      promoCodeRule,
+      excludedCategoryIds,
+    ],
   )
 
   useEffect(() => {

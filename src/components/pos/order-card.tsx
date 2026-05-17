@@ -297,12 +297,14 @@ export function OrderCard({
         {/* ── Строка 2: адрес на сером фоне / Glovo ── */}
         <div
           className={cn(
-            "flex items-center gap-2 rounded-lg bg-[#f2f2f2] px-3 py-2.5",
-            order.delivery_mode === "aggregator" && "justify-center",
+            "flex items-center gap-2 rounded-lg px-3 py-2.5",
+            order.delivery_mode === "aggregator"
+              ? "justify-center bg-orange-500"
+              : "bg-[#f2f2f2]",
           )}
         >
           {order.delivery_mode === "aggregator" ? (
-            <span className="rounded-md bg-orange-500 px-2 py-1 text-xs font-bold uppercase text-white">
+            <span className="text-sm font-bold uppercase tracking-wide text-white">
               GLOVO
             </span>
           ) : (

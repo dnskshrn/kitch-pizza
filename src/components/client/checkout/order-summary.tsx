@@ -20,6 +20,12 @@ const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
 
 export type OrderSummaryProps = {
   lang: CartLang
+  /** Подписи исключённых из скидок категорий (товары из них есть при totalDiscount > 0). */
+  excludedCategoriesNotice?: Array<{
+    id: string
+    name_ru: string
+    name_ro: string
+  }>
   items: CartItem[]
   itemCount: number
   subtotal: number
@@ -42,6 +48,7 @@ export type OrderSummaryProps = {
 
 export function OrderSummary({
   lang,
+  excludedCategoriesNotice,
   items,
   itemCount,
   subtotal,
@@ -167,6 +174,26 @@ export function OrderSummary({
             <span className="storefront-modal-accent tabular-nums">
               −{formatMoney(discount, lang)}
             </span>
+          </div>
+        ) : null}
+        {(excludedCategoriesNotice ?? []).length > 0 ? (
+          <div className="flex flex-col gap-1 mt-1">
+            {(excludedCategoriesNotice ?? []).map((cat) => (
+              <div
+                key={cat.id}
+                className="flex items-start gap-1.5 text-xs text-[#808080]"
+              >
+                <span className="mt-0.5 shrink-0">ℹ️</span>
+                <span>
+                  {`Скидка не применяется на «${cat.name_ru}»`}
+                  {cat.name_ro && cat.name_ro !== cat.name_ru ? (
+                    <span className="ml-1 opacity-70">
+                      {`/ Reducerea nu se aplică la «${cat.name_ro}»`}
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+            ))}
           </div>
         ) : null}
         {bonusesRedeemed > 0 ? (

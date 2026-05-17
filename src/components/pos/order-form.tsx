@@ -94,6 +94,7 @@ import {
   Banknote,
   Bike,
   CreditCard,
+  Layers,
   Loader2,
   MapPin,
   Minus,
@@ -222,6 +223,7 @@ function buildPersistedDiscountEngineSeed(
     deliveryFeeBani: deliveryFeeOut,
     totalBani: totalBaniOut,
     bonusMultiplier: 1,
+    excludedCategoryIds: [],
   }
 }
 
@@ -255,7 +257,9 @@ const checkoutSchema = z
     addressFloor: z.string().optional(),
     addressApartment: z.string().optional(),
     addressIntercom: z.string().optional(),
-    paymentMethod: z.enum(["cash", "card", "aggregator_card"]),
+    paymentMethod: z.enum(["cash", "card", "aggregator_card", "mixed"]),
+    cashAmount: z.number().int().min(0).nullable().optional(),
+    cardAmount: z.number().int().min(0).nullable().optional(),
     changeFromLei: z.string().optional(),
     comment: z.string().optional(),
   })
@@ -298,7 +302,17 @@ function checkoutValuesFromPosListOrder(o: PosOrder): CheckoutFormValues {
     addressFloor: addr.floor,
     addressApartment: addr.apartment,
     addressIntercom: addr.intercom,
-    paymentMethod: o.payment_method ?? "cash",
+    paymentMethod:
+      o.payment_method === "card" ||
+      o.payment_method === "cash" ||
+      o.payment_method === "aggregator_card" ||
+      o.payment_method === "mixed"
+        ? o.payment_method
+        : "cash",
+    cashAmount:
+      o.payment_method === "mixed" ? (o.cash_amount ?? null) : null,
+    cardAmount:
+      o.payment_method === "mixed" ? (o.card_amount ?? null) : null,
     changeFromLei:
       o.change_from != null && o.change_from > 0
         ? String(o.change_from / 100)
@@ -886,6 +900,9 @@ export function OrderForm({
   const [cartActionBusy, setCartActionBusy] = useState(false)
   const loadBrandMenu = usePosMenuCache((s) => s.loadBrandMenu)
   const getBrandMenu = usePosMenuCache((s) => s.getBrandMenu)
+  const posMenuCategories = usePosMenuCache((s) =>
+    brandId ? s.brands[brandId]?.categories : undefined,
+  )
 
   const [engineOutput, setEngineOutput] = useState<DiscountEngineOutput | null>(
     null,
@@ -1019,6 +1036,8 @@ export function OrderForm({
       addressApartment: "",
       addressIntercom: "",
       paymentMethod: "cash",
+      cashAmount: null,
+      cardAmount: null,
       changeFromLei: "",
       comment: "",
     },
@@ -1026,6 +1045,8 @@ export function OrderForm({
 
   const deliveryMode = form.watch("deliveryMode")
   const paymentMethod = form.watch("paymentMethod")
+  const cashAmountWatched = form.watch("cashAmount")
+  const cardAmountWatched = form.watch("cardAmount")
   const deliveryAddress = form.watch("deliveryAddress")
   const userPhoneWatched = form.watch("userPhone")
 
@@ -1066,6 +1087,13 @@ export function OrderForm({
     }))
   }, [cart])
 
+  const excludedCategoryIds = useMemo(() => {
+    if (!posMenuCategories) return []
+    return posMenuCategories
+      .filter((c) => c.exclude_from_discounts)
+      .map((c) => c.id)
+  }, [posMenuCategories])
+
   const deliveryZoneForEngine = useMemo((): DeliveryZoneForEngine | null => {
     if (deliveryMode === "pickup") {
       return { price_bani: 0, free_from_bani: 0 }
@@ -1095,8 +1123,14 @@ export function OrderForm({
         items: cartForEngine,
         rules: [],
         deliveryZone: deliveryZoneForEngine,
+        excludedCategoryIds:
+          excludedCategoryIds.length > 0 ? excludedCategoryIds : undefined,
       }),
-    [cartForEngine, deliveryZoneForEngine],
+    [
+      cartForEngine,
+      deliveryZoneForEngine,
+      excludedCategoryIds,
+    ],
   )
 
   const rawEngineOutput = engineOutput ?? fallbackEngineOutput
@@ -1115,6 +1149,15 @@ export function OrderForm({
       deliveryZoneForEngine,
     ],
   )
+
+  const excludedCategoriesInCart = useMemo(() => {
+    if (!effectiveEngineOutput || effectiveEngineOutput.totalDiscountBani === 0) return []
+    const inCart = new Set(cartForEngine.map((i) => i.category_id))
+    const src = posMenuCategories ?? []
+    return src
+      .filter((c) => c.exclude_from_discounts && inCart.has(c.id))
+      .map((c) => ({ id: c.id, name_ru: c.name_ru, name_ro: "" }))
+  }, [effectiveEngineOutput, cartForEngine, posMenuCategories])
 
   const totalBani = effectiveEngineOutput.totalBani ?? 0
   const runnerHasPricedItems = effectiveEngineOutput.itemSubtotalBani > 0
@@ -1462,7 +1505,7 @@ export function OrderForm({
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
+          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, cash_amount, card_amount, comment, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
         )
         .eq("id", posOrderId)
         .maybeSingle()
@@ -1482,10 +1525,12 @@ export function OrderForm({
         delivery_address: string | null
         delivery_fee: number
         discount: number
-        payment_method: "cash" | "card" | "aggregator_card"
+        payment_method: "cash" | "card" | "aggregator_card" | "mixed"
         aggregator: "glovo" | null
         prep_deadline_at: string | null
         change_from: number | null
+        cash_amount: number | null
+        card_amount: number | null
         comment: string | null
         promo_code: string | null
         address_entrance: string | null
@@ -1547,6 +1592,10 @@ export function OrderForm({
             raw.change_from != null && raw.change_from > 0
               ? String(raw.change_from / 100)
               : "",
+          cashAmount:
+            raw.payment_method === "mixed" ? (raw.cash_amount ?? null) : null,
+          cardAmount:
+            raw.payment_method === "mixed" ? (raw.card_amount ?? null) : null,
           comment: raw.comment ?? "",
         })
         if (!cancelled) {
@@ -1594,6 +1643,10 @@ export function OrderForm({
           raw.change_from != null && raw.change_from > 0
             ? String(raw.change_from / 100)
             : "",
+        cashAmount:
+          raw.payment_method === "mixed" ? (raw.cash_amount ?? null) : null,
+        cardAmount:
+          raw.payment_method === "mixed" ? (raw.card_amount ?? null) : null,
         comment: raw.comment ?? "",
       })
 
@@ -2259,6 +2312,26 @@ export function OrderForm({
         ? uiBonuses
         : Math.max(fromOrderBonuses, uiBonuses)
 
+      const sub = eng.itemSubtotalBani
+      const safeDiscountPre = Math.min(totalDiscountBani, sub)
+      const expectedPayTotalBani = Math.max(
+        0,
+        sub - safeDiscountPre + feeBani - bonusesRedeemedPoints * 100,
+      )
+
+      if (values.paymentMethod === "mixed") {
+        const c = values.cashAmount ?? 0
+        const d = values.cardAmount ?? 0
+        const splitOk =
+          c > 0 &&
+          d > 0 &&
+          Math.abs(c + d - expectedPayTotalBani) <= 1
+        if (!splitOk) {
+          if (opts?.forSubmit) return false
+          return true
+        }
+      }
+
       const paymentMethodForSave =
         values.deliveryMode === "aggregator" &&
         values.paymentMethod === "card"
@@ -2293,6 +2366,14 @@ export function OrderForm({
             : values.addressIntercom?.trim() || null,
         paymentMethod: paymentMethodForSave,
         changeFrom: changeBani ?? undefined,
+        cashAmount:
+          values.paymentMethod === "mixed"
+            ? (values.cashAmount ?? null)
+            : null,
+        cardAmount:
+          values.paymentMethod === "mixed"
+            ? (values.cardAmount ?? null)
+            : null,
         comment: values.comment?.trim() || undefined,
         promoCode: promoCode?.trim() || undefined,
         discount: totalDiscountBani,
@@ -2318,12 +2399,8 @@ export function OrderForm({
         else toast.error("Не удалось сохранить данные")
         return false
       }
-      const sub = eng.itemSubtotalBani
-      const safeDiscount = Math.min(totalDiscountBani, sub)
-      const cardTotal = Math.max(
-        0,
-        sub - safeDiscount + feeBani - bonusesRedeemedPoints * 100,
-      )
+      const safeDiscount = safeDiscountPre
+      const cardTotal = expectedPayTotalBani
       updateOrderLocalState(posOrderId, {
         total: cardTotal,
         delivery_fee: feeBani,
@@ -2720,6 +2797,16 @@ export function OrderForm({
     if (!detailsArePersistable(values)) {
       setSubmitError("Заполните имя, телефон и адрес при доставке")
       return
+    }
+
+    if (values.paymentMethod === "mixed") {
+      const c = values.cashAmount ?? 0
+      const d = values.cardAmount ?? 0
+      const target = payableAfterBonusBani
+      if (c <= 0 || d <= 0 || Math.abs(c + d - target) > 1) {
+        toast.error("Укажите суммы split-оплаты")
+        return
+      }
     }
 
     runnerKitchenLockedRef.current = true
@@ -3143,6 +3230,7 @@ export function OrderForm({
                       skipSeedResolve={skipWebsitePromoSeedResolve}
                       items={cartForEngine}
                       deliveryZone={deliveryZoneForEngine}
+                      excludedCategoryIds={excludedCategoryIds}
                       onDiscountChange={setEngineOutput}
                       onAppliedPromoCodeChange={setAppliedPromoCode}
                     />
@@ -3151,6 +3239,7 @@ export function OrderForm({
                     output={effectiveEngineOutput}
                     deliveryZone={deliveryZoneForEngine}
                     bonusRedeemedBani={redeemBaniApplied}
+                    excludedCategories={excludedCategoriesInCart}
                   />
                 </>
               }
@@ -3197,7 +3286,9 @@ export function OrderForm({
               courierButtonHints={courierButtonGate.hints}
               courierContactWarnings={courierContactWarnings}
               onRunnerSend={
-                listOrder?.status === "draft"
+                listOrder?.status === "draft" ||
+                listOrder?.status === "new" ||
+                listOrder?.status === "confirmed"
                   ? handleRunnerFromStep2
                   : undefined
               }
@@ -3734,40 +3825,42 @@ export function OrderForm({
                   name="paymentMethod"
                   render={({ field }) => (
                     <FormSection title="Метод оплаты">
-                      <div className="grid grid-cols-2 gap-2">
-                        {deliveryMode === "aggregator" ? (
-                          <>
+                      {deliveryMode === "aggregator" ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          <ModeButton
+                            active={field.value === "cash"}
+                            onClick={() => {
+                              field.onChange("cash")
+                              clearDetailsDebounce()
+                              window.setTimeout(() => {
+                                void runDetailsSaveToServer()
+                              }, 0)
+                            }}
+                            icon={<Banknote className="size-4 shrink-0" />}
+                            label="Наличные"
+                          />
+                          <ModeButton
+                            active={field.value === "aggregator_card"}
+                            onClick={() => {
+                              field.onChange("aggregator_card")
+                              clearDetailsDebounce()
+                              window.setTimeout(() => {
+                                void runDetailsSaveToServer()
+                              }, 0)
+                            }}
+                            icon={<CreditCard className="size-4 shrink-0" />}
+                            label="Карта Glovo"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-3 gap-2">
                             <ModeButton
                               active={field.value === "cash"}
                               onClick={() => {
                                 field.onChange("cash")
-                                clearDetailsDebounce()
-                                window.setTimeout(() => {
-                                  void runDetailsSaveToServer()
-                                }, 0)
-                              }}
-                              icon={<Banknote className="size-4 shrink-0" />}
-                              label="Наличные"
-                            />
-                            <ModeButton
-                              active={field.value === "aggregator_card"}
-                              onClick={() => {
-                                field.onChange("aggregator_card")
-                                clearDetailsDebounce()
-                                window.setTimeout(() => {
-                                  void runDetailsSaveToServer()
-                                }, 0)
-                              }}
-                              icon={<CreditCard className="size-4 shrink-0" />}
-                              label="Карта Glovo"
-                            />
-                          </>
-                        ) : (
-                          <>
-                            <ModeButton
-                              active={field.value === "cash"}
-                              onClick={() => {
-                                field.onChange("cash")
+                                form.setValue("cashAmount", null)
+                                form.setValue("cardAmount", null)
                                 clearDetailsDebounce()
                                 window.setTimeout(() => {
                                   void runDetailsSaveToServer()
@@ -3780,6 +3873,8 @@ export function OrderForm({
                               active={field.value === "card"}
                               onClick={() => {
                                 field.onChange("card")
+                                form.setValue("cashAmount", null)
+                                form.setValue("cardAmount", null)
                                 clearDetailsDebounce()
                                 window.setTimeout(() => {
                                   void runDetailsSaveToServer()
@@ -3788,9 +3883,124 @@ export function OrderForm({
                               icon={<CreditCard className="size-4 shrink-0" />}
                               label="Картой курьеру"
                             />
-                          </>
-                        )}
-                      </div>
+                            <ModeButton
+                              active={field.value === "mixed"}
+                              onClick={() => {
+                                field.onChange("mixed")
+                                clearDetailsDebounce()
+                              }}
+                              icon={<Layers className="size-4 shrink-0" />}
+                              label="Разделить"
+                              hideLabel
+                            />
+                          </div>
+                          {paymentMethod === "mixed"
+                            ? (() => {
+                                const totalBaniSplit = payableAfterBonusBani
+                                const totalMdl = Math.round(
+                                  totalBaniSplit / 100,
+                                )
+                                const cashAmountMdl = Math.round(
+                                  (cashAmountWatched ?? 0) / 100,
+                                )
+                                const cardAmountMdl = Math.round(
+                                  (cardAmountWatched ?? 0) / 100,
+                                )
+                                return (
+                                  <div className="mt-3 flex flex-col gap-2 rounded-lg bg-muted/50 p-3">
+                                    <div className="flex items-center gap-3">
+                                      <span className="w-28 shrink-0 text-sm text-muted-foreground">
+                                        💵 Наличными
+                                      </span>
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        max={totalMdl}
+                                        value={
+                                          cashAmountMdl === 0 &&
+                                          (cashAmountWatched == null ||
+                                            cashAmountWatched === 0)
+                                            ? ""
+                                            : cashAmountMdl
+                                        }
+                                        onChange={(e) => {
+                                          const val = Math.max(
+                                            0,
+                                            Math.min(
+                                              totalMdl,
+                                              Number(e.target.value) || 0,
+                                            ),
+                                          )
+                                          form.setValue("cashAmount", val * 100)
+                                          form.setValue(
+                                            "cardAmount",
+                                            totalBaniSplit - val * 100,
+                                          )
+                                          clearDetailsDebounce()
+                                          window.setTimeout(() => {
+                                            void runDetailsSaveToServer()
+                                          }, 0)
+                                        }}
+                                        className="h-8 w-24"
+                                        placeholder="0"
+                                      />
+                                      <span className="text-sm text-muted-foreground">
+                                        MDL
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <span className="w-28 shrink-0 text-sm text-muted-foreground">
+                                        💳 Картой
+                                      </span>
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        max={totalMdl}
+                                        value={
+                                          cardAmountMdl === 0 &&
+                                          (cardAmountWatched == null ||
+                                            cardAmountWatched === 0)
+                                            ? ""
+                                            : cardAmountMdl
+                                        }
+                                        onChange={(e) => {
+                                          const val = Math.max(
+                                            0,
+                                            Math.min(
+                                              totalMdl,
+                                              Number(e.target.value) || 0,
+                                            ),
+                                          )
+                                          form.setValue("cardAmount", val * 100)
+                                          form.setValue(
+                                            "cashAmount",
+                                            totalBaniSplit - val * 100,
+                                          )
+                                          clearDetailsDebounce()
+                                          window.setTimeout(() => {
+                                            void runDetailsSaveToServer()
+                                          }, 0)
+                                        }}
+                                        className="h-8 w-24"
+                                        placeholder="0"
+                                      />
+                                      <span className="text-sm text-muted-foreground">
+                                        MDL
+                                      </span>
+                                    </div>
+                                    {cashAmountMdl + cardAmountMdl !==
+                                      totalMdl && (
+                                      <p className="text-xs text-destructive">
+                                        Сумма должна быть {totalMdl} MDL (сейчас{" "}
+                                        {cashAmountMdl + cardAmountMdl} MDL)
+                                      </p>
+                                    )}
+                                  </div>
+                                )
+                              })()
+                            : null}
+                        </>
+                      )}
 
                       {paymentMethod === "cash" &&
                       deliveryMode !== "aggregator" ? (
@@ -3891,6 +4101,7 @@ export function OrderForm({
                     skipSeedResolve={skipWebsitePromoSeedResolve}
                     items={cartForEngine}
                     deliveryZone={deliveryZoneForEngine}
+                    excludedCategoryIds={excludedCategoryIds}
                     onDiscountChange={setEngineOutput}
                     onAppliedPromoCodeChange={setAppliedPromoCode}
                   />
@@ -3899,6 +4110,7 @@ export function OrderForm({
                   output={effectiveEngineOutput}
                   deliveryZone={deliveryZoneForEngine}
                   bonusRedeemedBani={redeemBaniApplied}
+                  excludedCategories={excludedCategoriesInCart}
                 />
               </div>
               {showPayOrderCta ? (
@@ -3910,7 +4122,9 @@ export function OrderForm({
                 >
                   Принять оплату
                 </button>
-              ) : listOrder?.status === "draft" ? (
+              ) : listOrder?.status === "draft" ||
+                listOrder?.status === "new" ||
+                listOrder?.status === "confirmed" ? (
                 <button
                   type="submit"
                   form="pos-wizard-details-form"
@@ -4093,24 +4307,33 @@ function ModeButton({
   onClick,
   icon,
   label,
+  hideLabel,
 }: {
   active: boolean
   onClick: () => void
   icon: React.ReactNode
   label: string
+  /** Только иконка (подпись в aria-label и title). */
+  hideLabel?: boolean
 }) {
+  const densityClass = hideLabel
+    ? "px-3"
+    : "gap-2 px-4"
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={
+      aria-label={hideLabel ? label : undefined}
+      title={hideLabel ? label : undefined}
+      className={`flex items-center justify-center rounded-lg py-3 text-sm font-bold transition-colors ${densityClass} ${
         active
-          ? "flex items-center justify-center gap-2 rounded-lg bg-foreground px-4 py-3 text-sm font-bold text-background transition-colors"
-          : "flex items-center justify-center gap-2 rounded-lg bg-muted px-4 py-3 text-sm font-bold text-muted-foreground transition-colors hover:bg-[#e8e8e8] hover:text-foreground"
-      }
+          ? "bg-foreground text-background"
+          : "bg-muted text-muted-foreground hover:bg-[#e8e8e8] hover:text-foreground"
+      }`}
     >
       {icon}
-      {label}
+      {hideLabel ? null : label}
     </button>
   )
 }

@@ -8,6 +8,8 @@ export type Category = {
   created_at: string
   image_url: string | null
   show_in_upsell: boolean
+  /** Позиции категории не участвуют в расчёте скидок (витрина / POS). */
+  exclude_from_discounts?: boolean
 }
 
 export type MenuItemVariant = {

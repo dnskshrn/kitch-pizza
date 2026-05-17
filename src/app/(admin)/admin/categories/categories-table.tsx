@@ -37,8 +37,9 @@ export function CategoriesTable({ categories }: { categories: Category[] }) {
             <TableHead>Название (RU)</TableHead>
             <TableHead>Название (RO)</TableHead>
             <TableHead>Slug</TableHead>
-            <TableHead className="w-24">Порядок</TableHead>
+            <TableHead className="w-24 text-center">Порядок</TableHead>
             <TableHead>Статус</TableHead>
+            <TableHead className="text-center text-muted-foreground">Скидки</TableHead>
             <TableHead className="w-28 text-right">Действия</TableHead>
           </TableRow>
         </TableHeader>
@@ -55,6 +56,16 @@ export function CategoriesTable({ categories }: { categories: Category[] }) {
                 ) : (
                   <Badge variant="secondary">Скрыта</Badge>
                 )}
+              </TableCell>
+              <TableCell className="text-center align-middle">
+                {c.exclude_from_discounts ? (
+                  <Badge
+                    variant="secondary"
+                    className="border-0 bg-muted font-normal text-muted-foreground"
+                  >
+                    Без скидок
+                  </Badge>
+                ) : null}
               </TableCell>
               <TableCell className="text-right">
                 <Button

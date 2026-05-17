@@ -8,12 +8,11 @@ import { OrderSummary } from "@/components/client/checkout/order-summary"
 import { CheckoutSkeleton } from "@/components/client/storefront-skeletons"
 import { promoErrorMessage, type StorefrontMessages } from "@/lib/i18n/storefront"
 import {
-  getCartGrandTotalBani,
-  selectCartDiscount,
   selectCartItemCount,
   selectCartSubtotal,
   useCartStore,
 } from "@/lib/store/cart-store"
+import { evaluateStorefrontCartDiscount } from "@/components/client/cart/storefront-cart-pricing"
 import { useAuthStore } from "@/lib/store/auth-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
@@ -46,6 +45,7 @@ import {
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import type { DeliveryZoneForEngine, DiscountRule } from "@/types/promotions"
 import {
   useCallback,
   useEffect,
@@ -199,12 +199,22 @@ type CheckoutViewProps = {
   brandName: string
   brandLogo: string
   brandSlug: string
+  pricingBootstrap: {
+    discountAutoRules: DiscountRule[]
+    excludedDiscountCategoryIds: string[]
+    storefrontExcludedDiscountCategories: Array<{
+      id: string
+      name_ru: string
+      name_ro: string
+    }>
+  }
 }
 
 export function CheckoutView({
   brandName,
   brandLogo,
   brandSlug,
+  pricingBootstrap,
 }: CheckoutViewProps) {
   const { lang, t } = useLanguage()
   const router = useRouter()
@@ -225,7 +235,6 @@ export function CheckoutView({
   const removePromo = useCartStore((s) => s.removePromo)
 
   const subtotal = useCartStore(selectCartSubtotal)
-  const discount = useCartStore(selectCartDiscount)
   const itemCount = useCartStore(selectCartItemCount)
 
   const mode = useDeliveryStore((s) => s.mode)
@@ -308,8 +317,50 @@ export function CheckoutView({
 
   const showTimeSelect = showCustomTimeSelect || quickTimeSlots.length === 0
 
+  const deliveryZoneForEngine = useMemo((): DeliveryZoneForEngine | null => {
+    if (mode === "pickup") {
+      return { price_bani: 0, free_from_bani: 0 }
+    }
+    const z = selectedZone
+    if (!z) return null
+    return {
+      price_bani: z.delivery_price_bani,
+      free_from_bani: z.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
+    }
+  }, [mode, selectedZone])
+
+  const engineOutput = useMemo(() => {
+    return evaluateStorefrontCartDiscount({
+      cartItems: items,
+      discountAutoRules: pricingBootstrap.discountAutoRules,
+      excludedCategoryIds: pricingBootstrap.excludedDiscountCategoryIds,
+      appliedPromo,
+      deliveryZone: deliveryZoneForEngine,
+    })
+  }, [
+    items,
+    pricingBootstrap.discountAutoRules,
+    pricingBootstrap.excludedDiscountCategoryIds,
+    appliedPromo,
+    deliveryZoneForEngine,
+  ])
+
+  const excludedCategoriesInCart = useMemo(() => {
+    if (!engineOutput || engineOutput.totalDiscountBani === 0) return []
+    const inCart = new Set(items.map((i) => i.menuItem.category_id))
+    return pricingBootstrap.storefrontExcludedDiscountCategories.filter((c) =>
+      inCart.has(c.id),
+    )
+  }, [engineOutput, items, pricingBootstrap.storefrontExcludedDiscountCategories])
+
+  const discount = Math.min(
+    subtotal,
+    Math.max(0, Math.round(engineOutput.totalDiscountBani)),
+  )
+
   const deliveryFeeBani = getDeliveryFeeBani(subtotal)
-  const grandTotal = getCartGrandTotalBani()
+  const discountedGoodsBani = Math.max(0, subtotal - discount)
+  const grandTotal = discountedGoodsBani + deliveryFeeBani
   const checkoutGrandTotalBani = Math.max(0, grandTotal - bonusesRedeemed * 100)
 
   const hasResolvedAddress = Boolean(resolvedAddress?.trim())
@@ -1048,6 +1099,7 @@ export function CheckoutView({
               outOfZone={outOfZone}
               grandTotal={checkoutGrandTotalBani}
               bonusesRedeemed={bonusesRedeemed}
+              excludedCategoriesNotice={excludedCategoriesInCart}
               onCheckout={handleSubmit}
               checkoutSubmitting={orderSubmitting}
               checkoutError={orderSubmitError}

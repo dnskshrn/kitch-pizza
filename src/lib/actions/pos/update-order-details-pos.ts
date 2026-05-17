@@ -17,8 +17,12 @@ export type UpdateOrderDetailsPosInput = {
   addressFloor?: string | null
   addressApartment?: string | null
   addressIntercom?: string | null
-  paymentMethod: "cash" | "card" | "aggregator_card"
+  paymentMethod: "cash" | "card" | "aggregator_card" | "mixed"
   changeFrom?: number
+  /** Бани; только при payment_method = mixed. */
+  cashAmount?: number | null
+  /** Бани; только при payment_method = mixed. */
+  cardAmount?: number | null
   comment?: string
   promoCode?: string
   discount: number
@@ -297,6 +301,8 @@ export async function updateOrderDetailsPos(
       input.addressIntercom != null ? String(input.addressIntercom).trim() || null : null,
     payment_method: paymentMethod,
     change_from: changeFromBani,
+    cash_amount: input.cashAmount ?? null,
+    card_amount: input.cardAmount ?? null,
     total: totalBani,
     delivery_fee: deliveryFeeBani,
     discount: safeDiscount,

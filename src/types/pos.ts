@@ -50,8 +50,10 @@ export type PosOrder = {
   user_phone: string | null
   delivery_mode: "delivery" | "pickup" | "aggregator"
   delivery_address: string | null
-  payment_method: "cash" | "card" | "aggregator_card"
+  payment_method: "cash" | "card" | "aggregator_card" | "mixed"
   change_from: number | null
+  cash_amount: number | null
+  card_amount: number | null
   promo_code: string | null
   total: number
   delivery_fee: number

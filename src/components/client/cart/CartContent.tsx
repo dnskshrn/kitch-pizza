@@ -1,6 +1,9 @@
 "use client"
 
 import {
+  evaluateStorefrontCartDiscount,
+} from "@/components/client/cart/storefront-cart-pricing"
+import {
   formatMoney,
   goodsPhrase,
   pickLocalizedName,
@@ -17,6 +20,7 @@ import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
 import type { CartItem } from "@/types/cart"
 import type { Category } from "@/types/database"
+import type { DeliveryZoneForEngine, DiscountRule } from "@/types/promotions"
 import {
   Check,
   ChevronRight,
@@ -39,6 +43,15 @@ type CartContentProps = {
   items: CartItem[]
   subtotal: number
   itemCount: number
+  pricingBootstrap: {
+    discountAutoRules: DiscountRule[]
+    excludedDiscountCategoryIds: string[]
+    storefrontExcludedDiscountCategories: Array<{
+      id: string
+      name_ru: string
+      name_ro: string
+    }>
+  } | null
   onClose: () => void
   onEditItem: (item: CartItem) => void
   onRemoveItem: (cartItemId: string) => void
@@ -50,6 +63,7 @@ export function CartContent({
   items,
   subtotal,
   itemCount,
+  pricingBootstrap,
   onClose,
   onEditItem,
   onRemoveItem,
@@ -77,7 +91,7 @@ export function CartContent({
   const promoLoading = useCartStore((s) => s.promoLoading)
   const applyPromo = useCartStore((s) => s.applyPromo)
   const removePromo = useCartStore((s) => s.removePromo)
-  const discount = useCartStore(selectCartDiscount)
+  const fallbackPromoDiscount = useCartStore(selectCartDiscount)
   const isOpen = useCartStore((s) => s.isOpen)
   const deliveryMode = useDeliveryStore((s) => s.mode)
   const selectedZone = useDeliveryStore((s) => s.selectedZone)
@@ -85,6 +99,62 @@ export function CartContent({
   const deliveryFeeBani = useDeliveryStore((s) =>
     s.getDeliveryFeeBani(subtotal),
   )
+
+  const deliveryZoneForEngine = useMemo((): DeliveryZoneForEngine | null => {
+    if (deliveryMode === "pickup") {
+      return { price_bani: 0, free_from_bani: 0 }
+    }
+    const z = selectedZone
+    if (!z) return null
+    return {
+      price_bani: z.delivery_price_bani,
+      free_from_bani: z.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
+    }
+  }, [deliveryMode, selectedZone])
+
+  const storefrontEngineOutput = useMemo(() => {
+    if (!pricingBootstrap) return null
+    return evaluateStorefrontCartDiscount({
+      cartItems: items,
+      discountAutoRules: pricingBootstrap.discountAutoRules,
+      excludedCategoryIds: pricingBootstrap.excludedDiscountCategoryIds,
+      appliedPromo,
+      deliveryZone: deliveryZoneForEngine,
+    })
+  }, [
+    pricingBootstrap,
+    items,
+    appliedPromo,
+    deliveryZoneForEngine,
+  ])
+
+  const excludedCategoriesInCart = useMemo(() => {
+    if (
+      storefrontEngineOutput == null ||
+      storefrontEngineOutput.totalDiscountBani === 0
+    ) {
+      return []
+    }
+    if (!pricingBootstrap) return []
+    const inCart = new Set(items.map((i) => i.menuItem.category_id))
+    return pricingBootstrap.storefrontExcludedDiscountCategories.filter((c) =>
+      inCart.has(c.id),
+    )
+  }, [
+    storefrontEngineOutput,
+    items,
+    pricingBootstrap,
+  ])
+
+  const discount = useMemo(() => {
+    if (!storefrontEngineOutput) {
+      return fallbackPromoDiscount
+    }
+    return Math.min(
+      subtotal,
+      Math.max(0, Math.round(storefrontEngineOutput.totalDiscountBani)),
+    )
+  }, [storefrontEngineOutput, subtotal, fallbackPromoDiscount])
 
   useEffect(() => {
     if (!isOpen) setUpsellCategory(null)
@@ -335,6 +405,26 @@ export function CartContent({
                   <span className="storefront-modal-accent font-medium tabular-nums">
                     −{discountLei}
                   </span>
+                </div>
+              ) : null}
+              {excludedCategoriesInCart.length > 0 ? (
+                <div className="flex flex-col gap-1 mt-1">
+                  {excludedCategoriesInCart.map((cat) => (
+                    <div
+                      key={cat.id}
+                      className="flex items-start gap-1.5 text-xs text-[#808080]"
+                    >
+                      <span className="mt-0.5 shrink-0">ℹ️</span>
+                      <span>
+                        {`Скидка не применяется на «${cat.name_ru}»`}
+                        {cat.name_ro && cat.name_ro !== cat.name_ru ? (
+                          <span className="ml-1 opacity-70">
+                            {`/ Reducerea nu se aplică la «${cat.name_ro}»`}
+                          </span>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ) : null}
               {showBonusAccrualRow ? (

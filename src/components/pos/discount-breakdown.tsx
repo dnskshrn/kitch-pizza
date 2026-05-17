@@ -17,12 +17,15 @@ type DiscountBreakdownProps = {
   output: DiscountEngineOutput | null
   deliveryZone: DeliveryZoneForEngine | null
   bonusRedeemedBani?: number
+  excludedCategories?: Array<{ id: string; name_ru: string; name_ro: string }>
+  lang?: 'ru' | 'ro'
 }
 
 export function DiscountBreakdown({
   output,
   deliveryZone,
   bonusRedeemedBani = 0,
+  excludedCategories,
 }: DiscountBreakdownProps) {
   if (output == null) return null
 
@@ -51,6 +54,27 @@ export function DiscountBreakdown({
           </span>
         </div>
       ))}
+
+      {(excludedCategories ?? []).length > 0 ? (
+        <div className="flex flex-col gap-1 mt-1">
+          {(excludedCategories ?? []).map((cat) => (
+            <div
+              key={cat.id}
+              className="flex items-start gap-1.5 text-xs text-muted-foreground"
+            >
+              <span className="mt-0.5 shrink-0">ℹ️</span>
+              <span>
+                {`Скидка не применяется на «${cat.name_ru}»`}
+                {cat.name_ro && cat.name_ro !== cat.name_ru ? (
+                  <span className="ml-1 opacity-70">
+                    {`/ Reducerea nu se aplică la «${cat.name_ro}»`}
+                  </span>
+                ) : null}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {hasDiscountLines ? (
         <>

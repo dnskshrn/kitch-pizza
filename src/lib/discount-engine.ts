@@ -87,6 +87,28 @@ function lineKey(item: CartItemForEngine): string {
   return `${item.menu_item_id}:${item.variant_id ?? ''}`
 }
 
+/** Доля текущего `running` после скидок, относимая к позициям не из excluded-категорий (пропорция по брутто). */
+function allocateEligibleRunningPortion(
+  runningBani: number,
+  eligibleRawSubtotal: number,
+  cartSubtotalBani: number
+): number {
+  if (
+    eligibleRawSubtotal <= 0 ||
+    cartSubtotalBani <= 0 ||
+    runningBani <= 0
+  ) {
+    return 0
+  }
+  return Math.max(
+    0,
+    Math.min(
+      runningBani,
+      Math.round((runningBani * eligibleRawSubtotal) / cartSubtotalBani)
+    )
+  )
+}
+
 type MutableQty = Map<string, { item: CartItemForEngine; qty: number }>
 
 function buildMutableQty(items: CartItemForEngine[]): MutableQty {
@@ -102,11 +124,18 @@ function buildMutableQty(items: CartItemForEngine[]): MutableQty {
 
 function expandUnitsFromMutable(
   work: MutableQty,
-  rule: DiscountRule
+  rule: DiscountRule,
+  excludedCategoryIds: Set<string>
 ): { unitPriceBani: number; key: string }[] {
   const units: { unitPriceBani: number; key: string }[] = []
   for (const [key, { item, qty }] of work) {
     if (qty <= 0) continue
+    if (
+      excludedCategoryIds.size > 0 &&
+      excludedCategoryIds.has(item.category_id)
+    ) {
+      continue
+    }
     if (!matchesTargets(item, rule)) continue
     for (let i = 0; i < qty; i++) {
       units.push({ unitPriceBani: item.unit_price_bani, key })
@@ -149,6 +178,7 @@ export function evaluateDiscounts(
   currentTime?: Date
 ): DiscountEngineOutput {
   const now = currentTime ?? new Date()
+  const excludedSet = new Set(input.excludedCategoryIds ?? [])
 
   const appliedDiscounts: AppliedDiscount[] = []
   const giftItems: GiftCartItem[] = []
@@ -158,6 +188,13 @@ export function evaluateDiscounts(
     (s, it) => s + it.unit_price_bani * it.quantity,
     0
   )
+  const eligibleRawSubtotal =
+    excludedSet.size === 0
+      ? itemSubtotalBani
+      : items.reduce((sum, i) => {
+          if (excludedSet.has(i.category_id)) return sum
+          return sum + i.unit_price_bani * i.quantity
+        }, 0)
 
   if (items.length === 0) {
     const dz = input.deliveryZone
@@ -170,6 +207,7 @@ export function evaluateDiscounts(
       deliveryFeeBani: dz ? (0 >= dz.free_from_bani ? 0 : dz.price_bani) : null,
       totalBani: dz ? (0 >= dz.free_from_bani ? 0 : dz.price_bani) : null,
       bonusMultiplier: 1.0,
+      excludedCategoryIds: [],
     }
   }
 
@@ -186,7 +224,7 @@ export function evaluateDiscounts(
     const n = rule.free_every_n
     if (n == null || n <= 0) continue
 
-    const units = expandUnitsFromMutable(workQty, rule)
+    const units = expandUnitsFromMutable(workQty, rule, excludedSet)
     const freeCount = Math.floor(units.length / n)
     if (freeCount <= 0) continue
 
@@ -219,6 +257,7 @@ export function evaluateDiscounts(
     if (ev == null) continue
     let ruleDisc = 0
     for (const it of items) {
+      if (excludedSet.has(it.category_id)) continue
       if (!matchesTargets(it, rule)) continue
       const lineSub = it.unit_price_bani * it.quantity
       ruleDisc += Math.round(lineSub * ev)
@@ -243,11 +282,44 @@ export function evaluateDiscounts(
   for (const rule of orderPercentAutos) {
     const ev = rule.effect_value
     if (ev == null) continue
-    const disc = Math.round(running * ev)
+    if (eligibleRawSubtotal <= 0) continue
+    const eligibleBasis = allocateEligibleRunningPortion(
+      running,
+      eligibleRawSubtotal,
+      itemSubtotalBani
+    )
+    if (eligibleBasis <= 0) continue
+    const disc = Math.round(eligibleBasis * ev)
     if (disc <= 0) continue
+    const appliedDisc = Math.min(disc, running)
     appliedDiscounts.push({
       rule_id: rule.id,
       effect_type: 'order_percent',
+      label_ru: rule.label_ru ?? '',
+      discount_bani: appliedDisc,
+    })
+    running = Math.max(0, running - appliedDisc)
+  }
+
+  const orderFixedAutos = autoRules
+    .filter((r) => r.effect_type === 'order_fixed' && r.trigger_type === 'auto')
+    .sort((a, b) => b.priority - a.priority)
+
+  for (const rule of orderFixedAutos) {
+    const ev = rule.effect_value
+    if (ev == null) continue
+    if (eligibleRawSubtotal <= 0) continue
+    const eligibleBasis = allocateEligibleRunningPortion(
+      running,
+      eligibleRawSubtotal,
+      itemSubtotalBani
+    )
+    if (eligibleBasis <= 0) continue
+    const disc = Math.min(ev, eligibleBasis, running)
+    if (disc <= 0) continue
+    appliedDiscounts.push({
+      rule_id: rule.id,
+      effect_type: 'order_fixed',
       label_ru: rule.label_ru ?? '',
       discount_bani: disc,
     })
@@ -257,26 +329,48 @@ export function evaluateDiscounts(
   const promo = input.promoCodeRule
   if (promo && isRuleEligible(promo, now)) {
     if (promo.effect_type === 'order_percent' && promo.effect_value != null) {
-      const disc = Math.round(running * promo.effect_value)
-      if (disc > 0) {
-        appliedDiscounts.push({
-          rule_id: promo.id,
-          effect_type: 'order_percent',
-          label_ru: promo.label_ru ?? '',
-          discount_bani: disc,
-        })
-        running = Math.max(0, running - disc)
+      if (eligibleRawSubtotal > 0) {
+        const eligibleBasis = allocateEligibleRunningPortion(
+          running,
+          eligibleRawSubtotal,
+          itemSubtotalBani
+        )
+        if (eligibleBasis > 0) {
+          const disc = Math.round(eligibleBasis * promo.effect_value)
+          const appliedDisc = Math.min(disc, running)
+          if (appliedDisc > 0) {
+            appliedDiscounts.push({
+              rule_id: promo.id,
+              effect_type: 'order_percent',
+              label_ru: promo.label_ru ?? '',
+              discount_bani: appliedDisc,
+            })
+            running = Math.max(0, running - appliedDisc)
+          }
+        }
       }
-    } else if (promo.effect_type === 'order_fixed' && promo.effect_value != null) {
-      const disc = Math.min(promo.effect_value, running)
-      if (disc > 0) {
-        appliedDiscounts.push({
-          rule_id: promo.id,
-          effect_type: 'order_fixed',
-          label_ru: promo.label_ru ?? '',
-          discount_bani: disc,
-        })
-        running = Math.max(0, running - disc)
+    } else if (
+      promo.effect_type === 'order_fixed' &&
+      promo.effect_value != null
+    ) {
+      if (eligibleRawSubtotal > 0) {
+        const eligibleBasis = allocateEligibleRunningPortion(
+          running,
+          eligibleRawSubtotal,
+          itemSubtotalBani
+        )
+        if (eligibleBasis > 0) {
+          const disc = Math.min(promo.effect_value, eligibleBasis, running)
+          if (disc > 0) {
+            appliedDiscounts.push({
+              rule_id: promo.id,
+              effect_type: 'order_fixed',
+              label_ru: promo.label_ru ?? '',
+              discount_bani: disc,
+            })
+            running = Math.max(0, running - disc)
+          }
+        }
       }
     }
   }
@@ -310,6 +404,16 @@ export function evaluateDiscounts(
     totalBani = discountedSubtotalBani + deliveryFeeBani
   }
 
+  const excludedCategoryIds = input.excludedCategoryIds
+    ? [
+        ...new Set(
+          input.items
+            .filter((i) => excludedSet.has(i.category_id))
+            .map((i) => i.category_id),
+        ),
+      ]
+    : []
+
   return {
     appliedDiscounts,
     giftItems,
@@ -319,5 +423,6 @@ export function evaluateDiscounts(
     deliveryFeeBani,
     totalBani,
     bonusMultiplier,
+    excludedCategoryIds,
   }
 }

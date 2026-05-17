@@ -4,7 +4,7 @@ import type { PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 
 /** Колонки `orders` + вложения для списка/карточек POS (без несуществующих полей). */
 const ORDERS_POS_SELECT =
-  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, delivery_fee, promo_code, discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, brands(slug), order_items(count)"
+  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, brands(slug), order_items(count)"
 
 /** Активные заказы левой колонки POS (без завершённых, отмен и отказов сайта). */
 export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
@@ -31,8 +31,10 @@ export type OrderRow = {
   user_phone: string | null
   delivery_mode: "delivery" | "pickup" | "aggregator"
   delivery_address: string | null
-  payment_method: "cash" | "card" | "aggregator_card"
+  payment_method: "cash" | "card" | "aggregator_card" | "mixed"
   change_from: number | null
+  cash_amount?: number | null
+  card_amount?: number | null
   promo_code: string | null
   total: number
   delivery_fee: number
@@ -183,10 +185,19 @@ export function mapOrderRowToPosOrder(
     payment_method:
       row.payment_method === "card" ||
       row.payment_method === "cash" ||
-      row.payment_method === "aggregator_card"
+      row.payment_method === "aggregator_card" ||
+      row.payment_method === "mixed"
         ? row.payment_method
         : "cash",
     change_from: row.change_from ?? null,
+    cash_amount:
+      typeof row.cash_amount === "number" && Number.isFinite(row.cash_amount)
+        ? row.cash_amount
+        : null,
+    card_amount:
+      typeof row.card_amount === "number" && Number.isFinite(row.card_amount)
+        ? row.card_amount
+        : null,
     promo_code: row.promo_code ?? null,
     total: row.total,
     delivery_fee: row.delivery_fee,

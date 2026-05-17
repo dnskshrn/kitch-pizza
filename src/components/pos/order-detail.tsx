@@ -1026,7 +1026,7 @@ export function OrderDetail({
                 : "Заказ отменён"}
             </p>
           ) : null}
-          {order.status === "new" && parseSource(order.source) === "website" ? (
+          {order.status === "new" && order.source === "website" ? (
             <WebsiteNewActions
               order={order as unknown as PosOrder}
               busy={websiteActionBusy}

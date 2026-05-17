@@ -64,7 +64,7 @@ export async function createDraftOrder(
   if (options?.deliveryMode === "aggregator") {
     const res = await (supabase.from("orders") as any)
       .insert({
-        status: "draft" as const,
+        status: "new" as const,
         source: "pos" as const,
         operator_id: staff.id,
         total: 0,
@@ -96,7 +96,7 @@ export async function createDraftOrder(
   } else {
     const res = await (supabase.from("orders") as any)
       .insert({
-        status: "draft" as const,
+        status: "new" as const,
         source: "pos" as const,
         operator_id: staff.id,
         total: 0,

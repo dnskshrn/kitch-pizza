@@ -7,6 +7,7 @@ export type PosMenuCategoryCacheRow = {
   id: string
   name_ru: string
   sort_order: number
+  exclude_from_discounts: boolean
 }
 
 export type PosMenuCacheBrand = {
@@ -33,7 +34,7 @@ async function fetchBrandMenu(brandId: string): Promise<PosMenuCacheBrand> {
   const [categoriesResult, itemsResult] = await Promise.all([
     supabase
       .from("menu_categories")
-      .select("id, name_ru, sort_order")
+      .select("id, name_ru, sort_order, exclude_from_discounts")
       .eq("brand_id", brandId)
       .eq("is_active", true)
       .order("sort_order", { ascending: true }),
@@ -52,7 +53,20 @@ async function fetchBrandMenu(brandId: string): Promise<PosMenuCacheBrand> {
     throw new Error(itemsResult.error.message)
   }
 
-  const categories = (categoriesResult.data ?? []) as PosMenuCategoryCacheRow[]
+  const categories = (categoriesResult.data ?? []).map((row) => {
+    const r = row as {
+      id: string
+      name_ru: string
+      sort_order: number
+      exclude_from_discounts?: boolean | null
+    }
+    return {
+      id: r.id,
+      name_ru: r.name_ru,
+      sort_order: r.sort_order,
+      exclude_from_discounts: Boolean(r.exclude_from_discounts),
+    } satisfies PosMenuCategoryCacheRow
+  })
   const items = (itemsResult.data ?? []) as PosMenuItemModalSourceRow[]
   const itemsByCategory: Record<string, PosMenuItemModalSourceRow[]> = {}
   const itemsById: Record<string, PosMenuItemModalSourceRow> = {}

@@ -429,6 +429,9 @@ type PayOrderLoadedRow = OrderPayRow & {
   profile_id: string | null
   bonus_multiplier?: number | null
   delivery_mode?: string | null
+  payment_method?: string | null
+  cash_amount?: number | null
+  card_amount?: number | null
 }
 
 export type PayOrderInput = {
@@ -457,7 +460,7 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
     supabase.from("orders") as any
   )
     .select(
-      "id, total, status, paid_at, profile_id, bonus_multiplier, delivery_mode",
+      "id, total, status, paid_at, profile_id, bonus_multiplier, delivery_mode, payment_method, cash_amount, card_amount",
     )
     .eq("id", input.orderId)
     .maybeSingle()
@@ -536,31 +539,77 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
 
   let transaction: CashTransactionRow | null = null
   if (!skipCashTransaction) {
-    const { data: txIns, error: txErr } = await (
-      supabase.from("cash_transactions")
-    )
-      .insert({
-        cash_session_id: input.cashSessionId,
-        type: "order_payment",
-        direction: "in",
-        amount_bani: updatedOrder.total,
-        payment_method: input.paymentMethod,
-        order_id: input.orderId,
-        created_by_staff_id: input.createdByStaffId ?? null,
-        category: null,
-        description: null,
-      })
-      .select("*")
-      .single()
+    const cashAmt = Number(order.cash_amount ?? 0)
+    const cardAmt = Number(order.card_amount ?? 0)
+    const isSplit =
+      order.payment_method === "mixed" && cashAmt > 0 && cardAmt > 0
 
-    if (txErr || !txIns) {
-      console.error("[payOrder] insert tx", txErr?.message)
-      return {
-        data: null,
-        error: txErr?.message ?? "insert_failed",
+    const staffId = input.createdByStaffId ?? null
+
+    if (isSplit) {
+      const { data: txIns, error: txErr } = await supabase
+        .from("cash_transactions")
+        .insert([
+          {
+            cash_session_id: input.cashSessionId,
+            type: "order_payment",
+            direction: "in",
+            amount_bani: cashAmt,
+            payment_method: "cash",
+            order_id: input.orderId,
+            created_by_staff_id: staffId,
+            category: null,
+            description: null,
+          },
+          {
+            cash_session_id: input.cashSessionId,
+            type: "order_payment",
+            direction: "in",
+            amount_bani: cardAmt,
+            payment_method: "card",
+            order_id: input.orderId,
+            created_by_staff_id: staffId,
+            category: null,
+            description: null,
+          },
+        ])
+        .select("*")
+
+      if (txErr || !txIns?.length) {
+        console.error("[payOrder] insert tx", txErr?.message)
+        return {
+          data: null,
+          error: txErr?.message ?? "insert_failed",
+        }
       }
+      transaction = txIns[0] as CashTransactionRow
+    } else {
+      const { data: txIns, error: txErr } = await (
+        supabase.from("cash_transactions")
+      )
+        .insert({
+          cash_session_id: input.cashSessionId,
+          type: "order_payment",
+          direction: "in",
+          amount_bani: updatedOrder.total,
+          payment_method: input.paymentMethod,
+          order_id: input.orderId,
+          created_by_staff_id: staffId,
+          category: null,
+          description: null,
+        })
+        .select("*")
+        .single()
+
+      if (txErr || !txIns) {
+        console.error("[payOrder] insert tx", txErr?.message)
+        return {
+          data: null,
+          error: txErr?.message ?? "insert_failed",
+        }
+      }
+      transaction = txIns as CashTransactionRow
     }
-    transaction = txIns as CashTransactionRow
   }
 
   const orderId = input.orderId

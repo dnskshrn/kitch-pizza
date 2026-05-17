@@ -8,7 +8,9 @@ export async function getStorefrontCategories(): Promise<Category[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("menu_categories")
-    .select("*")
+    .select(
+      "id,name_ru,name_ro,slug,sort_order,is_active,created_at,image_url,show_in_upsell,exclude_from_discounts",
+    )
     .eq("brand_id", brandId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })

@@ -1,5 +1,6 @@
 "use client"
 
+import { getStorefrontCartPricingBootstrap } from "@/lib/actions/discounts"
 import {
   selectCartItemCount,
   selectCartSubtotal,
@@ -40,6 +41,24 @@ export function CartRoot({ brandSlug }: { brandSlug: string }) {
   const itemCount = useCartStore(selectCartItemCount)
   const subtotal = useCartStore(selectCartSubtotal)
   const openForEdit = useProductModalStore((s) => s.openForEdit)
+  const [pricingBootstrap, setPricingBootstrap] = useState<
+    Awaited<ReturnType<typeof getStorefrontCartPricingBootstrap>> | null
+  >(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const boot = await getStorefrontCartPricingBootstrap()
+        if (!cancelled) setPricingBootstrap(boot)
+      } catch {
+        if (!cancelled) setPricingBootstrap(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handleEditItem = (cartItem: CartItem) => {
     const isDesktop =
@@ -61,6 +80,7 @@ export function CartRoot({ brandSlug }: { brandSlug: string }) {
     items,
     subtotal,
     itemCount,
+    pricingBootstrap,
     onClose: closeCart,
     onEditItem: handleEditItem,
     onRemoveItem: removeItem,

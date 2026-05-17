@@ -71,6 +71,8 @@ items: CartItemForEngine[]
 rules: DiscountRule[]          // already-filtered active auto rules
 promoCodeRule?: DiscountRule   // resolved promo code rule (if any)
 deliveryZone: DeliveryZoneForEngine | null
+/** Категории меню, на которые не распространяются скидки (исключённые из базы расчёта). */
+excludedCategoryIds?: string[]
 }
 // Engine output
 export interface DiscountEngineOutput {
@@ -82,4 +84,6 @@ discountedSubtotalBani: number  // itemSubtotal - totalDiscount
 deliveryFeeBani: number | null  // null if deliveryZone is null
 totalBani: number | null        // null if deliveryZone is null
 bonusMultiplier: number         // default 1.0, higher if bonus_multiplier rule active
+/** category_id, по которым в корзине были позиции и exclude=true в конфиге движка */
+excludedCategoryIds: string[]
 }

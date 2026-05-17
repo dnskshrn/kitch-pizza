@@ -1,5 +1,7 @@
 'use server'
 
+import { getStorefrontCategories } from '@/lib/data/storefront-categories'
+import { getBrandId } from '@/lib/get-brand-id'
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import type { DiscountRule } from '@/types/promotions'
 import type { PromoCode } from '@/types/database'
@@ -21,6 +23,32 @@ export async function getActiveDiscountRules(brandId: string): Promise<DiscountR
   }
 
   return (data ?? []) as DiscountRule[]
+}
+
+/** Витрина: авто-правила и id категорий с исключением из базы скидок для checkout/корзины. */
+export async function getStorefrontCartPricingBootstrap(): Promise<{
+  discountAutoRules: DiscountRule[]
+  excludedDiscountCategoryIds: string[]
+  storefrontExcludedDiscountCategories: Array<{
+    id: string
+    name_ru: string
+    name_ro: string
+  }>
+}> {
+  const brandId = await getBrandId()
+  const [discountAutoRules, categories] = await Promise.all([
+    getActiveDiscountRules(brandId),
+    getStorefrontCategories(),
+  ])
+  const storefrontExcludedDiscountCategories = categories
+    .filter((c) => c.exclude_from_discounts === true)
+    .map((c) => ({ id: c.id, name_ru: c.name_ru, name_ro: c.name_ro }))
+  const excludedDiscountCategoryIds = storefrontExcludedDiscountCategories.map((c) => c.id)
+  return {
+    discountAutoRules,
+    excludedDiscountCategoryIds,
+    storefrontExcludedDiscountCategories,
+  }
 }
 
 export async function resolvePromoCode(

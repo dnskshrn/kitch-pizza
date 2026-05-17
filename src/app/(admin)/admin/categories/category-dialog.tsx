@@ -42,6 +42,7 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
   const [isActive, setIsActive] = useState(true)
   const [imageUrl, setImageUrl] = useState("")
   const [showInUpsell, setShowInUpsell] = useState(false)
+  const [excludeFromDiscounts, setExcludeFromDiscounts] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [pending, startTransition] = useTransition()
 
@@ -55,6 +56,7 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
       setIsActive(category.is_active)
       setImageUrl(category.image_url ?? "")
       setShowInUpsell(category.show_in_upsell ?? false)
+      setExcludeFromDiscounts(category.exclude_from_discounts ?? false)
     } else {
       setNameRu("")
       setNameRo("")
@@ -63,6 +65,7 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
       setIsActive(true)
       setImageUrl("")
       setShowInUpsell(false)
+      setExcludeFromDiscounts(false)
     }
   }, [open, mode, category])
 
@@ -86,6 +89,7 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
       is_active: isActive,
       image_url: (imageUrl ?? "").trim() || null,
       show_in_upsell: showInUpsell,
+      exclude_from_discounts: excludeFromDiscounts,
     }
     startTransition(async () => {
       try {
@@ -215,6 +219,22 @@ export function CategoryDialog({ open, onOpenChange, mode, category }: Props) {
               value={imageUrl ?? ""}
               onChange={(e) => setImageUrl(e.target.value)}
               placeholder="или вставьте URL"
+            />
+          </div>
+          <div className="flex gap-4 rounded-lg border border-border p-3">
+            <div className="min-w-0 flex-1 space-y-1">
+              <Label htmlFor="cat-exclude-discounts">
+                Исключить из скидок
+              </Label>
+              <p className="text-muted-foreground text-sm">
+                Позиции этой категории не участвуют ни в каких скидках
+              </p>
+            </div>
+            <Switch
+              id="cat-exclude-discounts"
+              checked={excludeFromDiscounts}
+              onCheckedChange={setExcludeFromDiscounts}
+              className="mt-1 shrink-0"
             />
           </div>
           <div className="flex items-center gap-2">

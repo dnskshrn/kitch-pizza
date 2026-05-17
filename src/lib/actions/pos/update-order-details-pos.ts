@@ -24,6 +24,7 @@ export type UpdateOrderDetailsPosInput = {
   /** Бани; только при payment_method = mixed. */
   cardAmount?: number | null
   comment?: string
+  kitchen_note?: string | null
   /** Доставка: `asap` или `HH:MM`; для самовывоза/агрегатора не задаётся (NULL в БД). */
   scheduled_time?: string | null
   promoCode?: string
@@ -324,6 +325,13 @@ export async function updateOrderDetailsPos(
     delivery_lat,
     delivery_lng,
     bonus_multiplier: input.bonus_multiplier ?? 1,
+  }
+
+  if (input.kitchen_note !== undefined) {
+    patch.kitchen_note =
+      input.kitchen_note == null || input.kitchen_note === ""
+        ? null
+        : String(input.kitchen_note).trim() || null
   }
 
   if (bonusPtsFromInput !== null) {

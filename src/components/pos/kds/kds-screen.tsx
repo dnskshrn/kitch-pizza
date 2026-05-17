@@ -135,6 +135,10 @@ function normalizeOrderRow(raw: unknown): KdsOrderRow | null {
       o.aggregator == null || o.aggregator === ""
         ? null
         : String(o.aggregator),
+    kitchen_note:
+      o.kitchen_note == null || o.kitchen_note === ""
+        ? null
+        : String(o.kitchen_note),
     updated_at: String(o.updated_at),
     cooking_started_at:
       o.cooking_started_at == null || o.cooking_started_at === ""

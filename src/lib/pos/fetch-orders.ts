@@ -4,7 +4,7 @@ import type { PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 
 /** Колонки `orders` + вложения для списка/карточек POS (без несуществующих полей). */
 const ORDERS_POS_SELECT =
-  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, ready_at, brands(slug), order_items(count)"
+  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, kitchen_note, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, ready_at, brands(slug), order_items(count)"
 
 /** Активные заказы левой колонки POS (без завершённых, отмен и отказов сайта). */
 export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
@@ -41,6 +41,7 @@ export type OrderRow = {
   discount: number
   bonuses_redeemed: number
   comment: string | null
+  kitchen_note?: string | null
   scheduled_time?: string | null
   created_at: string
   updated_at: string
@@ -214,6 +215,10 @@ export function mapOrderRowToPosOrder(
         : 0,
     ),
     comment: row.comment,
+    kitchen_note:
+      row.kitchen_note != null && String(row.kitchen_note).trim()
+        ? String(row.kitchen_note).trim()
+        : null,
     scheduled_time:
       row.scheduled_time != null && String(row.scheduled_time).trim()
         ? String(row.scheduled_time).trim()

@@ -215,6 +215,8 @@ export interface Order {
   /** KDS: переход `cooking` → `ready` */
   ready_at: string | null
   comment: string | null
+  /** Только кухня (POS), не подмешивается в расчёты и витрину. */
+  kitchen_note: string | null
   tg_message_id: string | null
   created_at: string
   updated_at: string

@@ -97,6 +97,7 @@ import {
   CreditCard,
   Layers,
   Loader2,
+  ChefHat,
   MapPin,
   Minus,
   MoreVertical,
@@ -936,6 +937,10 @@ export function OrderForm({
   /** Время доставки: `asap` или `HH:MM` (только режим доставки). */
   const [scheduledTime, setScheduledTime] = useState("asap")
 
+  const [kitchenNoteOpen, setKitchenNoteOpen] = useState(false)
+  const [kitchenNote, setKitchenNote] = useState("")
+  const kitchenNoteDirtyRef = useRef(false)
+
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
@@ -1341,6 +1346,11 @@ export function OrderForm({
     setAppliedPromoCode(listOrder.promo_code?.trim() || null)
     const st = listOrder.scheduled_time?.trim()
     setScheduledTime(st && st.length > 0 ? st : "asap")
+    if (!kitchenNoteDirtyRef.current) {
+      const kn = listOrder.kitchen_note?.trim() ?? ""
+      setKitchenNote(listOrder.kitchen_note ?? "")
+      setKitchenNoteOpen(kn.length > 0)
+    }
   }, [listOrder, posOrderId, detailsFormDirty, form])
 
   useEffect(() => {
@@ -1362,6 +1372,9 @@ export function OrderForm({
     setBonusRedeemTouched(false)
     lastCustomerLookupPhoneRef.current = null
     setScheduledTime("asap")
+    setKitchenNote("")
+    setKitchenNoteOpen(false)
+    kitchenNoteDirtyRef.current = false
   }, [posOrderId])
 
   useEffect(() => {
@@ -1505,7 +1518,7 @@ export function OrderForm({
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, cash_amount, card_amount, comment, scheduled_time, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
+          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, cash_amount, card_amount, comment, kitchen_note, scheduled_time, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
         )
         .eq("id", posOrderId)
         .maybeSingle()
@@ -1532,6 +1545,7 @@ export function OrderForm({
         cash_amount: number | null
         card_amount: number | null
         comment: string | null
+        kitchen_note: string | null
         scheduled_time: string | null
         promo_code: string | null
         address_entrance: string | null
@@ -1604,6 +1618,9 @@ export function OrderForm({
             ? raw.scheduled_time.trim()
             : "asap",
         )
+        setKitchenNote(raw.kitchen_note ?? "")
+        setKitchenNoteOpen(Boolean(raw.kitchen_note?.trim()))
+        kitchenNoteDirtyRef.current = false
         if (!cancelled) {
           setOrderPrep({ loading: false, error: null })
           setStep(1)
@@ -1660,6 +1677,9 @@ export function OrderForm({
           ? raw.scheduled_time.trim()
           : "asap",
       )
+      setKitchenNote(raw.kitchen_note ?? "")
+      setKitchenNoteOpen(Boolean(raw.kitchen_note?.trim()))
+      kitchenNoteDirtyRef.current = false
 
       if (!cancelled) {
         setOrderPrep({ loading: false, error: null })
@@ -2390,6 +2410,7 @@ export function OrderForm({
             ? (values.cardAmount ?? null)
             : null,
         comment: values.comment?.trim() || undefined,
+        kitchen_note: kitchenNote.trim() || null,
         promoCode: promoCode?.trim() || undefined,
         discount: totalDiscountBani,
         discountRulesApplied: JSON.stringify(eng.appliedDiscounts ?? []),
@@ -2438,6 +2459,7 @@ export function OrderForm({
       listOrder,
       bonusRedeemTouched,
       scheduledTime,
+      kitchenNote,
     ],
   )
 
@@ -4098,6 +4120,39 @@ export function OrderForm({
                       </FormItem>
                     )}
                   />
+                  {/* Kitchen note toggle */}
+                  {!kitchenNoteOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => setKitchenNoteOpen(true)}
+                      className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <ChefHat className="size-4" />
+                      + Комментарий повару
+                    </button>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <ChefHat className="size-4" />
+                        Комментарий повару
+                      </label>
+                      <Textarea
+                        value={kitchenNote}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          kitchenNoteDirtyRef.current = true
+                          setKitchenNote(v)
+                          patchDetailsCardAndScheduleSave({
+                            kitchen_note: v.trim() ? v : null,
+                          })
+                        }}
+                        placeholder="Видит только кухня..."
+                        rows={2}
+                        className="resize-none text-sm"
+                        autoFocus
+                      />
+                    </div>
+                  )}
                 </FormSection>
 
                 {submitError ? (

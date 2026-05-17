@@ -61,6 +61,8 @@ export type PosOrder = {
   /** Пункты лояльности (1 п. ≈ 1 MDL списано с суммы перед сохранением `total`). */
   bonuses_redeemed: number
   comment: string | null
+  /** Комментарий повара (только POS → кухня). */
+  kitchen_note: string | null
   /** Предзаказ: `asap`, время `HH:MM` или ISO; для KDS см. `isKdsScheduledOrder` */
   scheduled_time: string | null
   created_at: string

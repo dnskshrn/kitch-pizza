@@ -12,7 +12,7 @@ import {
 } from "@/components/pos/kds/types"
 import { isKdsCardActive } from "@/lib/pos/kds-wakeup"
 import { cn } from "@/lib/utils"
-import { Clock, Timer } from "lucide-react"
+import { ChefHat, Clock, Timer } from "lucide-react"
 import { motion } from "motion/react"
 import { useEffect, useRef, useState } from "react"
 
@@ -286,6 +286,14 @@ export function KdsOrderCard({
         ) : null}
 
         <div className="flex min-h-[72px] flex-col gap-2 pb-2 pt-3">
+          {order.kitchen_note ? (
+            <div className="flex items-start gap-2 rounded-lg bg-yellow-400/90 px-3 py-2 text-black">
+              <ChefHat className="mt-0.5 size-4 shrink-0" />
+              <span className="text-sm font-semibold leading-snug">
+                {order.kitchen_note}
+              </span>
+            </div>
+          ) : null}
           {items.map((line) => (
             <KdsLineItem key={line.id} line={line} />
           ))}

@@ -2,9 +2,11 @@
 
 import {
   evaluateStorefrontCartDiscount,
+  getOrderedExcludedDiscountCategoriesInCart,
 } from "@/components/client/cart/storefront-cart-pricing"
 import {
   formatMoney,
+  formatStorefrontExcludedCategoryList,
   goodsPhrase,
   pickLocalizedName,
   promoErrorMessage,
@@ -33,6 +35,8 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { CartItemCard } from "./CartItemCard"
+import { StorefrontDiscountExcludedNotice } from "./storefront-discount-excluded-notice"
+import { StorefrontPromoExcludedWarning } from "./storefront-promo-excluded-warning"
 import {
   LososUpsellCategoryStrip,
   LososUpsellSlidePanel,
@@ -128,22 +132,56 @@ export function CartContent({
     deliveryZoneForEngine,
   ])
 
-  const excludedCategoriesInCart = useMemo(() => {
-    if (
-      storefrontEngineOutput == null ||
-      storefrontEngineOutput.totalDiscountBani === 0
-    ) {
-      return []
-    }
+  const excludedCategoriesOrderedForNotice = useMemo(() => {
     if (!pricingBootstrap) return []
-    const inCart = new Set(items.map((i) => i.menuItem.category_id))
-    return pricingBootstrap.storefrontExcludedDiscountCategories.filter((c) =>
-      inCart.has(c.id),
+    return getOrderedExcludedDiscountCategoriesInCart(
+      items,
+      pricingBootstrap.excludedDiscountCategoryIds,
+      pricingBootstrap.storefrontExcludedDiscountCategories,
     )
+  }, [items, pricingBootstrap])
+
+  const hasActiveAutoRules =
+    (pricingBootstrap?.discountAutoRules.length ?? 0) > 0
+
+  const engineTotalDiscountBani =
+    storefrontEngineOutput?.totalDiscountBani ?? 0
+
+  const excludedDiscountNotice = useMemo(() => {
+    if (excludedCategoriesOrderedForNotice.length === 0) return null
+    if (engineTotalDiscountBani > 0) {
+      return {
+        mode: "partial" as const,
+        categories: excludedCategoriesOrderedForNotice,
+      }
+    }
+    if (hasActiveAutoRules && engineTotalDiscountBani === 0) {
+      return {
+        mode: "zero" as const,
+        categories: excludedCategoriesOrderedForNotice,
+      }
+    }
+    return null
   }, [
-    storefrontEngineOutput,
-    items,
-    pricingBootstrap,
+    excludedCategoriesOrderedForNotice,
+    hasActiveAutoRules,
+    engineTotalDiscountBani,
+  ])
+
+  const promoExcludedCategoryWarningText = useMemo(() => {
+    if (appliedPromo == null || engineTotalDiscountBani !== 0) return null
+    if (excludedCategoriesOrderedForNotice.length === 0) return null
+    const names = excludedCategoriesOrderedForNotice.map((c) =>
+      lang === "RU" ? c.name_ru : c.name_ro,
+    )
+    const list = formatStorefrontExcludedCategoryList(names, lang)
+    return t.cart.promoAcceptedButExcluded(list)
+  }, [
+    appliedPromo,
+    engineTotalDiscountBani,
+    excludedCategoriesOrderedForNotice,
+    lang,
+    t.cart,
   ])
 
   const discount = useMemo(() => {
@@ -337,26 +375,33 @@ export function CartContent({
         <section className="shrink-0 pb-4 pt-1" aria-label={t.cart.promoAndDetails}>
           <div className="storefront-modal-surface storefront-modal-card-radius rounded-[20px] p-4">
             {appliedPromo ? (
-              <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
-                <Check
-                  className="storefront-modal-accent size-5 shrink-0"
-                  strokeWidth={2.5}
-                  aria-hidden
-                />
-                <p className="min-w-0 flex-1 text-sm font-medium text-[#242424]">
-                  {t.cart.promoApplied(appliedPromo.code)}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    removePromo()
-                    setCodeInput("")
-                  }}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/10"
-                  aria-label={t.cart.removePromo}
-                >
-                  <X className="size-4" strokeWidth={2.5} />
-                </button>
+              <div className="flex flex-col gap-2">
+                <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
+                  <Check
+                    className="storefront-modal-accent size-5 shrink-0"
+                    strokeWidth={2.5}
+                    aria-hidden
+                  />
+                  <p className="min-w-0 flex-1 text-sm font-medium text-[#242424]">
+                    {t.cart.promoApplied(appliedPromo.code)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      removePromo()
+                      setCodeInput("")
+                    }}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#242424] transition-colors hover:bg-black/10"
+                    aria-label={t.cart.removePromo}
+                  >
+                    <X className="size-4" strokeWidth={2.5} />
+                  </button>
+                </div>
+                {promoExcludedCategoryWarningText ? (
+                  <StorefrontPromoExcludedWarning
+                    message={promoExcludedCategoryWarningText}
+                  />
+                ) : null}
               </div>
             ) : (
               <div className="flex flex-col gap-2">
@@ -407,25 +452,11 @@ export function CartContent({
                   </span>
                 </div>
               ) : null}
-              {excludedCategoriesInCart.length > 0 ? (
-                <div className="flex flex-col gap-1 mt-1">
-                  {excludedCategoriesInCart.map((cat) => (
-                    <div
-                      key={cat.id}
-                      className="flex items-start gap-1.5 text-xs text-[#808080]"
-                    >
-                      <span className="mt-0.5 shrink-0">ℹ️</span>
-                      <span>
-                        {`Скидка не применяется на «${cat.name_ru}»`}
-                        {cat.name_ro && cat.name_ro !== cat.name_ru ? (
-                          <span className="ml-1 opacity-70">
-                            {`/ Reducerea nu se aplică la «${cat.name_ro}»`}
-                          </span>
-                        ) : null}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+              {excludedDiscountNotice ? (
+                <StorefrontDiscountExcludedNotice
+                  categories={excludedDiscountNotice.categories}
+                  mode={excludedDiscountNotice.mode}
+                />
               ) : null}
               {showBonusAccrualRow ? (
                 <div className="flex items-center justify-between text-sm">

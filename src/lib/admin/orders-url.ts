@@ -1,21 +1,13 @@
-import type { OrderStatus } from "@/types/database"
-
 export const ORDERS_PAGE_SIZE = 50
 
-const ORDER_STATUSES = [
-  "draft",
-  "new",
-  "confirmed",
-  "cooking",
-  "ready",
-  "delivery",
-  "done",
-  "cancelled",
-  "rejected",
-] as const satisfies readonly OrderStatus[]
+export type OrdersStatusGroup = "all" | "active" | "done" | "cancelled"
+
+export type OrdersSourceChannel = "all" | "website" | "pos" | "glovo"
 
 export type OrdersUrlState = {
-  status: OrderStatus | null
+  statusGroup: OrdersStatusGroup
+  brandId: string | null
+  sourceChannel: OrdersSourceChannel
   dateFrom: string | null
   dateTo: string | null
   timeFrom: string | null
@@ -23,6 +15,20 @@ export type OrdersUrlState = {
   search: string | null
   page: number
 }
+
+const STATUS_GROUPS: readonly OrdersStatusGroup[] = [
+  "all",
+  "active",
+  "done",
+  "cancelled",
+]
+
+const SOURCE_CHANNELS: readonly OrdersSourceChannel[] = [
+  "all",
+  "website",
+  "pos",
+  "glovo",
+]
 
 function first(
   v: string | string[] | undefined,
@@ -36,6 +42,17 @@ function parseYmd(s: string | undefined): string | null {
   return s
 }
 
+/** Ключа в query нет → сегодня (UTC); пустое/битое значение → null (без подстановки). */
+function resolveOrdersDateRaw(
+  value: string | string[] | undefined,
+  todayYmd: string,
+): string | null {
+  if (value === undefined) return todayYmd
+  const s = first(value)
+  if (s === undefined) return todayYmd
+  return parseYmd(s)
+}
+
 /** HH:mm, часы 0–23 */
 function parseHm(s: string | undefined): string | null {
   if (!s) return null
@@ -47,15 +64,57 @@ function parseHm(s: string | undefined): string | null {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+/** Начало суток UTC для YYYY-MM-DD */
+function startOfDayUtcIso(dateYmd: string): string {
+  return `${dateYmd}T00:00:00.000Z`
+}
+
+/** Сегодня по UTC в формате YYYY-MM-DD (для метрик «за сегодня»). */
+export function utcTodayYmd(): string {
+  const d = new Date()
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0")
+  const day = String(d.getUTCDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
+/**
+ * То же правило для `URLSearchParams.get`: `null` (параметра нет) → сегодня UTC,
+ * пустая строка → без подстановки (`null`).
+ */
+export function resolveOrdersDatesFromSearchParamGets(
+  dateFromGet: string | null,
+  dateToGet: string | null,
+): { dateFrom: string | null; dateTo: string | null } {
+  const todayYmd = utcTodayYmd()
+  return {
+    dateFrom:
+      dateFromGet === null ? todayYmd : parseYmd(dateFromGet),
+    dateTo: dateToGet === null ? todayYmd : parseYmd(dateToGet),
+  }
+}
+
 export function parseOrdersSearchParams(
   raw: Record<string, string | string[] | undefined>,
 ): OrdersUrlState {
-  const statusRaw = first(raw.status)
-  const status =
-    statusRaw &&
-    (ORDER_STATUSES as readonly string[]).includes(statusRaw)
-      ? (statusRaw as OrderStatus)
-      : null
+  const sgRaw = first(raw.status_group)
+  const statusGroup: OrdersStatusGroup =
+    sgRaw && (STATUS_GROUPS as readonly string[]).includes(sgRaw)
+      ? (sgRaw as OrdersStatusGroup)
+      : "active"
+
+  const brandRaw = first(raw.brand_id)?.trim()
+  const brandId =
+    brandRaw && UUID_RE.test(brandRaw) ? brandRaw : null
+
+  const chRaw = first(raw.order_src)
+  const sourceChannel: OrdersSourceChannel =
+    chRaw && (SOURCE_CHANNELS as readonly string[]).includes(chRaw)
+      ? (chRaw as OrdersSourceChannel)
+      : "all"
 
   const pageRaw = first(raw.page)
   const parsedPage = parseInt(pageRaw ?? "1", 10)
@@ -65,10 +124,14 @@ export function parseOrdersSearchParams(
   const searchRaw = first(raw.search)?.trim()
   const search = searchRaw ? searchRaw : null
 
+  const todayYmd = utcTodayYmd()
+
   return {
-    status,
-    dateFrom: parseYmd(first(raw.date_from)),
-    dateTo: parseYmd(first(raw.date_to)),
+    statusGroup,
+    brandId,
+    sourceChannel,
+    dateFrom: resolveOrdersDateRaw(raw.date_from, todayYmd),
+    dateTo: resolveOrdersDateRaw(raw.date_to, todayYmd),
     timeFrom: parseHm(first(raw.time_from)),
     timeTo: parseHm(first(raw.time_to)),
     search,
@@ -76,9 +139,9 @@ export function parseOrdersSearchParams(
   }
 }
 
-/** Начало суток UTC для YYYY-MM-DD */
-function startOfDayUtcIso(dateYmd: string): string {
-  return `${dateYmd}T00:00:00.000Z`
+/** Начало текущих суток по UTC (00:00:00.000Z). */
+export function startOfUtcTodayIso(): string {
+  return startOfDayUtcIso(utcTodayYmd())
 }
 
 /** Конец суток UTC (включительно) */

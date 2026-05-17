@@ -79,6 +79,7 @@ export type Database = {
           address_intercom: string | null
           aggregator: "glovo" | null
           prep_deadline_at: string | null
+          ready_at: string | null
         }
         Insert: {
           id?: string
@@ -109,6 +110,7 @@ export type Database = {
           address_intercom?: string | null
           aggregator?: "glovo" | null
           prep_deadline_at?: string | null
+          ready_at?: string | null
         }
         Update: {
           id?: string
@@ -139,6 +141,7 @@ export type Database = {
           address_intercom?: string | null
           aggregator?: "glovo" | null
           prep_deadline_at?: string | null
+          ready_at?: string | null
         }
         Relationships: []
       }

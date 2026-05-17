@@ -182,27 +182,38 @@ export type OrderStatus =
   | "cancelled"
   | "rejected"
 
-export type DeliveryMode = "delivery" | "pickup"
+export type DeliveryMode = "delivery" | "pickup" | "aggregator"
 
-export type PaymentMethod = "cash" | "card"
+export type PaymentMethod = "cash" | "card" | "aggregator_card" | "mixed"
 
 export interface Order {
   id: string
   order_number: number
+  brand_id: string | null
+  operator_id: string | null
+  profile_id?: string | null
   user_name: string | null
   user_phone: string | null
   status: OrderStatus
+  /** Канал оформления: витрина или POS. */
+  source?: string | null
   delivery_mode: DeliveryMode
+  aggregator?: "glovo" | null
   delivery_address: string | null
   payment_method: PaymentMethod
+  cash_amount?: number | null
+  card_amount?: number | null
   change_from: number | null
   total: number
   delivery_fee: number
   discount: number
+  bonuses_redeemed?: number
   promo_code: string | null
   scheduled_time: string | null
   /** Заполняется при переходе в `cooking` (триггер в БД); для таймера KDS */
   cooking_started_at?: string | null
+  /** KDS: переход `cooking` → `ready` */
+  ready_at: string | null
   comment: string | null
   tg_message_id: string | null
   created_at: string
@@ -215,6 +226,8 @@ export interface Order {
   courier_id: string | null
   courier_assigned_at: string | null
   delivered_at: string | null
+  /** Момент оплаты (POS / агрегатор); для расчёта времени исполнения. */
+  paid_at?: string | null
   delivery_lat: number | null
   delivery_lng: number | null
 }
@@ -234,6 +247,11 @@ export interface OrderItem {
 
 export interface OrderWithItems extends Order {
   order_items: OrderItem[]
+  /** Join `brands` при выборке списка заказов в админке. */
+  brands?: { name: string; slug?: string | null } | Array<{
+    name: string
+    slug?: string | null
+  }> | null
 }
 
 export type CourierLocation = {

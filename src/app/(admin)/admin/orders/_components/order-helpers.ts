@@ -1,5 +1,5 @@
 import { format, parseISO } from "date-fns"
-import type { OrderItem, OrderStatus } from "@/types/database"
+import type { OrderItem, OrderStatus, PaymentMethod } from "@/types/database"
 
 export function formatLei(bani: number): string {
   return (bani / 100).toLocaleString("ro-MD", {
@@ -65,8 +65,31 @@ export function statusBadgeClass(s: OrderStatus): string {
   }
 }
 
-export function paymentLabel(m: "cash" | "card"): string {
-  return m === "cash" ? "Наличные" : "Карта"
+export function paymentLabel(m: PaymentMethod): string {
+  switch (m) {
+    case "cash":
+      return "Наличные"
+    case "card":
+      return "Карта"
+    case "aggregator_card":
+      return "Карта агрегатора"
+    case "mixed":
+      return "Смешанная оплата"
+    default:
+      return String(m)
+  }
+}
+
+/** Длительность между `created_at` и конечной меткой времени (мс). */
+export function formatDurationRu(createdAtIso: string, endTimeMs: number): string {
+  const start = parseISO(createdAtIso).getTime()
+  const ms = Math.max(0, endTimeMs - start)
+  const totalMin = Math.floor(ms / 60000)
+  const h = Math.floor(totalMin / 60)
+  const m = totalMin % 60
+  if (h > 0 && m > 0) return `${h} ч ${m} мин`
+  if (h > 0) return `${h} ч`
+  return `${m} мин`
 }
 
 export function sizeRu(size: string | null): string {

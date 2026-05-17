@@ -475,10 +475,15 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
 
   const order = orderRow as PayOrderLoadedRow
 
-  const canPayFromReadyGlovo =
-    order.status === "ready" && order.delivery_mode === "aggregator"
-  if (order.status !== "delivery" && !canPayFromReadyGlovo) {
-    return { data: null, error: "invalid_order_status" }
+  const canPayOrder =
+    order.status === "delivery" ||
+    (order.status === "ready" && order.delivery_mode === "aggregator") ||
+    (order.status === "ready" && order.delivery_mode === "pickup")
+  if (!canPayOrder) {
+    return {
+      data: null,
+      error: `Нельзя оплатить заказ со статусом "${order.status}" (режим: ${order.delivery_mode ?? "—"})`,
+    }
   }
   if (order.paid_at != null) {
     return { data: null, error: "already_paid" }
@@ -517,7 +522,7 @@ export async function payOrder(input: PayOrderInput): Promise<PayOrderResult> {
     orderPatch.payment_method = "cash"
   }
 
-  const expectedPayStatus = canPayFromReadyGlovo ? "ready" : "delivery"
+  const expectedPayStatus = order.status === "delivery" ? "delivery" : "ready"
 
   const { data: updatedOrders, error: updOrderErr } = await supabase
     .from("orders")

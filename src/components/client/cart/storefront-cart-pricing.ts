@@ -79,3 +79,27 @@ export function evaluateStorefrontCartDiscount(
         : undefined,
   })
 }
+
+export function getOrderedExcludedDiscountCategoriesInCart(
+  items: CartItem[],
+  excludedDiscountCategoryIds: string[],
+  storefrontExcludedDiscountCategories: Array<{
+    id: string
+    name_ru: string
+    name_ro: string
+  }>,
+): Array<{ id: string; name_ru: string; name_ro: string }> {
+  const excl = new Set(excludedDiscountCategoryIds)
+  const idOrder: string[] = []
+  for (const item of items) {
+    const cid = item.menuItem.category_id
+    if (!cid || !excl.has(cid)) continue
+    if (!idOrder.includes(cid)) idOrder.push(cid)
+  }
+  const byId = new Map(
+    storefrontExcludedDiscountCategories.map((c) => [c.id, c]),
+  )
+  return idOrder
+    .map((id) => byId.get(id))
+    .filter((c): c is NonNullable<typeof c> => c != null)
+}

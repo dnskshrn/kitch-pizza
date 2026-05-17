@@ -6,126 +6,132 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
+/**
+ * API `/api/admin/bonus/adjust` требует непустой `staff_id` для поля `created_by`.
+ * `staffId` передаётся с сервера (первый активный сотрудник).
+ */
 export function BonusAdjustForm({
   profileId,
   staffId,
 }: {
   profileId: string
-  staffId: string
+  staffId: string | null
 }) {
   const router = useRouter()
-  const [kind, setKind] = useState<"manual_add" | "manual_deduct">("manual_add")
+  const [type, setType] = useState<"add" | "deduct">("add")
   const [amount, setAmount] = useState("")
-  const [reason, setReason] = useState("")
-  const [pending, setPending] = useState(false)
+  const [note, setNote] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
+    setError(null)
+
     if (!staffId) {
-      toast.error("Нет staff_id для аудита (добавьте сотрудника в staff)")
+      setError(
+        "Нет сотрудника для аудита корректировки. Добавьте активного сотрудника в staff.",
+      )
       return
     }
+
     const n = Number.parseInt(amount, 10)
     if (!Number.isFinite(n) || n < 1) {
-      toast.error("Укажите целое число от 1")
-      return
-    }
-    const note = reason.trim()
-    if (note.length < 3) {
-      toast.error("Причина не короче 3 символов")
+      setError("Укажите целое число от 1")
       return
     }
 
-    const delta = kind === "manual_add" ? n : -n
+    const noteTrim = note.trim()
+    if (noteTrim === "") {
+      setError("Комментарий обязателен")
+      return
+    }
 
-    setPending(true)
+    const payload = {
+      profile_id: profileId,
+      amount: type === "add" ? n : -n,
+      type: type === "add" ? "manual_add" : "manual_deduct",
+      note: noteTrim,
+      staff_id: staffId,
+    }
+
+    setLoading(true)
     try {
       const res = await fetch("/api/admin/bonus/adjust", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          profile_id: profileId,
-          amount: delta,
-          note,
-          staff_id: staffId,
-        }),
+        body: JSON.stringify(payload),
       })
       const data = (await res.json()) as { error?: string }
       if (!res.ok) {
-        toast.error(data.error ?? "Ошибка")
+        setError(data.error ?? "Не удалось применить корректировку")
         return
       }
-      toast.success("Применено")
+      toast.success("Бонусы обновлены")
       setAmount("")
-      setReason("")
+      setNote("")
+      setError(null)
       router.refresh()
     } catch {
-      toast.error("Сеть недоступна")
+      setError("Сеть недоступна")
     } finally {
-      setPending(false)
+      setLoading(false)
     }
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      className="flex flex-wrap items-end gap-3 rounded-lg border border-[#f2f2f2] bg-white p-4"
-    >
-      <div className="space-y-1.5">
-        <Label className="text-xs text-[#808080]">Операция</Label>
-        <Select
-          value={kind}
-          onValueChange={(v) =>
-            setKind(v === "manual_deduct" ? "manual_deduct" : "manual_add")
-          }
+    <form onSubmit={onSubmit} className="space-y-4 rounded-md border p-4">
+      <div className="space-y-2">
+        <Label className="text-muted-foreground">Операция</Label>
+        <Tabs
+          value={type}
+          onValueChange={(v) => setType(v === "deduct" ? "deduct" : "add")}
         >
-          <SelectTrigger className="w-[180px] border-[#808080]/30">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="manual_add">Начислить</SelectItem>
-            <SelectItem value="manual_deduct">Списать</SelectItem>
-          </SelectContent>
-        </Select>
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="add">Начислить</TabsTrigger>
+            <TabsTrigger value="deduct">Списать</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs text-[#808080]">Сумма (пункты)</Label>
-        <Input
-          type="number"
-          min={1}
-          step={1}
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          className="w-[120px] border-[#808080]/30"
-          required
-        />
+
+      <div className="grid gap-4 sm:grid-cols-2 sm:items-end">
+        <div className="space-y-2">
+          <Label htmlFor="bonus-amount">Сумма (бонусов)</Label>
+          <Input
+            id="bonus-amount"
+            type="number"
+            min={1}
+            step={1}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            disabled={loading}
+          />
+        </div>
+        <div className="space-y-2 sm:col-span-2">
+          <Label htmlFor="bonus-note">Комментарий</Label>
+          <Input
+            id="bonus-note"
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            disabled={loading}
+            placeholder="Обязательно"
+          />
+        </div>
       </div>
-      <div className="min-w-[200px] flex-1 space-y-1.5">
-        <Label className="text-xs text-[#808080]">Причина</Label>
-        <Input
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          minLength={3}
-          placeholder="Не короче 3 символов"
-          className="border-[#808080]/30"
-          required
-        />
-      </div>
-      <Button
-        type="submit"
-        disabled={pending || !staffId}
-        className="bg-[#ccff00] text-[#242424] hover:bg-[#ccff00]/90"
-      >
-        {pending ? "…" : "Применить"}
+
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Button type="submit" disabled={loading || !staffId}>
+        {loading ? "…" : "Применить"}
       </Button>
     </form>
   )

@@ -1,16 +1,8 @@
-import Link from "next/link"
 import { createServiceSupabaseClient } from "@/lib/supabase/server"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Search } from "lucide-react"
+import { AdminCustomersTable } from "./customers-table"
 
 export const dynamic = "force-dynamic"
 
@@ -26,27 +18,6 @@ function parseQ(
   const t = typeof s === "string" ? s.trim() : ""
   if (t === "") return { display: "", rpc: null }
   return { display: t, rpc: t }
-}
-
-function formatDateDdMmYyyy(raw: string | null): string {
-  if (raw == null || raw === "") return "—"
-  const d = new Date(raw)
-  if (Number.isNaN(d.getTime())) return "—"
-  return d.toLocaleDateString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  })
-}
-
-function formatLtvMdlFromBani(bani: number): string {
-  if (!Number.isFinite(bani)) return "—"
-  const lei = bani / 100
-  const formatted = lei.toLocaleString("ro-MD", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
-  return `${formatted} MDL`
 }
 
 type ListRow = {
@@ -135,57 +106,7 @@ export default async function AdminCustomersPage({ searchParams }: PageProps) {
           Клиентов пока нет
         </p>
       ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Телефон</TableHead>
-                <TableHead>Имя</TableHead>
-                <TableHead className="text-right">Заказов</TableHead>
-                <TableHead className="text-right">LTV (MDL)</TableHead>
-                <TableHead className="text-right">Бонусов</TableHead>
-                <TableHead>Первый заказ</TableHead>
-                <TableHead>Последний заказ</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="font-mono tabular-nums">
-                    <Link
-                      href={`/admin/customers/${row.id}`}
-                      className="text-foreground underline-offset-4 hover:underline"
-                    >
-                      {row.phone ?? "—"}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    {row.name != null && row.name.trim() !== ""
-                      ? row.name
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {row.order_count}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatLtvMdlFromBani(row.ltv)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {Number.isFinite(row.bonus_balance)
-                      ? Math.round(row.bonus_balance)
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {formatDateDdMmYyyy(row.first_order_at)}
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {formatDateDdMmYyyy(row.last_order_at)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <AdminCustomersTable rows={rows} />
       )}
     </>
   )

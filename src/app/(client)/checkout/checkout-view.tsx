@@ -6,13 +6,14 @@ import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
 import { OrderSummary } from "@/components/client/checkout/order-summary"
 import { CheckoutSkeleton } from "@/components/client/storefront-skeletons"
-import { promoErrorMessage, type StorefrontMessages } from "@/lib/i18n/storefront"
+import { promoErrorMessage, formatStorefrontExcludedCategoryList, type StorefrontMessages } from "@/lib/i18n/storefront"
 import {
   selectCartItemCount,
   selectCartSubtotal,
   useCartStore,
 } from "@/lib/store/cart-store"
-import { evaluateStorefrontCartDiscount } from "@/components/client/cart/storefront-cart-pricing"
+import { evaluateStorefrontCartDiscount, getOrderedExcludedDiscountCategoriesInCart } from "@/components/client/cart/storefront-cart-pricing"
+import { StorefrontPromoExcludedWarning } from "@/components/client/cart/storefront-promo-excluded-warning"
 import { useAuthStore } from "@/lib/store/auth-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
@@ -345,13 +346,53 @@ export function CheckoutView({
     deliveryZoneForEngine,
   ])
 
-  const excludedCategoriesInCart = useMemo(() => {
-    if (!engineOutput || engineOutput.totalDiscountBani === 0) return []
-    const inCart = new Set(items.map((i) => i.menuItem.category_id))
-    return pricingBootstrap.storefrontExcludedDiscountCategories.filter((c) =>
-      inCart.has(c.id),
+  const excludedCategoriesOrderedForNotice = useMemo(() => {
+    return getOrderedExcludedDiscountCategoriesInCart(
+      items,
+      pricingBootstrap.excludedDiscountCategoryIds,
+      pricingBootstrap.storefrontExcludedDiscountCategories,
     )
-  }, [engineOutput, items, pricingBootstrap.storefrontExcludedDiscountCategories])
+  }, [items, pricingBootstrap])
+
+  const hasActiveAutoRules = pricingBootstrap.discountAutoRules.length > 0
+  const engineTotalDiscountBani = engineOutput.totalDiscountBani
+
+  const excludedDiscountNotice = useMemo(() => {
+    if (excludedCategoriesOrderedForNotice.length === 0) return null
+    if (engineTotalDiscountBani > 0) {
+      return {
+        mode: "partial" as const,
+        categories: excludedCategoriesOrderedForNotice,
+      }
+    }
+    if (hasActiveAutoRules && engineTotalDiscountBani === 0) {
+      return {
+        mode: "zero" as const,
+        categories: excludedCategoriesOrderedForNotice,
+      }
+    }
+    return null
+  }, [
+    excludedCategoriesOrderedForNotice,
+    hasActiveAutoRules,
+    engineTotalDiscountBani,
+  ])
+
+  const promoExcludedCategoryWarningText = useMemo(() => {
+    if (appliedPromo == null || engineTotalDiscountBani !== 0) return null
+    if (excludedCategoriesOrderedForNotice.length === 0) return null
+    const names = excludedCategoriesOrderedForNotice.map((c) =>
+      lang === "RU" ? c.name_ru : c.name_ro,
+    )
+    const list = formatStorefrontExcludedCategoryList(names, lang)
+    return t.cart.promoAcceptedButExcluded(list)
+  }, [
+    appliedPromo,
+    engineTotalDiscountBani,
+    excludedCategoriesOrderedForNotice,
+    lang,
+    t.cart,
+  ])
 
   const discount = Math.min(
     subtotal,
@@ -918,30 +959,37 @@ export function CheckoutView({
               <span className={checkoutLabelTop}>{t.checkout.promoTitle}</span>
               <div className="min-w-0 flex-1">
                 {appliedPromo ? (
-                  <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
-                    <Check
-                      className="storefront-modal-accent size-5 shrink-0"
-                      strokeWidth={2.5}
-                      aria-hidden
-                    />
-                    <p className="min-w-0 flex-1 text-sm font-medium text-[#242424]">
-                      {t.cart.promoApplied(appliedPromo.code)}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        removePromo()
-                        setPromoInput("")
-                      }}
-                      className={cn(
-                        "flex size-9 shrink-0 items-center justify-center rounded-full text-[#242424] hover:bg-black/10",
-                        btnMotion,
-                        "active:scale-95",
-                      )}
-                      aria-label={t.cart.removePromo}
-                    >
-                      <X className="size-4" strokeWidth={2.5} />
-                    </button>
+                  <div className="flex flex-col gap-2">
+                    <div className="storefront-modal-field flex items-center gap-2 rounded-[12px] px-3 py-3">
+                      <Check
+                        className="storefront-modal-accent size-5 shrink-0"
+                        strokeWidth={2.5}
+                        aria-hidden
+                      />
+                      <p className="min-w-0 flex-1 text-sm font-medium text-[#242424]">
+                        {t.cart.promoApplied(appliedPromo.code)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          removePromo()
+                          setPromoInput("")
+                        }}
+                        className={cn(
+                          "flex size-9 shrink-0 items-center justify-center rounded-full text-[#242424] hover:bg-black/10",
+                          btnMotion,
+                          "active:scale-95",
+                        )}
+                        aria-label={t.cart.removePromo}
+                      >
+                        <X className="size-4" strokeWidth={2.5} />
+                      </button>
+                    </div>
+                    {promoExcludedCategoryWarningText ? (
+                      <StorefrontPromoExcludedWarning
+                        message={promoExcludedCategoryWarningText}
+                      />
+                    ) : null}
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2">
@@ -1099,7 +1147,7 @@ export function CheckoutView({
               outOfZone={outOfZone}
               grandTotal={checkoutGrandTotalBani}
               bonusesRedeemed={bonusesRedeemed}
-              excludedCategoriesNotice={excludedCategoriesInCart}
+              excludedDiscountNotice={excludedDiscountNotice}
               onCheckout={handleSubmit}
               checkoutSubmitting={orderSubmitting}
               checkoutError={orderSubmitError}

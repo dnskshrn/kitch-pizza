@@ -5,6 +5,7 @@ import {
   getCartItemSummary,
   type CartLang,
 } from "@/lib/cart-helpers"
+import { StorefrontDiscountExcludedNotice } from "@/components/client/cart/storefront-discount-excluded-notice"
 import { formatMoney, goodsPhrase, pickLocalizedName } from "@/lib/i18n/storefront"
 import { getStorefrontDeliveryLineDisplay } from "@/lib/storefront-delivery-display"
 import { useLanguage } from "@/lib/store/language-store"
@@ -20,12 +21,11 @@ const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
 
 export type OrderSummaryProps = {
   lang: CartLang
-  /** Подписи исключённых из скидок категорий (товары из них есть при totalDiscount > 0). */
-  excludedCategoriesNotice?: Array<{
-    id: string
-    name_ru: string
-    name_ro: string
-  }>
+  /** Пояснение про категории без авто-скидки (корзина / checkout). */
+  excludedDiscountNotice?: {
+    mode: "zero" | "partial"
+    categories: Array<{ id: string; name_ru: string; name_ro: string }>
+  } | null
   items: CartItem[]
   itemCount: number
   subtotal: number
@@ -48,7 +48,7 @@ export type OrderSummaryProps = {
 
 export function OrderSummary({
   lang,
-  excludedCategoriesNotice,
+  excludedDiscountNotice = null,
   items,
   itemCount,
   subtotal,
@@ -176,25 +176,12 @@ export function OrderSummary({
             </span>
           </div>
         ) : null}
-        {(excludedCategoriesNotice ?? []).length > 0 ? (
-          <div className="flex flex-col gap-1 mt-1">
-            {(excludedCategoriesNotice ?? []).map((cat) => (
-              <div
-                key={cat.id}
-                className="flex items-start gap-1.5 text-xs text-[#808080]"
-              >
-                <span className="mt-0.5 shrink-0">ℹ️</span>
-                <span>
-                  {`Скидка не применяется на «${cat.name_ru}»`}
-                  {cat.name_ro && cat.name_ro !== cat.name_ru ? (
-                    <span className="ml-1 opacity-70">
-                      {`/ Reducerea nu se aplică la «${cat.name_ro}»`}
-                    </span>
-                  ) : null}
-                </span>
-              </div>
-            ))}
-          </div>
+        {excludedDiscountNotice != null &&
+        excludedDiscountNotice.categories.length > 0 ? (
+          <StorefrontDiscountExcludedNotice
+            categories={excludedDiscountNotice.categories}
+            mode={excludedDiscountNotice.mode}
+          />
         ) : null}
         {bonusesRedeemed > 0 ? (
           <div className="flex items-center justify-between text-[14px] font-medium">

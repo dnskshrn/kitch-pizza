@@ -44,6 +44,7 @@ export async function updateOrderStatusKds(
       .update({
         status: "ready",
         updated_at: updatedAt,
+        ready_at: new Date().toISOString(),
       })
       .eq("id", orderId)
       .eq("status", "cooking")

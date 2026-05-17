@@ -71,6 +71,7 @@ export type PosOrder = {
   address_intercom: string | null
   aggregator: "glovo" | null
   prep_deadline_at: string | null
+  ready_at: string | null
   courier_id: string | null
   /** Имя из `staff` при непустом `courier_id`; подгружается в `fetchPosOrders`. */
   courier_name: string | null

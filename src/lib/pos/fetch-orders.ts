@@ -4,7 +4,7 @@ import type { PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 
 /** Колонки `orders` + вложения для списка/карточек POS (без несуществующих полей). */
 const ORDERS_POS_SELECT =
-  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, brands(slug), order_items(count)"
+  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, ready_at, brands(slug), order_items(count)"
 
 /** Активные заказы левой колонки POS (без завершённых, отмен и отказов сайта). */
 export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
@@ -54,6 +54,7 @@ export type OrderRow = {
   profile_id?: string | null
   aggregator?: "glovo" | null
   prep_deadline_at?: string | null
+  ready_at?: string | null
 }
 
 function brandSlugFromRow(row: OrderRow): string {
@@ -224,6 +225,7 @@ export function mapOrderRowToPosOrder(
     courier_name: courierName,
     aggregator: row.aggregator ?? null,
     prep_deadline_at: row.prep_deadline_at ?? null,
+    ready_at: row.ready_at ?? null,
     profile_id:
       typeof row.profile_id === "string" && row.profile_id.trim()
         ? row.profile_id.trim()

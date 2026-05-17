@@ -53,6 +53,26 @@ export function formatMoneyValue(bani: number): string {
   })
 }
 
+/** Список категорий в «ёлочках» для подписей про исключения из авто-скидок. */
+export function formatStorefrontExcludedCategoryList(
+  names: string[],
+  lang: Lang,
+): string {
+  const parts = names.map((s) => s.trim()).filter(Boolean)
+  if (parts.length === 0) return ""
+  if (parts.length === 1) return `«${parts[0]}»`
+  const andW = lang === "RO" ? "și" : "и"
+  if (parts.length === 2) {
+    return `«${parts[0]}» ${andW} «${parts[1]}»`
+  }
+  const last = parts[parts.length - 1]!
+  const head = parts
+    .slice(0, -1)
+    .map((p) => `«${p}»`)
+    .join(", ")
+  return `${head} ${andW} «${last}»`
+}
+
 export function formatWeightGrams(grams: number, lang: Lang): string {
   return lang === "RO" ? `${grams}g` : `${grams}гр`
 }
@@ -176,6 +196,12 @@ export const messages = {
       remove: "Удалить",
       decrease: "Уменьшить количество",
       increase: "Увеличить количество",
+      discountDoesNotApplyTo: (categoryList: string) =>
+        `Скидка не распространяется на ${categoryList}`,
+      discountNotAppliedTo: (categoryList: string) =>
+        `Скидка не применена к ${categoryList}`,
+      promoAcceptedButExcluded: (categoryList: string) =>
+        `Промокод принят, но не применён к ${categoryList} — на эти позиции скидка не действует`,
     },
     promoErrors: {
       not_found: "Промокод не найден",
@@ -404,6 +430,12 @@ export const messages = {
       remove: "Șterge",
       decrease: "Micșorează cantitatea",
       increase: "Mărește cantitatea",
+      discountDoesNotApplyTo: (categoryList: string) =>
+        `Reducerea nu se aplică la ${categoryList}`,
+      discountNotAppliedTo: (categoryList: string) =>
+        `Reducerea nu a fost aplicată la ${categoryList}`,
+      promoAcceptedButExcluded: (categoryList: string) =>
+        `Codul promoțional este acceptat, dar nu se aplică la ${categoryList}`,
     },
     promoErrors: {
       not_found: "Promocodul nu a fost găsit",

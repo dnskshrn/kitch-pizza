@@ -19,9 +19,14 @@ export type CreateDraftOrderOptions = {
 export async function createDraftOrder(
   options?: CreateDraftOrderOptions,
 ): Promise<CreateDraftOrderResult> {
-  const staff = await getCurrentStaff()
-  if (!staff) {
-    return { success: false, error: "Сессия кассира недействительна" }
+  let operator_id: string | null = null
+  try {
+    const staff = await getCurrentStaff()
+    if (staff) {
+      operator_id = staff.id
+    }
+  } catch {
+    operator_id = null
   }
 
   let supabase
@@ -66,7 +71,7 @@ export async function createDraftOrder(
       .insert({
         status: "new" as const,
         source: "pos" as const,
-        operator_id: staff.id,
+        operator_id,
         total: 0,
         delivery_mode: "aggregator" as const,
         aggregator: "glovo" as const,
@@ -98,7 +103,7 @@ export async function createDraftOrder(
       .insert({
         status: "new" as const,
         source: "pos" as const,
-        operator_id: staff.id,
+        operator_id,
         total: 0,
         delivery_mode: options?.deliveryMode ?? ("delivery" as const),
         payment_method: "cash" as const,

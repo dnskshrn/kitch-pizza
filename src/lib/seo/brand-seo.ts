@@ -1,5 +1,3 @@
-import type { Metadata } from 'next'
-
 export interface BrandSeoConfig {
   title: string
   titleRo: string

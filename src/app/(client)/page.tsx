@@ -1,3 +1,4 @@
+import type { Metadata } from "next"
 import { ClientContainer } from "@/components/client/client-container"
 import { FeaturedMenuSection } from "@/components/client/featured-menu-section"
 import { MenuCategoryBar } from "@/components/client/menu-category-bar"
@@ -6,7 +7,18 @@ import { PromotionsSlider } from "@/components/client/promotions-slider"
 import { getStorefrontFeaturedMenuItems } from "@/lib/data/storefront-featured-menu"
 import { getStorefrontMenu } from "@/lib/data/storefront-menu"
 import { getStorefrontPromotions } from "@/lib/data/storefront-promotions"
+import { getBrandSeo } from "@/lib/seo/brand-seo"
 import { headers } from "next/headers"
+
+export async function generateMetadata(): Promise<Metadata> {
+  const brandSlug = (await headers()).get("x-brand-slug") ?? "kitch-pizza"
+  const seo = getBrandSeo(brandSlug)
+
+  return {
+    title: seo.titleRo,
+    description: seo.descriptionRo,
+  }
+}
 
 function isBoutiqueBrand(brandSlug: string): boolean {
   return (

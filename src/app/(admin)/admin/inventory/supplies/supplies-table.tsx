@@ -13,6 +13,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Plus } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 import {
   SupplyOrderDialog,
   type SupplyOrderViewModel,
@@ -106,6 +108,7 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
             <TableHead className="text-right">Кол-во позиций</TableHead>
             <TableHead className="text-right">Сумма без НДС</TableHead>
             <TableHead className="text-right">Сумма с НДС</TableHead>
+            <TableHead className="w-[120px]">Статус</TableHead>
             <TableHead className="w-28 text-right" />
           </TableRow>
         </TableHeader>
@@ -113,7 +116,7 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
           {orders.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={6}
+                colSpan={7}
                 className="text-muted-foreground text-center"
               >
                 Пока нет поставок
@@ -122,29 +125,65 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
           ) : filteredOrders.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={6}
+                colSpan={7}
                 className="text-muted-foreground text-center"
               >
                 Ничего не найдено
               </TableCell>
             </TableRow>
           ) : (
-            filteredOrders.map((o) => (
-              <TableRow key={o.id}>
-                <TableCell className="font-medium">
+            filteredOrders.map((o) => {
+              const isAnnulled = o.annulled_at != null
+              return (
+              <TableRow
+                key={o.id}
+                className={cn(
+                  isAnnulled && "bg-muted/50 text-muted-foreground",
+                )}
+              >
+                <TableCell
+                  className={cn("font-medium", isAnnulled && "line-through")}
+                >
                   {o.delivery_date.slice(0, 10)}
                 </TableCell>
-                <TableCell>
+                <TableCell className={cn(isAnnulled && "line-through")}>
                   {supplierNameById[o.supplier_id] ?? "—"}
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
+                <TableCell
+                  className={cn(
+                    "text-right tabular-nums",
+                    isAnnulled && "line-through",
+                  )}
+                >
                   {o.items.length}
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
+                <TableCell
+                  className={cn(
+                    "text-right tabular-nums",
+                    isAnnulled && "line-through",
+                  )}
+                >
                   {formatMdlTable(o.total_cost_ex_vat)} лей
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
+                <TableCell
+                  className={cn(
+                    "text-right tabular-nums",
+                    isAnnulled && "line-through",
+                  )}
+                >
                   {formatMdlTable(o.total_cost_inc_vat)} лей
+                </TableCell>
+                <TableCell>
+                  {isAnnulled ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-zinc-200 text-zinc-700 hover:bg-zinc-200"
+                    >
+                      Аннулирована
+                    </Badge>
+                  ) : (
+                    <span className="text-muted-foreground text-xs">Активна</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-right">
                   <Button
@@ -156,7 +195,7 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
                   </Button>
                 </TableCell>
               </TableRow>
-            ))
+            )})
           )}
         </TableBody>
       </Table>

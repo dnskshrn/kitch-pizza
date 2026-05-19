@@ -17,6 +17,7 @@ import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
 import { nextSelectedToppingIdsWithGroupCap } from "@/lib/topping-max-selection"
 import type { MenuItem, MenuItemVariant, Topping } from "@/types/database"
+import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
 import { cn } from "@/lib/utils"
 import { X } from "lucide-react"
 import Image from "next/image"
@@ -426,7 +427,7 @@ export function ProductModalRoot() {
         {panelItem.image_url ? (
           <Image
             src={panelItem.image_url}
-            alt=""
+            alt={menuItemImageAlt(panelItem.name_ro)}
             fill
             className="object-contain"
             sizes="(max-width: 768px) 70vw, 580px"

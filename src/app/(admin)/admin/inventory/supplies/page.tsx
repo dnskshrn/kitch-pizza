@@ -21,6 +21,7 @@ type RawSupplyOrderRow = {
   note: string | null
   total_cost_ex_vat: number | string | null
   total_cost_inc_vat: number | string | null
+  annulled_at: string | null
   suppliers: unknown
   supply_order_items: RawSupplyItemRow[] | null
 }
@@ -62,6 +63,7 @@ function toSupplyOrderViewModel(row: RawSupplyOrderRow): SupplyOrderViewModel {
     supplier_id: row.supplier_id ?? "",
     delivery_date: row.delivery_date,
     note: row.note,
+    annulled_at: row.annulled_at,
     total_cost_ex_vat:
       row.total_cost_ex_vat != null ? Number(row.total_cost_ex_vat) : null,
     total_cost_inc_vat:
@@ -84,6 +86,7 @@ export default async function AdminInventorySuppliesPage() {
         note,
         total_cost_ex_vat,
         total_cost_inc_vat,
+        annulled_at,
         suppliers ( name ),
         supply_order_items (
           id,

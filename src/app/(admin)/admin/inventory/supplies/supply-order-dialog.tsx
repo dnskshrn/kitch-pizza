@@ -9,7 +9,8 @@ import {
   toStoragePrice,
   toStorageQty,
 } from "@/lib/inventory-units"
-import { createSupplyOrder } from "./actions"
+import { useRouter } from "next/navigation"
+import { createSupplyOrder, annulSupplyOrder } from "./actions"
 import { IngredientCombobox } from "./ingredient-combobox"
 import { Button } from "@/components/ui/button"
 import {
@@ -38,6 +39,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Trash2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
 function round4(value: number): number {
   return Math.round(value * 10000) / 10000
@@ -88,6 +91,7 @@ export type SupplyOrderViewModel = {
   supplier_id: string
   delivery_date: string
   note: string | null
+  annulled_at: string | null
   total_cost_ex_vat: number | null
   total_cost_inc_vat: number | null
   items: {
@@ -150,11 +154,15 @@ export function SupplyOrderDialog({
   ingredients,
   supplierNameById = {},
 }: SupplyOrderDialogProps) {
+  const router = useRouter()
   const [supplierId, setSupplierId] = useState("")
   const [deliveryDate, setDeliveryDate] = useState(todayLocalISODate())
   const [note, setNote] = useState("")
   const [rows, setRows] = useState<EditableRow[]>([emptyRow()])
   const [pending, startTransition] = useTransition()
+  const [annulPending, startAnnulTransition] = useTransition()
+
+  const isAnnulled = mode === "view" && order?.annulled_at != null
 
   const activeSuppliers = useMemo(
     () => suppliers.filter((s) => s.is_active),
@@ -362,6 +370,24 @@ export function SupplyOrderDialog({
     })
   }
 
+  function handleAnnul() {
+    if (!order || isAnnulled) return
+    const ok = window.confirm(
+      "Аннулировать поставку? Остатки будут уменьшены на полученные количества. Запись останется в списке как аннулированная.",
+    )
+    if (!ok) return
+
+    startAnnulTransition(async () => {
+      try {
+        await annulSupplyOrder(order.id)
+        onOpenChange(false)
+        router.refresh()
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Не удалось аннулировать поставку")
+      }
+    })
+  }
+
   const viewSupplierLabel =
     mode === "view" && order
       ? supplierNameById[order.supplier_id] ?? "—"
@@ -378,10 +404,25 @@ export function SupplyOrderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[92vh] !w-[calc(100vw-16px)] !max-w-[1280px] flex-col gap-0 overflow-hidden p-0 sm:!max-w-[calc(100vw-32px)] xl:!w-[1280px] xl:!max-w-[1280px]">
         <DialogHeader className="border-b px-6 py-4">
-          <DialogTitle>{title}</DialogTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <DialogTitle>{title}</DialogTitle>
+            {isAnnulled ? (
+              <Badge
+                variant="secondary"
+                className="bg-zinc-200 text-zinc-700 hover:bg-zinc-200"
+              >
+                Аннулирована
+              </Badge>
+            ) : null}
+          </div>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6",
+            isAnnulled && "opacity-80",
+          )}
+        >
           <div className="mb-4 grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label>Поставщик</Label>
@@ -645,11 +686,35 @@ export function SupplyOrderDialog({
           </div>
         </div>
 
-        <DialogFooter className="border-t px-6 py-4 sm:justify-end">
+        <DialogFooter
+          className={cn(
+            "border-t px-6 py-4",
+            readOnly ? "sm:justify-between" : "sm:justify-end",
+          )}
+        >
           {readOnly ? (
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Закрыть
-            </Button>
+            <>
+              {!isAnnulled ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={handleAnnul}
+                  disabled={annulPending}
+                >
+                  {annulPending ? "Аннулирование…" : "Аннулировать поставку"}
+                </Button>
+              ) : (
+                <span className="text-muted-foreground text-sm">
+                  Поставка аннулирована
+                  {order?.annulled_at
+                    ? ` · ${order.annulled_at.slice(0, 16).replace("T", " ")}`
+                    : ""}
+                </span>
+              )}
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Закрыть
+              </Button>
+            </>
           ) : (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>

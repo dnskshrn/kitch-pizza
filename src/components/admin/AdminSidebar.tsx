@@ -31,6 +31,7 @@ import {
   Megaphone,
   FolderTree,
   Images,
+  Coins,
 } from "lucide-react"
 import { brands } from "@/brands"
 import { BrandSwitcher } from "@/components/admin/brand-switcher"
@@ -179,6 +180,18 @@ const generalNavGroups: NavGroup[] = [
         href: "/admin/finance/ledger",
         label: "История движений",
         icon: ArrowLeftRight,
+      },
+    ],
+  },
+  {
+    id: "cash-sessions",
+    label: "Касса",
+    icon: Coins,
+    items: [
+      {
+        href: "/admin/finance/cash-sessions",
+        label: "Касса",
+        icon: Coins,
       },
     ],
   },

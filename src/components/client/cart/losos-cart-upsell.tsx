@@ -18,6 +18,7 @@ import {
 import { Minus, Plus, X } from "lucide-react"
 import Image from "next/image"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
 import { cn } from "@/lib/utils"
 
 function localizedCategoryName(cat: Category, lang: Lang): string {
@@ -127,7 +128,7 @@ function UpsellMenuRow({
           {item.image_url ? (
             <Image
               src={item.image_url}
-              alt=""
+              alt={menuItemImageAlt(item.name_ro)}
               fill
               className="object-cover"
               sizes="48px"

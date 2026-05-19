@@ -53,7 +53,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="ru"
+      lang="ro"
       className={cn(inter.variable, robotoMono.variable)}
       style={{ colorScheme: "light" }}
       suppressHydrationWarning

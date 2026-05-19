@@ -1,370 +1,670 @@
-# Kitch! Food Delivery
+# Food Service / Kitch POS
 
-Краткая техническая памятка по проекту: multi-brand витрина доставки еды, админка и POS в одном Next.js приложении.
+Multi-brand витрина доставки еды, админка и POS в одном Next.js приложении.
 
-## Что это
+## Бренды
 
-- **Витрины:** `kitch-pizza`, `losos`, `the-spot`.
-- **Админка:** `/admin/*`, Supabase Auth, CRUD контента и заказов. Корень **`/admin`** (**`admin/page.tsx`**) перенаправляет на **`/admin/orders`**.
-- **POS:** `/pos/*`, **двухшаговый вход**: **`/pos/manager-login`** (**Supabase Auth**) и **`/pos/login`** (**PIN**, кука **`pos-session`**) — в **`middleware`** для них **не** вызывается **`getUser`** (только заголовки бренда); для остальных **`/pos/*`** — Supabase-сессия + валидный **`pos-session`**. Смены, создание и редактирование заказов; новые строки через **`createDraftOrderPos`** в **`orders`** сразу **`status: 'new'`**, **`source: 'pos'`** (имя функции сохранено); **новый заказ Glovo (агрегатор)** в **`idle`** — **`OrderTypeSelectModal`** (`src/components/pos/order-type-select-modal.tsx`, три кнопки) → **`createDraftOrderPos({ deliveryMode: 'aggregator' })`**: в **`orders`** уходит **`delivery_mode: 'aggregator'`**, **`aggregator: 'glovo'`**, **`payment_method: 'aggregator_card'`**, **`prep_deadline_at`** (ISO, ~+15 мин от создания); **входящий звонок (ОАТС)** — **`useIncomingCall`** + shadcn **Dialog** в **`PosAppShell`** (**«Создать заказ»** → **`createDraftOrderPos`** с полями из звонка, мост **`pos-order-from-call-bridge`** регистрируется в **`/pos/page.tsx`**); **KDS** — `/pos/kds` (**`cooking`**, join **`brands.slug`**). В шапке — **`CourierMapModal`** (**`courier_locations`** при **`is_on_shift`**). **Касса:** до доступа к POS после входа обязательна **открытая кассовая смена** на текущий **`shift_logs`**: в **`src/app/pos/layout.tsx`** вызываются **`ensureActiveShift`** (возвращает **`id`** смены и **`clock_in`**) и проверка **`cash_sessions`** со статусом **`open`**; без сессии показывается блокирующий экран **`CashSessionGate`** (стартовый остаток, **`openCashSession`** с записью **`created_by_staff_id`** у транзакции **`opening`**). В **`PosAppShell`** контент страниц обёрнут в **`CashSessionProvider`** (**`cashSessionId`**, **`staffId`**) — **`OrderForm`** и **`OrderDetail`** открывают **`PayOrderModal`** (**`payOrder`** в **`cash-session.ts`**): оплата разрешена только в трёх случаях — **`status === 'delivery'`**, или (**`status === 'ready'`** и **`delivery_mode === 'aggregator'`**), или (**`status === 'ready'`** и **`delivery_mode === 'pickup'`**); кнопка **«Принять оплату»** (**`showPayOrderCta`** в **`order-form.tsx`**) совпадает с этим; для **`ready` + обычная доставка** сначала **«Назначить курьера»** → **`delivery`**; запись в **`cash_transactions`**; **Glovo** (**`delivery_mode: 'aggregator'`**) — оплата при **`ready`** (без **`delivery`**); при оплате **картой Glovo** в **`orders.payment_method`** сохраняется **`aggregator_card`**, строка в **`cash_transactions`** **не** создаётся; **наличные Glovo** — одна транзакция **`order_payment`** как обычно. **Split-оплата** (**`payment_method: 'mixed'`**, только не агрегатор): в **`orders`** **`cash_amount`** и **`card_amount`** (бани, оба > 0); при оплате **`payOrder`** вставляет **две** строки **`cash_transactions`** (**`order_payment`**: нал + карта) по суммам из заказа; в **`PayOrderModal`** (**`pay-order-modal.tsx`**) без переключателя нал/карта для split: если **`mixed`** и обе суммы переданы через пропы **`cashAmount`/`cardAmount`** (> 0) — сводка «наличные / карта» (MDL), иначе короткая подсказка про оплату частями; в **`payOrder`** при split в action уходит заглушка **`payment_method: 'cash'`**, сервер берёт суммы из строки **`orders`**. В шапке — меню **`PosActionsMenu`** (⋯): **«Создать транзакцию»** (**`CreateTransactionModal`**, **`createCashTransaction`**), **«Данные смены»** (**`ShiftDataModal`**, **`getCashSession`**), **«Закрыть смену»** (**`CloseShiftModal`**: **`closeCashSession`**, **`closeShift`**, **`logout`**, **`supabase.auth.signOut()`**, редирект на **`/pos`**). Server actions кассы — **`cash-session.ts`** (**`openCashSession`**, **`getCashSession`**, **`createCashTransaction`**, **`closeCashSession`**, **`payOrder`**) — таблицы и поля заказов см. ниже.
-- **Валюта:** MDL; витрина, заказы и POS: суммы в БД — **integer bani**, в UI — lei. **Склад:** суммы в заказах поставок (`supply_orders`, строки позиций) и **средневзвешенная себестоимость** в **`ingredient_stock.avg_cost`** хранятся как **numeric** в реальных MDL (не бани) — см. типы в `src/types/database.ts` и миграции. У **`ingredients`** отдельного поля закупной цены нет; учёт ведётся через остатки и поставки.
-- **Склад в админке (UI vs БД):** количества для **`g`** и **`ml`** в базе по-прежнему в **граммах** и **миллилитрах**; **`pcs`** — без масштаба. В интерфейсе разделов **`/admin/inventory/*`** (остатки, поставки, списания, инвентаризация, таблица ингредиентов и списка полуфабрикатов и т.п.) пользователь вводит и видит **кг** и **л** (и **шт**), цены закупки/себестоимости — **MDL за кг / л / шт**. Конвертация только на клиенте и в точках сохранения соответствующих диалогов: хелперы **`src/lib/inventory-units.ts`** (`toDisplayQty` / `toStorageQty`, `toDisplayPrice` / `toStoragePrice`, `displayUnit`). Схема БД и серверные actions не меняют единицу хранения. **Исключение:** редактор техкарт **`RecipeEditorModal`**, диалог состава полуфабриката **`semi-finished-dialog.tsx`**, таблица **`RecipeIngredientSemiCompositionTable`** в модалке топпинга (**`topping-dialog.tsx`**) работают **напрямую в г / мл / шт** (как в БД), без **`toDisplayQty`/`toStorageQty`**; количества в инпутах — строки (**`recipe-editor-qty.ts`**, пересчёт нетто↔брутто — **`recipe-composition-row-updates.ts`**, **`onBlur`** — нормализация или `""`). Для строк **«Блюдо (комбо)»** в **`RecipeEditorModal`** в БД **`quantity = 1`**, **`menu_item_ref_*`**; г/мл/шт не вводятся — для выбранного блюда показывается **read-only превью** состава вложенного рецепта (см. таблицу **`/admin/menu`**).
-- **Языки витрины:** RU / RO через Zustand store и поля `*_ru` / `*_ro`; **язык по умолчанию — RO** (`DEFAULT_LANG` в `src/lib/i18n/storefront.ts`, persist key `lang` в localStorage).
-- **Техработы витрины (опционально):** в **`src/app/(client)/layout.tsx`** константа **`MAINTENANCE_MODE`**. При **`true`** — только **`MaintenanceScreen`**, **`AuthInitializer`** (однократный **`fetchMe`**) и **`MetaPixel`** (**`brand.metaPixelId`**); **`StorefrontTopBar`** и **`ClientChrome`** не монтируются. При **`false`** перед **`ClientChrome`** рендерится **`StorefrontTopBar`**, **`ClientChrome`** монтирует **`AuthInitializer`** и **`AuthModal`** вне условных веток; **`MetaPixel`** подключён в обеих ветках. Полноэкранный текст «Закрыто на обновление» / RO-локализация, переключатель **RU/RO** пишет в **`localStorage`** тот же ключ **`lang`**, что и **`useLanguageStore`**. **Маршруты `/pos` и `/admin`** не используют этот гейт. **Актуальное значение флага** — только в исходнике **`layout.tsx`** (не дублировать здесь).
+- `kitch-pizza` (домен `kitch.md`)
+- `losos` (домен `losos.md`, путь `/losos` на localhost)
+- `the-spot` (домен `thespot.md`, путь `/thespot` на localhost; в URL — `thespot` без дефиса, канон в конфиге — `the-spot`)
+
+Канонический конфиг: `src/brands/index.ts`. Нормализация slug — `normalizePosBrandSlug` + `getBrandBySlug`.
 
 ## Стек
 
 | Область | Используется |
 |---|---|
 | Framework | Next.js 14 App Router, React 18, TypeScript |
-| Styling | Tailwind CSS v4, shadcn/ui, Radix UI, `tw-animate-css` |
-| Data | Supabase PostgreSQL, Auth, Storage, Realtime |
+| Styling | Tailwind v4, shadcn/ui, Radix UI |
+| Data | Supabase (PostgreSQL, Auth, Storage, Realtime) |
 | State | Zustand |
-| Forms / validation | React Hook Form, Zod |
-| Maps | Leaflet, Leaflet Draw, **react-leaflet** (карта курьеров в POS только client-side через `next/dynamic`, `ssr: false`), Nominatim |
-| POS auth | Supabase Auth (менеджерский вход) + `jose` JWT + `bcryptjs` PIN |
-| UI extras | Sonner, Swiper, Vaul, Lucide, Motion, web-haptics, **cmdk** (Command/combobox для админки), **DiceBear** (**`@dicebear/core`**, **`@dicebear/thumbs`**) — детерминированные SVG-аватары по **`profile.id`** |
-| Lint | ESLint (**`next lint`**), **`.eslintrc.json`**: extends **`next/core-web-vitals`**, **`next/typescript`**; **`@typescript-eslint/no-explicit-any`**: **`warn`** |
+| Forms | React Hook Form + Zod |
+| Maps | Leaflet, Leaflet Draw, react-leaflet, Nominatim |
+| POS Auth | Supabase Auth + `jose` JWT + `bcryptjs` PIN |
+| UI extras | Sonner, Vaul, Swiper, cmdk, DiceBear (`@dicebear/core`, `@dicebear/thumbs`) |
 
-## Архитектура
+ESLint: `next/core-web-vitals`, `next/typescript`; `@typescript-eslint/no-explicit-any: warn`.
 
-```txt
+## Структура
+
+```
 src/
 ├── app/
-│   ├── (client)/        # публичная витрина, checkout, **аккаунт** (`account/page.tsx`); **`layout.tsx`**: **`MetaPixel`**, **`MAINTENANCE_MODE`**, резолв бренда по **`x-brand-slug`**
-│   ├── (admin)/admin/   # админка; `layout.tsx` + `AdminShell` / `AdminSidebar` (shadcn offcanvas); `loading.tsx` на корне; **`page.tsx`** → **`redirect('/admin/orders')`**; **`customers/`** (список из RPC **`admin_customers_list`**, поиск **`?q=`**, строка таблицы кликабельна → деталь **`/admin/customers/[id]`** через клиентский **`customers-table.tsx`**; **`customers/[id]`** — RSC: **`Promise.all`** профиль, сумма **`bonus_transactions`**, последние транзакции и заказы; **`bonus-adjust-form.tsx`** → **`POST /api/admin/bonus/adjust`**, **`staff_id`** с сервера); **`settings/bonus/`** — **`page.tsx`** (RSC) + **`bonus-settings-form.tsx`** + **`updateBonusSettings`**; **`discount-rules/`** (справочник **`discount_rules`**: RSC + **`promotions-client`**, **`rule-dialog`**, **`rule-search-comboboxes`**, **`actions.ts`** — **`saveRule`** / **`deleteRule`** / **`toggleRuleActive`**, service role); `staff/` (сотрудники + `staff/shifts` — история смен, service role); `inventory/` (справочник **`ingredient-categories`**; списания **`writeoffs`**, инвентаризации **`audits`** + **`audits/[id]`** — карточка строк; техкарты **`tech-cards`** — read-only обзор; ссылка **«История движений»** → `finance/ledger`); `finance/ledger` (журнал **`stock_ledger`**); **`orders/`** (**`page.tsx`** RSC: **`export const dynamic = 'force-dynamic'`**, **`Promise.all`** (**`getOrders`**, **`getAdminOrdersTodayMetrics`**, **`getBrands`**); метрики «за сегодня» (сутки UTC, при **`brand_id`** в URL — по бренду) — **`lib/admin/orders-today-metrics.ts`**, карточки **`orders-day-metrics.tsx`** над **`filters-bar`**; **`orders-url.ts`**: **`status_group`**, **`brand_id`**, **`order_src`**, **`search`**, даты (**без параметров **`date_from`/`date_to`** в URL — дефолт **«сегодня»** UTC, **`utcTodayYmd`** / **`resolveOrdersDateRaw`** в **`parseOrdersSearchParams`**; пустое значение в query — без подстановки; отображение в **`filters-bar`** через **`resolveOrdersDatesFromSearchParamGets`**); клиент **`orders-client`**: **`selectedOrderId`** + shadcn **`Sheet`** **`order-detail-sheet.tsx`**; **`filters-bar`**, **`orders-table`** (**`BrandLogoCell`**, см. **`components/admin/orders/brand-logo-cell.tsx`**; **`getOrders`**: **`brands(name, slug)`**; статусы цветными pills; **«Состав»** — счётчик позиций без раскрытия; активные **`new`…`delivery`** — фон строки **#F2FFBC**) — клик по строке открывает шторку; **`actions.ts`**: **`fetchAdminOrderDetail`** — service role, **`orders` + `*`** и join **`brands`**, **`order_items`** (в т.ч. **`is_gift`**), **`operator`/`courier`** → **`staff`**, **`profiles`**); `menu/`; `promotions/` (галерея баннеров **`promotions`**); `legacy-menu-sizes.ts`
-│   ├── pos/             # **`manager-login/page.tsx`**, `layout.tsx` (логин / `ensureActiveShift` + проверка `cash_sessions`, гейт `CashSessionGate`), `login/page.tsx`, `page.tsx`, `kds/page.tsx` — оболочка **`PosAppShell`**, заказы + KDS
-│   ├── api/             # upload, storefront phone auth, **`bonus/`** (`settings`, `balance`), **`admin/bonus/`** (`adjust` POST — корректировка бонусов; `settings` GET — настройки для админки при необходимости), **`account/`** (`orders` GET, `profile` PATCH), **`avatar/[profileId]`** (GET SVG DiceBear `thumbs`, кэш 1y); **`pbx-webhook`** (legacy MoldCell → **`incoming_calls`**, маппинг линии **`diversion` / `called` / `to` → `brand_slug`** через **`lib/pbx/diversion-brand-slug.ts`**), **`pbx/incoming`** (ОАТС: **`contact` / `event` / `history`**, запись **`pbx_calls`** + **`brand_slug`** для **`contact`** и **`event`**); `telegram/route.ts` — webhook курьерского бота (смены, привязка `/start`, геолокация)
-│   ├── globals.css      # глобальные стили, токены, keyframes (в т.ч. `storefront-cart-trigger-pulse`)
-│   └── layout.tsx       # root layout, шрифты, фавикон бренда; **`export const viewport`** (**`interactiveWidget: 'resizes-visual'`** — iOS + клавиатура над Vaul drawer)
-├── brands/              # BrandConfig и host -> brand; поля **`metaPixelId`**, **`hours`**, **`openHour`/`closeHour`** (часы для слотов предзаказа POS / KDS-порог «пробуждения»); палитры и ключи корзины/доставки
+│   ├── (client)/        # витрина, checkout, account
+│   ├── (admin)/admin/   # админка
+│   ├── pos/             # POS + KDS
+│   ├── api/             # REST endpoints
+│   ├── robots.ts, sitemap.ts
+│   ├── globals.css
+│   └── layout.tsx       # root, <html lang="ro">
+├── brands/              # BrandConfig + host→brand
 ├── components/
-│   ├── MetaPixel.tsx    # Meta (Facebook) Pixel (**`next/script`** **`afterInteractive`**), проп **`pixelId`**
-│   ├── client/          # витрина, корзина, checkout; **`cart/storefront-cart-pricing.ts`** — сборка **`CartItemForEngine`** и **`evaluateDiscounts`** для корзины/checkout; **`cart/storefront-discount-excluded-notice.tsx`**, **`cart/storefront-promo-excluded-warning.tsx`** (подсказки по исключённым категориям скидок и промокоду при нулевой сумме скидки); **`storefront-top-bar.tsx`** — сервисная полоса (**`<lg`**: фикс. белая панель, часы **`StorefrontTopBarSchedule` с пропом `brandSlug`** — строка **`BrandConfig.hours`**, телефон / вход по **`openAuth()`** или аватар + имя → аккаунт, **`z-10`** ниже оверлея **`AuthModal`**; **`lg+`** скрыта из DOM); экспорты **`StorefrontTopBarSchedule`**, **`StorefrontDesktopAuthStrip`** для острова **`MainHeader`** (на **`lg+`** у **`Schedule` тот же **`brandSlug`**); **`avatar.tsx`** — **`img`** → **`/api/avatar/{profileId}`**; **`bonus-redeem-block.tsx`** — списание бонусов на checkout, строки **`bonus.*`** в **`storefront.ts`**; **`account-nav-link.tsx`** — ссылка «аккаунт» (икона **`User`**); **`client/auth/`** — **`AuthModal`** (Vaul при ширине ≤1023px, shadcn Dialog на десктопе, **`t.auth.modal`**), **`auth-initializer`**, **`auth-button`**
-│   ├── admin/           # AdminShell, brand-switcher, sidebar nav; `inventory-search.tsx`; **`orders/brand-logo-cell.tsx`** (лого в **`/admin/orders`**); `menu/RecipeEditorModal.tsx` — редактор **`product_recipes`**; общие **`RecipeNameCombobox.tsx`**, **`RecipeIngredientSemiCompositionTable.tsx`** (состав топпинга; нетто/брутто через **`recipe-composition-row-updates.ts`**); `staff/StaffClient.tsx`, `staff/ShiftsClient.tsx`
-│   ├── pos/             # `pos-app-shell` (**`CashSessionGate`**, **`CashSessionProvider`**, **Dialog** входящего звонка (**`useIncomingCall`**, Realtime **`pbx_calls`**, **`Создать заказ`** → мост **`pos-order-from-call-bridge`**), карта → **`CourierMapModal`**, **`PosActionsMenu`** → модалки кассы/смены, **`pay-order-modal`** (плашка **«Заказ Glovo»**, **`isAggregatorOrder`**; **`payOrder`**: для Glovo **`aggregator_card`** без **`cash_transactions`**, на вход modal/action передаётся переключатель **`cash`/`card`**; для **`mixed`** без переключателя нал/карта — сводка «наличные / карта» при пропах **`cashAmount`/`cardAmount`** с заказа, иначе короткая подсказка; две строки **`cash_transactions`** ставит **`payOrder`** по полям **`orders`**), **`cash-session-context`**), **`order-type-select-modal`** (idle: доставка / навынос / Glovo); **`scheduled-time-picker`** (время доставки на шаге «Детали» при **`delivery_mode === delivery`**); `kds/` (`kds-screen`, `kds-order-card`, `types` — выборка KDS + **`scheduled_time`**, **`delivery_mode`**, **`aggregator`**, фильтр **`kds_workshops`**, тик **`wakeTick`/**`isKdsCardActive` для «спящих» предзаказов, кнопка **Bell**); **`AssignCourierModal`** (назначение/смена курьера только из мастера; уведомление курьеру — **`courier-telegram-message`**: текст заказа + Telegram **`sendLocation`** при координатах, эмодзи оплаты **💳**/**💵**, сумма **💰**; в **`orders.courier_tg_*`** — ссылка на первое текстовое сообщение для **`editMessageText`**); **`promo-panel`** (**`seedPromoCode`**, **`skipSeedResolve`** для сохранённого промокода с витрины), **`discount-breakdown`**; панели, мастер, карточки списка (read-only статус/курьер)
-│   └── ui/              # shadcn/ui: `sidebar`, `collapsible`, `popover`, `command` (cmdk), `breadcrumb`, и др.
+│   ├── client/          # витрина, корзина, checkout, auth
+│   ├── admin/           # AdminShell, sidebar, inventory, cash-sessions
+│   ├── pos/             # PosAppShell, OrderForm, KdsScreen и др.
+│   ├── seo/JsonLd.tsx
+│   ├── MetaPixel.tsx
+│   └── ui/              # shadcn
 ├── lib/
-│   ├── actions/         # server actions; **`admin/bonus-settings-action.ts`**; **`inventory/ingredient-categories.ts`** (CRUD **`ingredient_categories`**, service role); `staff/staff-actions.ts`; **`discounts.ts`** (**`getActiveDiscountRules`**, **`resolvePromoCode`**, **`getStorefrontCartPricingBootstrap`** — авто-правила, **`excludedDiscountCategoryIds`**, **`storefrontExcludedDiscountCategories`** с именами категорий для подсказок в корзине/checkout); `pos/` т.ч. **`assign-courier-pos`** (`assignCourierPos`, `changeCourierPos`), **`update-order-details-pos`** (в т.ч. **`scheduled_time`** при доставке **`asap`/`HH:MM`**, **`user_name`** nullable; **Glovo**: необязательные контакты, **`delivery_address`** null; поля **`cash_amount`**, **`card_amount`**, **`payment_method`** вкл. **`mixed`**), **`create-draft-order.ts`** (**`createDraftOrderPos`**, опционально **`scheduledTime`** в INSERT), **`updateOrderDeliveryModePos`** при переходе на pickup сбрасывает **`scheduled_time`**), `cash-session`, KDS, **`customers-pos-actions.ts`** (**`posLookupCustomer`** — баланс + параллельно **`bonus_settings.max_redemption_rate`** (`id=1`), дефолт **0.3** при сбое; **`posSaveCustomer`**, **`posSaveCustomerAddress`** — проверка **`getCurrentStaff`**)
-│   ├── telegram/        # `bot.ts` — вызовы Telegram Bot API с **`TELEGRAM_COURIER_BOT_TOKEN`** (вебхук `/api/telegram`, опционально иные сценарии с тем же ботом); **`sendMessage(chatId, text, replyMarkup?)`** возвращает **`message_id`**, **`sendLocation(chatId, lat, lng, replyToMessageId?)`** (точка на карте курьеру, опционально **`reply_to_message_id`** к карточке заказа), **`editMessageText(chatId, messageId, text, replyMarkup?)`**
-│   ├── brand-phone.ts   # номер для витрины + tel:, из BrandConfig
-│   ├── data/            # storefront fetchers (меню с `menu_item_variants`); **`storefront-categories.ts`** — активные **`menu_categories`** для витрины, в т.ч. **`exclude_from_discounts`**
-│   ├── i18n/
-│   ├── topping-max-selection.ts  # лимит выбора топпингов по группе (витрина + POS)
-│   ├── order-item-size-display.ts # подпись размера в списках (исторические `s`/`l` vs текст варианта)
-│   ├── pos/
-│   │   ├── alert-sound.ts # общий unlock/play звука POS/KDS: `playPosNewOrderSound()` для новых заказов (WebAudio + fallback `/pos-new-order-chime.wav`) и `playPosStatusUpdateSound()` для KDS/смены статуса; кнопки Bell в POS/KDS должны быть нажаты на устройстве для Chrome/Android autoplay
-│   │   ├── menu-item-modal-row.ts # выборка меню для POS-модалки и `posMenuRowForModal`
-│   │   ├── pos-brand-slug-cookie.ts # cookie `pos-brand-slug` (активный бренд POS/KDS, path `/pos`)
-│   │   ├── use-incoming-call.ts # Realtime **`INSERT`** на **`pbx_calls`** (`cmd === 'event'`), **`INCOMING`** → догрузка **`profile_id`**, **`brand_slug`**, имени с contact-строки того же **`callid`**
-│   │   ├── scheduled-slots.ts # **`generateScheduledSlots`** — слоты **`HH:MM`** для POS (буфер, шаг, ночная смена **`closeHour ≤ openHour`**)
-│   │   ├── kds-wakeup.ts # **`isKdsCardActive`** — до какого момента карточка KDS «спит» относительно **`scheduled_time`** и **`delivery_mode`**
-│   │   └── split-composite-delivery-address.ts # разбор составной `delivery_address` (витрина) в поля улицы + подъезд/этаж/кв./домофон для формы POS; режим **`aggregator`** ведёт себя как доставка (не самовывоз)
-│   ├── admin-session.ts # **`getAdminSession()`** — пользователь Supabase Auth в админском контексте (для аудита и защищённых API при необходимости)
-│   ├── bonus.ts         # сервер-only лояльность: **баланс витрины** — последняя **`balance_after`** в **`bonus_transactions`** (`getUserBalance`); настройки (**`bonus_settings`**); **`manualAdjust`**, **`accrueBonus`**, **`redeemBonus`**, **`processBonusAccrualOnOrderDone(profileId, orderId, totalBani, multiplier?)`** после **`done`** в POS — множитель из **`orders.bonus_multiplier`** (по умолчанию **1**); начисление: **`Math.round((totalBani/100) × accrual_rate × multiplier)`**; ошибки не ломают оплату; **service role** через **`createServiceSupabaseClient`**
-│   ├── customers.ts     # профили и **`customer_addresses`**: **`getCustomerByPhone`**, **`saveCustomer`**, **`saveCustomerAddress`**, **`setDefaultAddress`**, **`getDefaultAddress`** — только **`createServiceRoleClient`** (оператор POS не является клиентом в Auth). Координаты адреса: если в payload уже есть **`delivery_lat`/`delivery_lng`**, сохраняются; иначе **best-effort** **`geocodeAddress`** из **`check-delivery-zone.ts`** (ошибки не блокируют вставку)
-│   ├── discount-engine.ts # чистая функция **`evaluateDiscounts`** / **`isRuleScheduleActive`** — порядок скидок, доставка от суммы после скидок, подарочные строки (**`GiftCartItem`**); вход **`DiscountEngineInput.excludedCategoryIds`** исключает категории меню из базы расчёта (**`item_percent`**, **`order_percent`/`order_fixed`**, **`cheapest_item_free`**; **`free_delivery`**, **`bonus_multiplier`**, подарки без изменений); в выходе **`DiscountEngineOutput.excludedCategoryIds`** — уникальные **`category_id`** корзины, попавшие в множество исключённых; без Supabase
-│   ├── cart-helpers.ts # цена позиции корзины, субтотал товаров; учёт вариантов при отображении
-│   ├── inventory-units.ts # склад (разделы /admin/inventory/* кроме редакторов рецепта): кг/л/шт и MDL за кг/л при хранении г/мл в БД
-│   ├── recipe-editor-qty.ts # техкарты, п/ф, состав топпинга: строковые qty, подписи г/мл/шт, нормализация blur
-│   ├── recipe-composition-waste.ts # **`wasteYieldFactor`**
-│   ├── recipe-composition-types.ts # **`RecipeCompositionIngredient`**, **`RecipeCompositionSemi`**
-│   ├── recipe-composition-row-updates.ts # пересчёт нетто/брутто ( **`RecipeEditorModal`**, **`RecipeIngredientSemiCompositionTable`** )
-│   ├── product-recipe-ingredient-qty.ts # объём списания по строке рецепта: COALESCE(quantity_gross, quantity) для складской логики / себестоимости
-│   ├── order-recipe-stock-deduction.ts  # чистая функция: **`order_lines` + плоский список `product_recipes` + `semi_finished`/`semi_finished_items`** → суммы по **`ingredient_id`**; вложенные комбо — одна ступень (**`menu_item_ref_id`**, см. миграцию **`product_recipes`**)
-│   ├── storefront-delivery-display.ts # строка «Доставка» в корзине / `OrderSummary`: зона, порог бесплатно, прочерк, подсказки
-│   ├── storefront-pickup-location.ts # координаты самовывоза bd. Dacia 27 для карты (модалка доставки, success-map)
-│   ├── storefront-account-path.ts   # URL страницы аккаунта по **`brandSlug`**: **`/account`**, **`/losos/account`**, **`/thespot/account`** (аналогично checkout)
-│   ├── store/           # Zustand: `cart-store` (persist корзины + `cartButtonPulseKey` только в памяти), **`auth-store`** (профиль витрины, модалка OTP: **`openAuth`**, **`closeAuth`** — успешное закрытие с колбэком **`onAuthSuccess`**, **`dismissAuth`** — закрытие без колбэка, **`fetchMe`** → `GET /api/auth/me`, без persist), **`pos-order-from-call-bridge`** (регистрация **`openNewOrderFromCall`** с **`/pos/page.tsx`** для **`PosAppShell`**)
-│   ├── pbx/             # **`diversion-brand-slug.ts`** — нормализация номера линии ОАТС и маппинг **79700290 / 79200190 / 79200120** → **`kitch-pizza` / `losos` / `the-spot`**; поля тела **`diversion`**, **`called`**, **`to`**
-│   └── supabase/        # **`server.ts`**: SSR-клиент + **`createServiceSupabaseClient`** (= **`createServiceRoleClient`**) для server actions; **`client.ts`**: **`createClient()`** (anon, витрина/POS) и **`createBrowserSupabaseClient()`** (алиас для Realtime-подписок)
-├── types/               # в т.ч. **`PosOrder`** (в т.ч. **`delivery_mode`**: `delivery` \| `pickup` \| `aggregator`, **`payment_method`**: `cash` \| `card` \| `aggregator_card` \| `mixed`, **`aggregator`**, **`prep_deadline_at`**, **`scheduled_time`** — время предзаказа на доставку из POS), **`OrderType`**, **`PosWizardBrandOption`**, **`promotions.ts`** (движок скидок: **`DiscountRule`**, **`DiscountEngineOutput`**, …), storefront DB types (`src/types/database.ts`)
-├── scripts/             # в т.ч. `setup-telegram-webhook.ts` — регистрация вебхука курьерского бота (`npm run setup:telegram`)
+│   ├── actions/         # server actions (см. раздел Server Actions)
+│   ├── data/            # storefront fetchers
+│   ├── store/           # Zustand stores
+│   ├── i18n/, pos/, pbx/, seo/, telegram/, supabase/
+│   ├── bonus.ts, customers.ts, discount-engine.ts
+│   ├── inventory-units.ts, recipe-*.ts
+│   ├── order-recipe-stock-deduction.ts
+│   └── ...
+├── types/               # database, pos, promotions
+├── scripts/
 └── middleware.ts
 ```
 
-## Multi-brand
+## Контракты
 
-- Канонический конфиг брендов: `src/brands/index.ts`; для POS и значений **`brand_slug`** из БД используются **`normalizePosBrandSlug`** (алиасы вроде `thespot` → **`the-spot`**) и **`getBrandBySlug`** с учётом нормализации.
-- `middleware.ts` резолвит бренд по `Host` или локальным префиксам **`/losos`** и **`/thespot`** (частные случаи корня `/losos`, `/thespot` и вложенные пути **`/losos/*`**, **`/thespot/*`**): заголовки **`x-brand-slug`** и **`x-pathname`**, rewrite внутреннего пути без префикса (например **`/losos/checkout`** → приложение видит **`/checkout`** с брендом losos). Канонический slug бренда в конфиге — **`the-spot`**, в URL на localhost — **`thespot`** (без дефиса).
-- **POS (`/pos/*`):** публичные **`/pos/manager-login`** и **`/pos/login`** — только заголовки бренда (**без** **`getUser`**); для остальных **`/pos/*`** — **`createServerClient`**, **`getUser()`**; без пользователя → **`/pos/manager-login`**; затем проверка **`pos-session`** (**`jose`**) → иначе **`/pos/login`**. В **`config.matcher`** исключён **`pos/manager-login`**.
-- Витрина читает бренд через `getBrand()` / `getBrandId()`; `(client)/layout` выставляет `data-brand`.
-- Админка не зависит от домена: активный бренд хранится в cookie `admin-brand-slug`, UUID берётся через `getAdminBrandId()` для **брендового** контента (меню, заказы, промо, зоны, топпинги и т.п.).
-- **Склад** (`/admin/inventory/*`) и **персонал** (`/admin/staff`, **`/admin/staff/shifts`**): данные **общие для всех брендов** — в server actions и `page.tsx` этих разделов **нет** фильтрации выборок по `getAdminBrandId()` для таблиц **`ingredients`**, **`semi_finished`**, **`stock_audits`**, **`suppliers`**, **`supply_orders`**, **`stock_writeoffs`** (и связанных строк). Типы и колонки `brand_id` в БД при необходимости остаются; вставки в **`stock_writeoffs`** в коде явно **`brand_id: null`**. Исключение: при **создании** новой инвентаризации (**`createAudit`**) в **`stock_audits`** записывается **`brand_id`** из **`getAdminBrandId()`** (список и карточка аудита по-прежнему без фильтра по бренду).
-- **Список заказов `/admin/orders`:** **`getOrders`** не привязан к **`getAdminBrandId()`** — фильтр по бренду только если в URL задан **`brand_id`** (значение **«Все бренды»** убирает параметр). Остальные контентные таблицы в админке и на витрине по-прежнему фильтруются по `brand_id` текущего бренда в cookie, где это применимо.
-- **POS / KDS — контекст бренда (дисплей, не фильтр списка):** cookie **`pos-brand-slug`** (`path=/pos`), модуль **`src/lib/pos/pos-brand-slug-cookie.ts`**. **`OrderForm`** при **`selectedBrand`** обновляет cookie. **`KdsScreen`** по-прежнему резолвит **`brandSlug`** / **`brandId`** из cookie → URL → localStorage → первый **`BrandConfig`** (для сообщения о загрузке UUID и запасного slug в **`slugForCard`**); **список заказов на KDS не фильтруется по бренду**. UUID бренда: клиентский запрос **`brands`** с **`.eq('slug', …).maybeSingle()`**.
+### Money & единицы
+
+- **Заказы в БД — integer bani** (`orders.total`, `price`, `discount`, `delivery_fee`, `bonuses_redeemed`, все `*_bani`). В UI — MDL.
+- **Склад в БД — numeric MDL** (`ingredient_stock.avg_cost`, цены в `supply_order_items`). Не bani.
+- **Склад: единица хранения в БД — g / ml / pcs**. В UI админки — кг / л / шт; цены — MDL за кг/л/шт. Конвертация: `src/lib/inventory-units.ts` (`toDisplayQty`/`toStorageQty`, `toDisplayPrice`/`toStoragePrice`).
+- **Исключение:** редактор техкарт (`RecipeEditorModal`), `semi-finished-dialog`, состав топпинга (`RecipeIngredientSemiCompositionTable`) — работают напрямую в г/мл/шт, без конвертации.
+- 1 бонус. пункт = 1 MDL = 100 bani.
+
+### Order — каноничные значения
+
+`OrderStatus` (src/types/database.ts): `draft` · `new` · `confirmed` · `cooking` · `ready` · `delivery` · `done` · `cancelled` · `rejected`.
+
+`delivery_mode`: `delivery` · `pickup` · `aggregator`.
+
+`payment_method`: `cash` · `card` · `aggregator_card` · `mixed`.
+
+`source`: `website` · `pos`.
+
+`aggregator`: пока только `glovo` (для `delivery_mode='aggregator'`).
+
+### Поля orders (избранное)
+
+| Поле | Назначение |
+|---|---|
+| `status`, `delivery_mode`, `payment_method`, `source` | см. выше |
+| `total`, `discount`, `delivery_fee`, `cash_amount`, `card_amount`, `change_from` | суммы в bani |
+| `delivery_address`, `address_entrance/floor/apartment/intercom`, `delivery_lat/lng` | доставка |
+| `courier_id`, `courier_assigned_at`, `delivered_at` | курьер |
+| `courier_tg_chat_id`, `courier_tg_message_id`, `courier_tg_message_updated_at` | Telegram-карточка курьера |
+| `comment` | общий комментарий (витрина + POS) |
+| `kitchen_note` | комментарий повару, **только из POS**; KDS показывает плашкой |
+| `scheduled_time` (timestamptz) | предзаказ POS на доставку; сбрасывается при смене на `pickup` |
+| `cooking_started_at`, `ready_at`, `paid_at` | KDS-таймеры и касса |
+| `cash_session_id` | FK кассовой сессии при оплате |
+| `aggregator`, `prep_deadline_at` | агрегатор (Glovo) и дедлайн готовки (+15 мин от создания) |
+| `profile_id` | FK на `profiles` (витрина или клиент POS) |
+| `bonuses_redeemed`, `bonuses_earned` | пункты лояльности |
+| `bonus_multiplier` (numeric, default 1) | множитель начисления при `done` |
+| `promo_code`, `discount_rules_applied` (JSON) | скидки |
+
+`order_items`: `variant_id` (FK `menu_item_variants`, nullable), `size` (текстовый snapshot подписи варианта; старые строки могут иметь `s`/`l`), `is_gift`, `gift_rule_id`.
+
+### Multi-brand: что брендовое, что общее
+
+**Брендовое** (фильтр по `brand_id`, для админки — через `getAdminBrandId()` из cookie `admin-brand-slug`): `menu_categories`, `menu_items`, `menu_item_variants`, `topping_groups`, `toppings`, `menu_item_topping_groups`, `promotions`, `featured_menu_items`, `promo_codes`, `discount_rules`, `delivery_zones`, `orders` (на витрине). На витрине бренд резолвится через `getBrand()` / `getBrandId()`; на админке через cookie.
+
+**Общее для всех брендов** (без фильтра по `getAdminBrandId()`): `staff`, `shift_logs`, `cash_sessions`, `cash_transactions`, склад целиком (`ingredients`, `ingredient_categories`, `ingredient_stock`, `semi_finished`, `semi_finished_items`, `product_recipes`, `suppliers`, `supply_orders`, `supply_order_items`, `stock_writeoffs`, `stock_audits`, `stock_ledger`), `profiles`, `customer_addresses`, `bonus_settings`, `bonus_transactions`.
+
+**Исключения:**
+- `/admin/orders` — фильтр по бренду только если в URL задан `brand_id` (не принудительно из cookie).
+- `stock_writeoffs.brand_id` всегда вставляется как **`null`** в коде.
+- `stock_audits.brand_id` при **создании** записывается из `getAdminBrandId()` (список и карточка — без фильтра).
+- POS/KDS: cookie `pos-brand-slug` хранит активный бренд **для дисплея**, список заказов в KDS не фильтруется по бренду.
+
+### Middleware (резолв бренда)
+
+- По `Host` или префиксам `/losos`, `/thespot`: ставит заголовки `x-brand-slug` и `x-pathname`, делает rewrite (`/losos/checkout` → `/checkout`).
+- `/admin/*` без сессии → `/admin/login`. `/api/admin/*` без сессии → **401 JSON** (не редирект).
+- `/pos/manager-login` и `/pos/login` — только заголовки бренда, **без `getUser`**. Для остальных `/pos/*` — Supabase сессия + валидный `pos-session` (JWT), иначе редирект на `manager-login` или `login`.
+
+## Auth
+
+### Витрина (storefront-session)
+
+httpOnly cookie. OTP-вход по телефону: 4 цифры через SMS.md (`POST /api/auth/send-otp`, `verify-otp`). Клиентский `fetch` к `/api/auth/me`, `/api/account/*`, `/api/bonus/balance` — обязательно с `credentials: 'include'`. Сессия в коде: `getStorefrontSession()`.
+
+### Админка
+
+Supabase Auth email/password. Layout делает `Promise.all` для `getBrands()` + `getAdminBrandSlug()` + `auth.getUser()`. Сервер-side проверки — `getAdminSession()`.
+
+### POS (двухслойный)
+
+1. `/pos/manager-login` → Supabase Auth (менеджер).
+2. `/pos/login` → PIN (`bcryptjs`), выпускает cookie `pos-session` (JWT HS256, библиотека `jose`, секрет `POS_SESSION_SECRET` **≥32 символов**).
+3. Корневой `src/app/pos/layout.tsx`: `ensureActiveShift` (`shift_logs`) + проверка `cash_sessions(status=open)`. Без открытой кассы — блокирующий `CashSessionGate`.
+
+Кода: `src/lib/actions/pos/auth.ts`, `shifts.ts`. Внутри POS активный сотрудник — `getCurrentStaff()`.
 
 ## POS
 
-- **Суммы заказов:** `orders.total` — всегда **нетто** в банях: товары + доставка − скидки − **`bonuses_redeemed * 100`**. `orders.bonuses_redeemed` хранит пункты лояльности (**1 пункт = 1 MDL = 100 bani**). Любой POS-пересчёт `total` в server actions должен читать уже сохранённый `bonuses_redeemed` из `orders` или принимать новое значение явно; нельзя пересчитывать `total` только как `subtotal + delivery_fee - discount`.
-- **Split-оплата в `orders`:** при **`payment_method = 'mixed'`** в БД — **`cash_amount`** и **`card_amount`** (integer bani, оба > 0); иначе эти поля **`NULL`**. **`payOrder`** при **`mixed`** создаёт две записи **`order_payment`** в **`cash_transactions`** по суммам из заказа.
-- **Новые заказы из POS (idle, звонок, тип заказа Glovo и т.д.):** **`createDraftOrderPos`** (**`src/lib/actions/pos/create-draft-order.ts`**) вставляет в **`orders`** **`status: 'new'`**, **`source: 'pos'`**, опционально **`operator_id`** из **`getCurrentStaff()`** (при `null`/ошибке — **`operator_id: null`**, заказ не блокируется); опционально **`scheduledTime`** → **`orders.scheduled_time`** (предзаказ при доставке). На кухню заказ отправляет **`sendPosDraftToKitchen`**, которая принимает исходный статус **`draft`**, **`new`** или **`confirmed`** (**`draft`** в типах остаётся для старых строк в БД).
-- **Заказы с витрины в POS-мастере:** `OrderForm` инициализирует списание бонусов из `listOrder.bonuses_redeemed`; пока оператор не менял поле, используется `effectiveBonusPoints = max(listOrder.bonuses_redeemed, bonusesToRedeem)`. Открытие существующего заказа не должно запускать `updateOrderDetailsPos`: lookup клиента по телефону в шаге «Детали» не стартует до `form.formState.isDirty`. `form.reset(...)` из `listOrder` синхронизирует `bonusesToRedeem` с БД.
-- **Сводка POS:** `DiscountBreakdown` принимает **`bonusRedeemedBani`**, опционально **`excludedCategories`** (подстрочные пояснения по **`menu_categories` с исключением из скидок при **`totalDiscountBani > 0`** и наличии в корзине позиций из таких **`category_id`**) и показывает крупное **«Итого»** уже как финальную сумму к оплате после промо, доставки и бонусов. Отдельной финальной строки «К оплате» после «Итого» быть не должно.
-- **Локальное состояние списка POS:** шаг «Оформление» может подтягивать рассчитанные скидки в карточку через `updateOrderLocalState`, но сумма карточки должна оставаться нетто: `effectiveEngineOutput.totalBani - effectiveBonusPoints * 100`. Это только локальный снимок панели, не запись в БД.
-- **Адрес в карточке заказа:** `compactCardDeliveryAddress()` показывает улицу/дом. Не обрезать адрес по точке: строки вида `str. Mihail Lomonosov 49` должны отображаться полностью; компактирование допустимо по запятой или за счёт отдельных структурных полей (`address_entrance`, `address_floor`, `address_apartment`, `address_intercom`).
+### Касса
 
-Текущие бренды (`BrandConfig.phone` — отображение на кнопках звонка; `hours` — график в **`StorefrontTopBarSchedule`** / **`MainHeader`**; **`getBrandPhoneHref`** строит `tel:+373…` для MDL номеров с ведущим `0`):
+Таблицы: `cash_sessions` (status `open`/`closed`, `opened_by_staff_id`, `closed_by_staff_id`, `discrepancy_reason`), `cash_transactions` (типы: `opening`, `order_payment`, `expense`, `income`, `encashment`; denormalized `order_delivery_mode`, `order_brand_id`, `encashment_destination`; voiding через `voided_at`, `voided_by_staff_id`, `void_reason`).
 
-| Slug | Domain / dev | Телефон (витрина) | График работы (витрина) | Logo |
-|---|---|---|---|---|
-| `kitch-pizza` | `kitch-pizza.md`, `localhost:3000` | `079 700 290` | **11:00 – 03:00** | `/kitch-pizza-logo.svg` |
-| `losos` | `losos.md`, `www.losos.md` | `079 200 190` | **15:00 – 03:00** | `/Losos_Logo.svg` |
-| `the-spot` | `thespot.md`, `192.168.50.137` | `079 200 120` | **11:00 – 03:00** | `/the-spot-logo.svg` |
+Server actions — `src/lib/actions/pos/cash-session.ts`: `openCashSession`, `getCashSession`, `getExpectedInDrawerBani`, `getActiveOrdersCountForShift`, `createCashTransaction`, `closeCashSession`, `payOrder`.
 
-**Meta Pixel:** у каждого бренда в **`src/brands/index.ts`** задаётся **`metaPixelId`** (`string | null`). Компонент **`src/components/MetaPixel.tsx`** монтируется в **`(client)/layout.tsx`**; при пустом ID ничего не рендерится.
+**Инварианты `payOrder`:**
+
+- Разрешён **только из** `status='delivery'` ИЛИ (`status='ready'` И `delivery_mode ∈ {pickup, aggregator}`).
+- Атомарно проставляет `paid_at`, `status='done'`, `cash_session_id` (UPDATE ожидает текущий `delivery` или `ready`).
+- В `cash_transactions` всегда denormalized `order_delivery_mode`, `order_brand_id`.
+- **Glovo (`aggregator_card`): строка в `cash_transactions` НЕ создаётся**; в `orders` обновляется `payment_method` и `cash_session_id`.
+- Наличные Glovo: одна строка `order_payment` как обычно.
+- `mixed`: **две строки** `cash_transactions` (`order_payment`: нал + карта) по полям `orders.cash_amount` и `card_amount`; обе должны быть > 0, сумма равна «К оплате» (±1 бан).
+- После успешной записи — `processBonusAccrualOnOrderDone(profileId, orderId, totalBani, bonus_multiplier ?? 1)` из `bonus.ts`. Ошибки начисления логируются, оплату не блокируют.
+
+**Закрытие смены (`closeCashSession`):** обязательный `discrepancyReason` ≥3 непробельных символов при расхождении >50 MDL. Незавершённые заказы смены — предупреждение, не блок. Строки с `voided_at` исключены из агрегатов баланса.
+
+Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`).
+
+### KDS (/pos/kds)
+
+- Список — все заказы `status='cooking'`, без фильтра по бренду. Выборка через константу `KDS_ORDER_QUERY_SELECT` в `components/pos/kds/types.ts` (с `menu_items(category_id, menu_categories(workshop))`).
+- **Realtime:** два канала на anon-клиенте — `kds-orders` (таблица `orders`) и `kds-order-items` (таблица `order_items`), `postgres_changes`, `event:*`, без server-side фильтров. Полная перезагрузка через `reloadCookingOrders`.
+- Дополнительно: периодический `reloadCookingOrders` каждые **30 с** + при `visibilitychange` / `online` / `window.focus`. Отдельный `wakeTick` каждые **60 с** пересчитывает `isKdsCardActive` (lib/pos/kds-wakeup.ts) — «спящие» карточки предзаказа.
+- «Готово» (`cooking → ready`): `update-order-status-kds.ts`, проставляет `ready_at`.
+- **Фильтр цехов:** `menu_categories.workshop` ∈ `operator`, `pizza`, `kebab`, `sushi`. localStorage ключ `kds_workshops` (JSON-массив). `workshop=null` у категории — строка видима всегда. Заказ без видимых после фильтра позиций не рендерится.
+- **Звуки:** `src/lib/pos/alert-sound.ts`. `playPosStatusUpdateSound()` при появлении нового `id` в `cooking` (вне `knownOrderIdsRef`). Bell-кнопка в шапке нужна для **unlock WebAudio на Chrome/Android**.
+
+### POS (главная страница и Realtime)
+
+- `src/app/pos/page.tsx`: слева `OrdersPanel` (24 ч активных + 50 «Выданных»; `ORDERS_POS_SELECT` в `src/lib/pos/fetch-orders.ts`); справа — `idle` (выбор типа: доставка / навынос / Glovo), `wizard` (мастер `OrderForm`) или `detail` (только `done`).
+- При монтировании страница один раз грузит `brands(id, name, slug)`, склеивает с `BrandConfig` в `wizardBrands` (`PosWizardBrandOption`), затем предзагружает меню всех брендов в `usePosMenuCache`.
+- **Realtime POS:** два канала в `orders-panel.tsx` на anon-клиенте — `pos-orders` и `pos-order-items`, `postgres_changes`, `event:*`. На каждое событие — `reloadOrders()` → `fetchPosOrders` / `fetchCompletedPosOrders` + `mergeOrdersPreserveBrandSlug` (сохраняет `brand_slug` если ответ пришёл с пустым slug при том же `brand_id`). При `INSERT` в `orders` — `playPosNewOrderSound()`.
+- Левая `OrderCard` — **только просмотр**: статус и курьер read-only. Все переходы статусов делаются из мастера/деталки (`update-order-status-kds`, `assign-courier-pos`, `payOrder`).
+- Принять / отклонить заказ с сайта (`new` + `source='website'`) — только из `OrderDetail` (`accept-order-pos`, `reject-order-pos`).
+
+### Мастер заказа (OrderForm)
+
+Шаги: **Бренд → Оформление (меню + корзина) → Детали**. Привязан к `orderId`; `key={panel.orderId}` меняется только при явной смене заказа.
+
+**Создание черновика** — `createDraftOrderPos`:
+- `delivery` / `pickup` — обычный заказ.
+- `aggregator` — Glovo: ставит `aggregator='glovo'`, `payment_method='aggregator_card'`, `prep_deadline_at` = +15 мин.
+- Из входящего звонка: `createDraftOrderPos({brandSlug, userPhone, profileId, userName})` — резолв `brand_id`, открытие мастера на шаге 2.
+
+**Меню в мастере:** `usePosMenuCache` (на время браузерной POS-сессии: категории, items с вариантами и группами топпингов, индексы). Fallback — Supabase запрос с `POS_MENU_ITEM_FOR_MODAL_SELECT`. Cookie `pos-brand-slug` обновляется при выборе бренда (синхронизация с KDS).
+
+**Корзина — optimistic:**
+- `addCartItem`, `updateQty`, `removeLine`, `saveCartLineFromModal`, `handleClearCart` сначала меняют локальный `cart` (`applyOptimisticCart`) → синхронно обновляют карточку слева через `updateOrderLocalState` (item_count, total, discount, delivery_fee, bonuses_redeemed) → в фоне зовут server actions (`addOrderItemsPos`, `updateOrderItemQuantityPos`, `removeOrderItemPos`, `updateOrderItemCompositionPos`, `replaceOrderItemsPos`).
+- На ошибке — `rollbackOptimisticCart(snapshot, message)` + Sonner.
+- Realtime подписки — финальная сверка.
+
+**Шаг «Детали»:**
+- Контакт: телефон **обязателен** для не-агрегатора, имя необязательно. Для Glovo контакты/адрес не требуются (Zod + `detailsArePersistable`).
+- Адрес при `delivery`: `delivery_address` + структурные `address_*`; зона через `checkDeliveryZoneByAddress` (Nominatim + viewbox по полигонам активных зон бренда, `bounded=1`, `countrycodes=md`, `findZoneForPoint`).
+- Время доставки (`ScheduledTimePicker`, `generateScheduledSlots`): `asap` или `HH:MM` → `orders.scheduled_time`. Слоты по `BrandConfig.openHour/closeHour`.
+- Оплата: `cash` / `card` / `mixed`. Сохранение — сразу по клику (для `mixed` — только когда обе суммы согласованы с итогом, защита DB constraint).
+- Дополнительно: `comment` (общий) и опционально `kitchen_note` (только для KDS).
+- **Lookup клиента** (`posLookupCustomer`): по телефону, debounce 500 мс + дедупликация. Возвращает профиль, адреса, баланс бонусов, `bonus_settings.max_redemption_rate` (id=1, дефолт 0.3 при сбое).
+- **Списание бонусов:** поле при найденном клиенте, `total > 0`, `balance > 0`. Потолок = `floor(min(balance, totalBani/100 × max_redemption_rate))`. `totalBani` после скидок и доставки.
+- Все правки на «Деталях» уходят через `updateOrderDetailsPos` с **debounce 600 мс** (контакт, адрес, координаты, comment, kitchen_note, profile_id, скидки, промо, синхронизация подарочных строк).
+
+**Скидки в мастере:** `getActiveDiscountRules` (trigger=`auto`) загружается на сервере; промокод через `PromoPanel` + `resolvePromoCode` (`discounts.ts`); финальный расчёт через `evaluateDiscounts` (`src/lib/discount-engine.ts`) с `excludedCategoryIds` из `usePosMenuCache`. Для заказов с сайта с непустым `promo_code` — флаг `skipSeedResolve` (быстрый показ без асинхронного `resolvePromoCode`).
+
+**Меню `⋯` мастера:** «Сделать доставкой» / «Сделать навыносом» (`updateOrderDeliveryModePos` — сбрасывает `aggregator`, `prep_deadline_at`, `scheduled_time` при переходе на pickup; нормализует `aggregator_card → cash`), «Очистить корзину», «Закрыть заказ» (`cancelOrderPos`).
+
+**«Отправить бегунок»** — `sendPosDraftToKitchen`:
+- Действует для `draft` / `new` / `confirmed` → `cooking`. Идемпотентно: уже в `cooking` — успех с тем же id.
+- Проставляет `cooking_started_at`, `updated_at`. Уменьшает `total` на `floor(bonus_points × 100)` bani, ставит `bonuses_redeemed`.
+- Затем `redeemBonus` из `lib/bonus.ts` (если `bonuses_redeemed > 0` и есть `profile_id`). Ошибки только в `console.error`, заказ не откатывается.
+- Мастер остаётся открытым на том же `orderId`.
+
+**«Назначить курьера»** — только из мастера, шаг «Оформление»:
+- Условие: `status='ready'` + `delivery_mode='delivery'`. Glovo (`aggregator`) — курьер не назначается.
+- Гейт `courierButtonGate`: для обычной доставки нужны `user_phone` И `delivery_address`; для pickup адрес не нужен. Без них кнопка disabled, модалка не открывается.
+- `assignCourierPos`: `status='delivery'`, `courier_id`, `courier_assigned_at`, Telegram-карточка (см. раздел Telegram).
+- «Сменить» в `delivery` — модалка та же, режим `reassign`: старая карточка → `editMessageText "передан другому"`, новый курьер получает новую пару сообщений.
+
+**Шаг «Бренд»:** при уходе со шага в фоне зовётся `persistBrandOrError` (`updateOrderBrandPos`), без ожидания. При переходе со шага 2 на 1 или 3 — `persistCartToServer` (`replaceOrderItemsPos`) вызывается только если отпечаток корзины изменился (`cartFingerprint` vs `lastSyncedCartFingerprintRef`).
+
+### Glovo (delivery_mode='aggregator')
+
+- Создание: `createDraftOrderPos({deliveryMode:'aggregator'})` → `aggregator='glovo'`, `payment_method='aggregator_card'`, `prep_deadline_at` +15 мин.
+- В мастере на «Деталях»: только блок «Заказ Glovo», оплата (наличные / `aggregator_card`), `comment`. Контакты и адрес скрыты. `runDetailsSaveToServer` передаёт `deliveryAddress=undefined`, `delivery_lat/lng=null`.
+- Оплата по `payOrder` сразу из `ready` (без перехода в `delivery`).
+- Карта Glovo → строка в `cash_transactions` не пишется (см. инварианты `payOrder`).
+- При смене режима на не-aggregator: `updateOrderDeliveryModePos` сбрасывает `aggregator`, `prep_deadline_at`, нормализует `aggregator_card → cash`.
+
+### Шапка POS и входящие звонки
+
+- `PosAppShell` после открытия кассы: логотип, `PosClockWidget`, `PosShiftTimer`, `PosLogoutButton`, «Карта курьеров» (`CourierMapModal` — react-leaflet через `dynamic({ssr:false})`, маркеры из `courier_locations` + `staff`, патч иконки `lib/leaflet-fix-default-icon.ts`).
+- Меню `⋯` — `PosActionsMenu`: «Создать транзакцию» (`CreateTransactionModal` + `createCashTransaction`), «Данные смены» (`ShiftDataModal` + `getCashSession`: `payment_breakdown`, `manual_breakdown`, `recent_manual_transactions`), «Закрыть смену» (`CloseShiftModal` → `closeCashSession`, `closeShift`, `auth.signOut()`, редирект на `/pos`).
+
+**Входящие звонки:**
+- Webhook ОАТС: `POST /api/pbx/incoming` (`PBX_WEBHOOK_TOKEN` в поле `crm_token`). Принимает `cmd` ∈ `contact` / `event` / `history` → таблица `pbx_calls`. `brand_slug` определяется по линии через `lib/pbx/diversion-brand-slug.ts` (поля `diversion` / `called` / `to`):
+  - 79700290 → `kitch-pizza`
+  - 79200190 → `losos`
+  - 79200120 → `the-spot`
+- Ответ всегда 200 при DB-ошибках (чтобы АТС не ретраила); 401/400 только для токена и неизвестного `cmd`.
+- POS подписка: `useIncomingCall` в `PosAppShell` — Realtime канал `pbx-realtime`, событие `INSERT` на `pbx_calls` с `cmd='event'`, `event_type='INCOMING'`. Догружается имя профиля и `brand_slug` с contact-строки того же `callid`.
+- Диалог в `PosAppShell` с кнопкой «Создать заказ» → мост `pos-order-from-call-bridge` (`src/lib/store/pos-order-from-call-bridge.ts`), регистрация колбэка в `/pos/page.tsx` (`openNewOrderFromCall`).
+- **Legacy:** `POST /api/pbx-webhook` (MoldCell) → upsert в `incoming_calls` по `call_id`, тот же маппинг линий. Параллельный баннер в `orders-panel.tsx` — без изменения основного флоу.
+
+### OrderDetail (правая панель)
+
+- Загрузка через `fetchPosOrderById` + Realtime по заказу и строкам.
+- Кнопки внизу: `WebsiteNewActions` (принять/отклонить) для `new` + `source='website'`; «Передать курьеру» (`ready` + delivery, обычная); «Принять оплату» (`delivery` или (`ready` + aggregator/pickup)).
+- При `interactionMode='readonly'` (статус `done`, список «Выданные» в Sheet) — только просмотр.
+- Редактирование позиций: `POS_MENU_ITEM_FOR_MODAL_SELECT`, `posMenuRowForModal`, `PosProductModal`. Минус при qty=1 снимает строку.
+
+### POS — прочее
+
+- **Высота:** `PosAppShell` — `h-screen` + `overflow-hidden`; scrolls только внутри панелей.
+- **Cмены курьеров:** через **отдельного** Telegram-бота. `POST /api/telegram`, таблица `courier_locations`, команды `/shift_start`, `/shift_end`, привязка по deep-link из `/admin/staff` (`generateTelegramLink`, `TELEGRAM_COURIER_BOT_USERNAME` без `@`).
+
+## Telegram
+
+### Два разных бота
+
+| Бот | Назначение | Env |
+|---|---|---|
+| Заказы с витрины | Уведомления в общий чат при `createOrder` (`src/lib/actions/create-order.ts`) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Курьерский | Привязка курьеров, смены, live location, карточки заказов | `TELEGRAM_COURIER_BOT_TOKEN`, `TELEGRAM_COURIER_BOT_USERNAME`, `TELEGRAM_COURIER_WEBHOOK_SECRET` |
+
+### Курьерский бот
+
+- Webhook: `POST /api/telegram` с заголовком `X-Telegram-Bot-Api-Secret-Token`. Команды: `/start` (привязка по токену), `/shift_start`, `/shift_end`; live location → `courier_locations`.
+- Исходящие — через `src/lib/telegram/bot.ts`: `sendMessage(chatId, text, replyMarkup?)` → `message_id`, `sendLocation(chatId, lat, lng, replyToMessageId?)`, `editMessageText(chatId, messageId, text, replyMarkup?)`.
+- При assign (`sendCourierAssignmentTelegram` в `courier-telegram-message.ts`):
+  1. `sendMessage` — карточка заказа (оплата с 💳/💵, сумма 💰).
+  2. `sendLocation` с `reply_to_message_id` к карточке, если есть координаты (иначе `withResolvedDeliveryCoords` + `checkDeliveryZoneByAddress`).
+  3. В `orders` пишутся `courier_tg_chat_id`, `courier_tg_message_id` (**только текстовая карточка**, для `editMessageText`), `courier_tg_message_updated_at`.
+- При смене курьера: старая карточка правится через `editPreviousCourierAssignmentTelegram`, новому курьеру — новая пара.
+- Обновления (`refreshCourierOrderTelegramMessage`) после `update-order-items` и `update-order-details-pos` в `delivery`: `editMessageText` карточки; при `reason='details'` дополнительно `sendLocation`. Короткое update-notice через `sendMessage` — **не чаще 1/мин** (throttle по `courier_tg_message_updated_at`).
+- Регистрация webhook: `npm run setup:telegram` (`scripts/setup-telegram-webhook.ts`, требует `NEXT_PUBLIC_APP_URL`).
+
+## Скидки и лояльность
+
+### Движок скидок
+
+`src/lib/discount-engine.ts`: чистая функция `evaluateDiscounts(input)` + `isRuleScheduleActive`. Без Supabase.
+
+Типы эффектов (`src/types/promotions.ts`): `item_percent`, `order_percent`, `order_fixed`, `cheapest_item_free`, `free_delivery`, `bonus_multiplier`, подарки.
+
+`DiscountEngineInput.excludedCategoryIds` — категории `menu_categories.exclude_from_discounts`. Не участвуют в `item_percent`, `order_percent`, `order_fixed`, `cheapest_item_free`. На `free_delivery`, `bonus_multiplier`, подарки — не влияют.
+
+Источники: таблица `discount_rules` (`trigger='auto'` или `promo`) + `promo_codes` (legacy, через синтетическое правило в `resolvePromoCode`).
+
+В `orders` сохраняется: `discount`, `discount_rules_applied` (JSON применённых правил), `promo_code`, `delivery_fee`, `bonus_multiplier`. Подарочные строки — `order_items.is_gift` + `gift_rule_id`.
+
+Bootstrap для витрины — `getStorefrontCartPricingBootstrap` в `discounts.ts`: авто-правила, `excludedDiscountCategoryIds`, `storefrontExcludedDiscountCategories` (с именами категорий для подсказок).
+
+Сборка корзины витрины — `src/components/client/cart/storefront-cart-pricing.ts` (`CartItemForEngine` + `evaluateDiscounts`). Подсказки: `storefront-discount-excluded-notice.tsx`, `storefront-promo-excluded-warning.tsx`.
+
+В POS-мастере: `mergePersistedWebsitePromoDiscount` подмешивает сохранённое `listOrder.promo_code` / `discount` пока движок ещё не дал полный выход.
+
+### Лояльность
+
+Таблицы: `bonus_settings` (id=1; `accrual_rate`, `max_redemption_rate`, `is_enabled`, `updated_at`), `bonus_transactions` (`profile_id`, `amount`, `balance_after`, `type`, `created_by`).
+
+Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceSupabaseClient`).
+
+- `getUserBalance(profileId)` — последняя `balance_after` в `bonus_transactions` (**используется на витрине и в POS**).
+- В админке `/api/admin/bonus/adjust` баланс считается как `SUM(amount)`. Может расходиться с `getUserBalance`, если знаки в истории смешаны.
+- `getBonusSettings()`, `manualAdjust`, `accrueBonus`, `redeemBonus`, `processBonusAccrualOnOrderDone(profileId, orderId, totalBani, multiplier?)`.
+
+**Начисление** (после успешного `payOrder`): `Math.round((totalBani / 100) × accrual_rate × bonus_multiplier)`. `totalBani` уже с учётом списанных бонусов. Ошибки логируются, оплату не блокируют.
+
+**Списание** (`redeemBonus`): из `sendPosDraftToKitchen` (POS) и `create-order.ts` (витрина).
+
+Кэшбек **единый для всех брендов** (5% по умолчанию).
+
+## Склад
+
+### Журнал движений (stock_ledger)
+
+Поля: `ingredient_id`, `movement_type`, `reference_type`, `reference_id`, `quantity_delta`, `cost_per_unit`, `note`, `created_at`.
+
+`movement_type` (CHECK в миграции): `supply`, `sale`, `writeoff`, `audit` / `audit_adjustment`, `manual`.
+`reference_type`: `supply_order`, `stock_writeoff`, `stock_audit`.
+
+### Поставки (supply_orders)
+
+- `supply_order_items.received_qty` — nullable. Если null, считается равным `quantity`.
+- `createSupplyOrder` (`inventory/supplies/actions.ts`): вставка заказа и строк, затем пополнение `ingredient_stock` и `stock_ledger` по **`received_qty ?? quantity`**.
+- `avg_cost` пересчитывается **средневзвешенно** по цене поставки (ex-VAT).
+- В UI: цены без НДС и с НДС синхронно (общая VAT % по строке); в БД — ex-VAT, в g/ml через `toStoragePrice`.
+
+### Списания (stock_writeoffs)
+
+- Причины (`reason`): `waste`, `spoilage`, `tasting`, `staff_meal`, `other`.
+- `createWriteoff` (`inventory/writeoffs/actions.ts`, только **service role**): вставка `stock_writeoffs` с **`brand_id: null`**, строк `stock_writeoff_items` с `cost_per_unit` из текущего `avg_cost`, уменьшение `ingredient_stock.quantity`, запись `stock_ledger` (`writeoff`, отрицательный `quantity_delta`).
+- `total_cost` — generated по строкам.
+
+### Инвентаризации (stock_audits)
+
+- `createAudit` (`audits/actions.ts`): вставка `stock_audits` с `brand_id` из `getAdminBrandId()` (исключение для склада); строки `stock_audit_items` с ожиданием из остатка, `actual_qty: null`.
+- Подтверждение (`audits/[id]/actions.ts`, service role): обновление остатков, `stock_ledger` (`audit_adjustment`), заполнение `cost_per_unit` и `diff_cost` в строках.
+- `stock_audit_items.diff` — generated.
+
+### Техкарты (product_recipes)
+
+- `quantity` — нетто; `quantity_gross` — брутто.
+- Объём списания и себестоимость строки с `ingredient_id` — через `recipeIngredientStockStorageQty` (`product-recipe-ingredient-qty.ts`) = `COALESCE(quantity_gross, quantity)`.
+- **Комбо (вложенное блюдо):** `menu_item_ref_id` + `menu_item_ref_variant_id` (NULL если у целевого блюда нет вариантов). При ссылке: `quantity=1`, `ingredient_id`/`semi_finished_id` = NULL. CHECK в миграции.
+- `ingredients.waste_percent` (0–100): в техкарте нетто = брутто × (1 − %/100).
+- `product_recipe_meta`: `output_qty`, `output_unit` (уникальность по `menu_item_id` + `variant_id`).
+- Расчёт суммарного списания по заказу: `src/lib/order-recipe-stock-deduction.ts` (`computeIngredientTotalsForOrder`). Вложенные комбо разворачиваются на **одну ступень**.
+- **Списание ингредиентов в `payOrder` пока не подключено.**
+
+### Топпинги
+
+- `topping_groups.max_selections`: NULL = без лимита; число ≥1 — максимум выбранных позиций в одной строке заказа. Логика — `src/lib/topping-max-selection.ts`.
+- `topping_recipes` — состав топпинга. RPC `save_topping_with_recipes`.
+- В `/admin/toppings` действие «Существующий» — **копирует** топпинг в новую группу вместе со строками `topping_recipes`. Дубликаты по `name_ru`/`name_ro`/`price` в группе блокируются.
 
 ## Витрина
 
-- Главная (**`page.tsx`**): промо (**`PromotionsSlider`**), **`FeaturedMenuSection`**, полоса категорий **`MenuCategoryBar`**, меню (**`MenuSection`**) для **всех трёх** витринных брендов в едином «бутик»-лейауте (в т.ч. **`kitch-pizza`**: условная ветка **`isBoutiqueBrand`** включает slug kitch-pizza). Полоса категорий: `src/components/client/menu-category-bar.tsx` — **`TheSpotCategoryBar`**: мобила — горизонтальные капсулы без иконок; **`md+`** — sticky строка категорий + корзина (у **losos/the-spot** — капсула с **`ShoppingBasket`** на **`var(--color-accent)`** и **`text-[var(--color-accent-text)]`**; у **`kitch-pizza`** на десктопе **`CartPill`** с **`bg-[var(--color-accent)]`** и тем же токеном текста). Offsets **`sticky top`** считаются через **`calc`** (**`STOREFRONT_TOP_BAR_HEIGHT_PX`**, **`env(safe-area-inset-top)`**, высоты блока **`MainHeader`**); для **`lg+`** спейсер TopBar в потоке отсутствует — отдельное значение **`top`**. **`getScrollOffset()`** без ветки по бренду (зависит от ширины viewport), согласован со sticky. Нижняя мобильная капсула: **`TheSpotFloatingCart`** / при не-бутик fallback — **`KitchFloatingCart`** (внешний вид унифицирован с бутиком, токены Kitch). **Пульс корзины:** счётчик **`cartButtonPulseKey`** в **`cart-store.ts`**, CSS **`storefront-cart-trigger-pulse`** / **`storefront-cart-pulse`** в **`globals.css`**, **`prefers-reduced-motion: reduce`** отключает анимацию.
-- **`StorefrontTopBar`** (`storefront-top-bar.tsx`): монтируется в **`src/app/(client)/layout.tsx`** над **`ClientChrome`** только при **`MAINTENANCE_MODE === false`**; не рендерится на путях с **`checkout`**. Только **viewport `<lg`**: фиксированная белая полоска (**`hidden max-lg:block`**), часы — **`BrandConfig.hours`** через **`StorefrontTopBarSchedule brandSlug={...}`**, телефон (**`getBrandPhone`**) или блок входа (**`Войти`** → **`openAuth()`**) / залогиненный (**`Avatar`** слева, имя справа); **`z-10`**, ниже оверлея **`AuthModal`** (**drawer/dialog в витрине — `z-50`** у слоя Vaul). Спейсер **`STOREFRONT_TOP_BAR_HEIGHT_PX`** (44) + **`safe-area-inset-top`**. На **`lg+`** полоска и спейсер не занимают место в потоке; те же часы и авторизация в **`MainHeader`** (**`StorefrontTopBarSchedule brandSlug={brandSlug}`**, **`StorefrontDesktopAuthStrip`**). Обёртка витрины в **`layout.tsx`** — **`div`** с **`data-brand={brandSlug}`** и **`bg-[var(--color-bg)]`** (токены в **`globals.css`**).
-- **Шапка:** `src/components/client/main-header.tsx` — **одинаковый бутик-паттерн** для **`kitch-pizza`**, **`losos`**, **`the-spot`**: лого и путь к файлу через **`getBrandBySlug`** → **`BrandConfig.logo`** / **`name`** (размеры — локальный switch по **`brand.slug`**). Мобила — белая капсула: лого, кнопка адреса (**`openDeliveryModal`**), бургер; **`md+`** — **`TheSpotDesktopHeader`**: остров **[лого] [адрес] [`StorefrontTopBarSchedule` при `lg+` с тем же **`brandSlug`**]** слева, справа **`AccountNavLink` (`md`–`lg`)**, **RU/RO**, **`tel:`**, **`StorefrontDesktopAuthStrip`**, бургер **`<lg`**. **`sticky`**: **`top-10`** ниже **`lg`**, **`lg:top-0`**. **`MobileFullMenuOverlay`**: **`z-[120]`**, лого, аккаунт, язык, адрес, внизу звонок. **`TopNav`** (`top-nav.tsx`) **нигде не монтируется** (оставлен файл с TODO). Аккаунт: **`storefrontAccountPath(brandSlug)`**.
-- **Модалка товара:** `src/components/client/product-modal/ProductModalRoot.tsx` — при **`has_sizes === true`** строки **`menu_item_variants`** приходят с меню или подгружаются, сортировка **`sort_order`**; объединённые варианты (**`variantsEffective`**) блокируют **«Добавить в корзину»**, пока нет строк варианта или пока активный вариант даёт цену **0** (**защита от «0 lei» и ложного добавления до подгрузки**). **`VariantSelector`** (`product-modal/SizeSelector.tsx`) — капсула **`--size-selector-bg`** и сегменты (**`--size-selector-item-bg`**, **`--size-selector-item-active-bg`**, **`--size-selector-item-active-text`**) в **`globals.css`** по **`[data-brand]`**. Подпись варианта — **`name_ru` / `name_ro`** через текущий язык (`pickLocalizedName` и т.п.). Цена и добавление в корзину зависят от выбранного **`variant_id`**; в корзину уходит **`variantId`** и текстовый снимок имени варианта (для **`order_items.size`**) — см. **`src/types/cart.ts`**, **`cart-store.ts`**. Без размеров — **`variantId`/`size`** = `null`. Топпинги группируются по **`topping_groups`** (данные **`fetchStorefrontMenuItemToppingGroups`** в **`src/lib/data/storefront-item-toppings.ts`**), лимит **`topping_groups.max_selections`**. На мобилке фото блюда визуально меньше (~`w-[70%]`, `max-w-[315px]`). Если **`menu_items.included_items`** непустой (**`(item.included_items ?? [])`**, элементы `{ name_ru, name_ro }`), между описанием и выбором варианта показывается блок **«Входит в заказ»** / локализованный заголовок — чипы с цветным индикатором по ключевым словам (васаби / имбирь / соус / палочки).
-- **Вход по телефону (витрина):** Zustand **`src/lib/store/auth-store.ts`** — **`profile`**, **`fetchMe`** (`GET /api/auth/me` с **`credentials: "include"`**, чтобы httpOnly-кука **`storefront-session`** уходила на API), **`openAuth`** / **`dismissAuth`** (закрытие без побочных действий) / **`closeAuth`** (после успешного OTP: вызывает **`onAuthSuccess`** если задан через **`setOnAuthSuccess`**, затем сбрасывает колбэк). Cookie сессии — **`storefront-session`** (JWT в cookie, см. **`src/lib/storefront-session.ts`**, выставляется в **`verify-otp`**). **`GET /api/auth/me`** читает ту же куку через **`getStorefrontSession()`**, профиль из **`profiles`**. Выход — **`POST /api/auth/logout`** (**`clearStorefrontSession`**). **`AuthModal`** (`src/components/client/auth/AuthModal.tsx`): префикс **+373**, OTP **4** цифры (**`send-otp`** / **`verify-otp`**); при **`max-width: 1023px`** — **Vaul** (**drawer** на всю ширину, **`rounded-t-[24px]`**, как **`CartSheet`** / карточка товара; **`onOpenAutoFocus`** с **`preventDefault`**, чтобы iOS/Android не дергали страницу, плюс **`focus`/`focusin`** на инпуты — **`scrollIntoView`** в центр); от **`lg` (1024px)** — **Dialog** из **`@/components/ui/dialog`**. Тексты UI — **`useLanguage()`** → **`t.auth.modal.*`** (**RU/RO** в **`storefront.ts`**). **`auth-button.tsx`** в топ-баре / шапке. Клиентские запросы к **`/api/auth/me`**, **`/api/bonus/*`**, **`/api/account/*`** и **`BonusRedeemBlock`** — с **`credentials: "include"`**.
-- Корзина: кнопка checkout при **`profile == null`** ставит **`setOnAuthSuccess(() => router.push(checkoutPath))`**, **`openAuth()`**, закрывает шит; **`checkoutPath`** = **`/checkout`** (kitch-pizza), **`/losos/checkout`**, **`/thespot/checkout`** — согласовано с префиксами middleware. Ссылка в шапке на личный кабинет — **`storefrontAccountPath(brandSlug)`** (`storefront-account-path.ts`): **`/account`**, **`/losos/account`**, **`/thespot/account`**. Далее — `cart-store`, localStorage key `kitch-cart`, TTL 7 дней (после TTL корзина сбрасывается при следующей гидратации — см. **`onRehydrateStorage`** в **`cart-store.ts`**). В **persist** попадают только **`items`** и **`savedAt`** (`partialize`); состояние **открыто/закрыто**, промокод, ошибки/лоадинг промо и счётчик **`cartButtonPulseKey`** в localStorage не пишутся. **`validatePromoCode`** после гидратации для применённого промо. Позиции с размерами мержатся по ключу **`menuItemId` + `variantId` + топпинги**. Визуальный импульс кнопок корзины при добавлении — см. первый буллет **Витрина** (**`menu-category-bar`**, **`cartButtonPulseKey`**). Состояние выбранной категории апсейла **`upsellCategory`** поднимено в **`src/components/client/cart/CartRoot.tsx`**: сброс при **`!cartOpen`** и при **`brandSlug !== 'losos'`**; пробрасывается в **`CartContent`** через пропсы. Модалка корзины: **`CartRoot`** ставит **`brandSlug`** из **`ClientChrome`**. **`CartContent` / `CartSheet` (мобила) / `CartPanel`** (десктоп, `≥768px`) — заголовок с числом позиций и кнопкой закрытия в одной строке (**`CartContent.tsx`**); ввод промокода — **`storefront-input`**. **Автоскидки:** **`CartRoot`** / **`CartContent`** получают с сервера **`getStorefrontCartPricingBootstrap()`** (**`discounts.ts`**) — правила (**`discount_rules`**, **`trigger: auto`**), **`excludedDiscountCategoryIds`** и **`storefrontExcludedDiscountCategories`** (имена категорий); **`evaluateStorefrontCartDiscount*`** (**`storefront-cart-pricing.ts`**) синхронно вызывает **`evaluateDiscounts`**. При **`totalDiscountBani > 0`** и наличии в корзине позиций из **`exclude_from_discounts`** категорий — подстрочные пояснения (**`StorefrontDiscountExcludedNotice`**). Если активны авто-правила, **`totalDiscountBani === 0`**, но в корзине есть исключённые категории — отдельное серое пояснение (те же компонент/строки **`t.cart.discountDoesNotApplyTo`** / **`discountNotAppliedTo`**). При применённом промокоде, **`totalDiscountBani === 0`** и исключённые позиции — янтарное предупреждение рядом с блоком промокода (**`StorefrontPromoExcludedWarning`**, **`t.cart.promoAcceptedButExcluded`**). До прихода bootstrap возможен временный расчёт **`selectCartDiscount`** без исключений по категориям. **Строка «Доставка» и итого:** сумма доставки **`delivery-store.getDeliveryFeeBani(subtotal)`** от **полного** товарного субтотала (до скидок на строки заказа; зона, режим самовывоз/доставка, порог **`free_delivery_from_bani`** → **«Бесплатно»**); итог скидок — из движка; отображение и подписи доставки — **`getStorefrontDeliveryLineDisplay`** в **`storefront-delivery-display.ts`**: без зоны — прочерк и **`cart.deliveryCostAddressHint`** (RU/RO); при **`outOfZone`** — прочерк, красным **`cart.deliveryOutsideZoneHint`**; в зоне с платной доставкой — сумма и подпись **`cart.deliveryCostAddressHint`** серым. Строка начисления бонусов в **`CartContent`** — текст на мягком фоне через **`--color-accent-foreground`**. **`checkout-view`** передаёт **`outOfZone`** в **`OrderSummary`** (сводка совпадает с корзиной).
-- **Лояльность (бонусы) на витрине:** таблицы **`bonus_transactions`**, **`bonus_settings`**. Один пункт бонуса в UX = **1 MDL** (**100 bani**). Серверная логика — **`src/lib/bonus.ts`**. В **`CartContent`**: строка начисления с заказа — **`t.bonus.earn`**, **`t.bonus.points`** (**`useLanguage`**). В **`OrderSummary`** и **`bonus-redeem-block.tsx`** — ключи **`t.bonus.*`** (баланс, списание, таймер и т.д.). Формула начисления в корзине: **`Math.floor((grandTotalBani / 100) * accrualRate)`**.
-- **`CartSheet`** (мобила, Vaul): **`onOpenAutoFocus`** с **`preventDefault`**; **`focusin`** по контенту шита прокручивает цель (**`scrollIntoView`**, **center**) под клавиатуру на мобильных; под шапкой дроуэра есть **полоска-свайп**, она живёт в **`CartSheet`**, не внутри **`CartContent`**. Для апсейла LOSOS затемнение и нижняя панель — **прямые дети **`Drawer.Content`**** (у контента **`relative`**): блок контента (**`CartContent`**), затем оверлей **`absolute inset-0 z-[15] bg-black/40`** (клик сбрасывает апсейл), затем слот **`LososUpsellSlidePanel`** (**`absolute bottom-0 h-1/2`**, **`z-[20]`**, **`rounded-t-2xl`**, анимация **`translate-y-full`** → **`0`**). На десктопе затемнение и панель остаются **внутри **`CartContent`**** (**`CartPanel`**), без второго затемнения в шите.
-- **Апсейл в корзине (только LOSOS):** `src/components/client/cart/losos-cart-upsell.tsx` — **`LososUpsellCategoryStrip`** (горизонтальный ряд категорий с превью из **`menu_categories.image_url`**, заголовок **`t.cart.addToOrder`**) и **`LososUpsellSlidePanel`** (список позиций категории запросом **`menu_items`** + **`menu_item_variants`**, токены витрины **`[data-brand="losos"]`** в **`globals.css`**). Категории: Supabase **`menu_categories`**, **`brand_id`** по **`LOSOS_BRAND_SLUG`** (**`src/brands/index.ts`**), фильтры **`show_in_upsell`**, **`is_active`**. Добавление в корзину через **`addItem`**; совпадение строки с уже добавленной конфигурацией — **`isSameCartConfiguration`** (**`src/lib/cart-helpers.ts`**); при **qty > 0** в строке списка показываются **− / +** и **`updateQuantity`**, иначе кнопка с ценой (**`--color-accent-soft`** / **`--color-accent-foreground`** для текста на мягком фоне).
-- Доставка: `delivery-store`, localStorage key `kitch-delivery`; в **persist** в основном **режим и координаты** (`partialize`): **`selectedZone`** пересобирается при **`recheckZoneWithZones`** после загрузки полигонов (`getActiveDeliveryZones` в **`DeliveryRoot`**); флаг **`outOfZone`** — точка есть, **`findZoneForPoint`** не нашёл полигона. Поиск адреса в **`DeliveryContent.tsx`** вызывает **`geocodeAddress(q, zones)`**: Nominatim ограничивается **viewbox** активных полигонов бренда (**`bounded=1`**) и предпочитает результат внутри зоны, чтобы адрес не уводило в другие города Молдовы. Карта модалки: **`delivery-modal/DeliveryMap.tsx`** — доставка: центральный пин и реверс-геокод по **`moveend`**; **самовывоз:** центрирование и маркер по **`STOREFRONT_PICKUP_LATLNG`** из **`storefront-pickup-location.ts`** (bd. Dacia 27); тайлы общие — **`leaflet-storefront-tiles.ts`**. Та же точка самовывоза для **`checkout-success-map.tsx`**. Режим **доставка / самовывоз** в UI: **`delivery-mode-island.tsx`** — трек **`storefront-modal-field`**, неактивный сегмент **`bg-transparent`**, активный **`storefront-modal-mode-active`**. Поля адреса и подъезда в **`DeliveryContent.tsx`** — **`storefront-input`** (**`--color-input-bg`**; на **kitch-pizza** белые поля).
-- Checkout: **`checkout/page.tsx`** передаёт клиенту **`getStorefrontCartPricingBootstrap()`** (**`pricingBootstrap`**): авто-правила **`discount_rules`**, **`excludedDiscountCategoryIds`**, **`storefrontExcludedDiscountCategories`** (имена для подсказок об исключённых из скидок категориях); **`checkout-view.tsx`** использует те же **`evaluateStorefront*`** (**`storefront-cart-pricing.ts`**) для автоскидок с **`excludedCategoryIds`**, промокод — **`resolvePromoCode`** / сохранённые правила пользователя. `createOrder`, **`OrderSummary`** (пропы **`deliveryFeeBani`**, **`outOfZone`**, **`grandTotal`**, **`excludedDiscountNotice`** (подсказки про исключённые категории), уже с вычетом бонусов; **`bonusesRedeemed`**; блок **`BonusRedeemBlock`** передаётся **дочерним элементом** (`children`) между сводкой строк и итогом), `CheckoutProgressSteps`, success page с картой (`checkout-success-view`, `checkout-success-map`). **`createOrder`**: в **`orders`** пишутся **`delivery_lat` / `delivery_lng`** при доставке — с **`useDeliveryStore`** (**`lat`/`lng`** после карты/геокода в модалке) либо **best-effort** повторный **`geocodeAddress`** по строке адреса на сервере (сбой геокода заказ не отменяет). **`checkout-view.tsx`**: текстовые поля и **`Select`** — **`storefront-input`**; неактивные переключатели (время доставки, способ оплаты) — **`checkoutToggleInactive`** (**`bg-[var(--color-selector-item-bg)]`**, на **kitch-pizza** — **`#ffffff`**). **`useAuthStore`** — **`profile`** для **`profile_id`** в **`createOrder`** и префилла имени/телефона из стора при пустых полях (после **`fetchMe`**); гидратация **`cart-store`** — если **`persist.hasHydrated()`** уже `true`, подписка **`onFinishHydration`** не вешается (ранний выход в **`useEffect`**). **`BonusRedeemBlock`**: клиентский компонент по умолчанию (`bonus-redeem-block.tsx`): **`profileId`** из **`useAuthStore`**, баланс **`GET /api/bonus/balance`**, настройки **`GET /api/bonus/settings`**, лимит списания **`Math.min(balance, Math.floor((orderTotalBani/100) * maxRedemptionRate))`**, состояние **`bonusesRedeemed`** → итог **`grandTotal - bonusesRedeemed * 100`** (bani). В **`src/lib/actions/create-order.ts`** в **`order_items`** пишется **`variant_id`** (FK на **`menu_item_variants`**, nullable) и **`size`** — строка-снимок (название варианта или исторические **`s`** / **`l`** для старых заказов); в **`orders`** — **`bonuses_redeemed`**, **`bonuses_earned: 0`**, **`profile_id`**, при доставке **`delivery_lat`/`delivery_lng`** (см. выше); после успешной вставки **`order_items`** при **`bonuses_redeemed > 0`** и **`profile_id`** вызывается **`redeemBonus`** (ошибки только в лог, заказ не откатывается). Если в заказе есть **`profile_id`** и непустое **`user_name`**, best-effort **`UPDATE profiles SET name …`** только когда имя в профиле пустое (**`name IS NULL OR name = ''`**), ошибки не откатывают заказ. После успешной оплаты в POS (**`payOrder`**: **`paid_at`**, **`status: done`** из **`delivery`** или из **`ready`** при **`pickup`/`aggregator`**; запись **`cash_transactions`**) — при непустом **`profile_id`** вызывается **`processBonusAccrualOnOrderDone(profileId, orderId, totalBani, orders.bonus_multiplier ?? 1)`** из **`bonus.ts`** (итог **`total`** в банях; **`bonus_multiplier`** читается из той же выборки **`orders`** до апдейта статуса); начисление по **`bonus_settings`**, запись **`orders.bonuses_earned`**; ошибки **`console.error`**, оплату не блокируют).
-- **Успешный заказ:** `src/components/client/checkout/checkout-success-view.tsx` — блок героя со стилизацией `storefront-checkout-success-hero` в `globals.css`; декоративная иллюстрация `/Vector.svg` только у **kitch-pizza**. У брендов **losos** и **the-spot** декор не показывается, текст без правых отступов под графику.
-- **Личный кабинет (витрина):** **`src/app/(client)/account/page.tsx`** — клиентская страница; guard: **`GET /api/auth/me`** с **`credentials: 'include'`**, без профиля — **`router.replace('/')`**, до успеха UI пустой (без спиннера). Над блоком бонусного баланса по центру — **`Avatar`** (**64px**, тот же **`/api/avatar/{profileId}`**). Подпись к балансу — **`t.bonus.balance`**. Секции: **бонусы** — **`GET /api/bonus/balance?profileId=`**; **последние 10 заказов** — **`GET /api/account/orders`** (сессия из cookie, **`profile_id`**, slug бренда из **`brands`**); **профиль** — имя (**`storefront-input`**), сохранение **`PATCH /api/account/profile`** (`{ name }`), телефон только чтение из профиля сессии; выход — **`POST /api/auth/logout`** + **`clearProfile()`**. Локализация статусов заказов и дат — RO/RU на странице. Дублирующее обновление имени через server action возможно в **`src/lib/actions/account/update-profile.ts`** (FormData); страница аккаунта использует REST **`/api/account/profile`**.
-- i18n: `src/lib/store/language-store.ts` и `src/lib/i18n/storefront.ts`; **`ClientChrome`** (`client-chrome.tsx`) синхронизирует `document.documentElement.lang`, монтирует **`AuthInitializer`**, **`AuthModal`**, **`MainHeader`**; **`MenuCategoryBar`** в **`ClientChrome`** **не** рендерится для бутик-брендов (в т.ч. **kitch-pizza**) — полоса категорий только на **главной** в **`(client)/page.tsx`**. Checkout-поток: без **`MainHeader`** и **`MenuCategoryBar`**; **`TopNav`** нигде не используется.
-- Haptics: `StorefrontHaptics` подключается только на витрине и checkout; отключение через `data-haptics="off"`.
-- Телефон в шапке и блоке успеха checkout: из `getBrandPhone(brandSlug)` (`src/lib/brand-phone.ts`), не общий текст из словаря.
-- Скелетоны переходов: `src/components/client/storefront-skeletons.tsx` — **`hasBoutiqueSkeleton`** включает **kitch-pizza** (одна ветка с losos/the-spot: **`CategoryBarSkeleton`**, **`FeaturedSkeleton`**, сетка меню); **CheckoutSkeleton** бутик-ветка для тех же slug; **`(client)/loading.tsx`** / **`checkout/loading.tsx`** — **`x-brand-slug`**. **Админка:** `src/app/(admin)/admin/loading.tsx` и вложенные при необходимости.
+### i18n
 
-Важное про Leaflet: компоненты с `leaflet` / **`react-leaflet`** подключать только client-side через `dynamic(..., { ssr: false })`; **не** вызывать **`import('react')`** внутри фабрики **`dynamic`** (Turbopack/HMR). Не реэкспортировать карту из barrel-файлов, если это ломает SSR.
+- Языки: `ru`, `ro`. **DEFAULT_LANG = `ro`** (`src/lib/i18n/storefront.ts`).
+- persist key `lang` в localStorage. `<html lang="ro">` по умолчанию; `ClientChrome` синхронизирует `document.documentElement.lang` при смене.
+- Динамические названия — `pickLocalizedName`, `pickLocalizedDescription`.
+- Server action `createOrder` принимает язык для snapshot заказа и текстов ошибок.
+
+### Maintenance mode
+
+Флаг `MAINTENANCE_MODE` в `src/app/(client)/layout.tsx`. При `true` рендерится только `MaintenanceScreen` + `AuthInitializer` + `MetaPixel`. **`/admin` и `/pos` не используют этот гейт.**
+
+### Layout и SEO
+
+- `(client)/layout.tsx`: `generateMetadata`, `BrandJsonLd`, `MetaPixel`, резолв бренда по `x-brand-slug`.
+- `(client)/page.tsx`: `generateMetadata`, `<h1 className="sr-only">` по бренду.
+- `BrandJsonLd` в `components/seo/JsonLd.tsx` — JSON-LD `Restaurant` + `FoodDelivery`.
+- SEO: `src/lib/seo/brand-seo.ts` (`BRAND_SEO`, `getBrandSeo`, canonical `kitch.md`/`losos.md`/`thespot.md`).
+- `robots.ts`: allow `/`, disallow `/admin/`, `/pos/`, `/api/`.
+- `sitemap.ts`: brand-aware по `x-brand-slug`.
+
+### Корзина и checkout
+
+- Адрес доставки с витрины → **одна строка** `orders.delivery_address`. Структурные `address_*` не заполняются.
+- POS при открытии мастера разрезает через `posCheckoutAddressFieldsFromOrder` (`split-composite-delivery-address.ts`) если все четыре поля пусты. Извлекает Scara / Etaj / Apartament / Interfon (плюс RU/EN аналоги: подъезд/этаж/квартира/домофон, entrance/floor/apartment/intercom). Если хоть одно поле уже заполнено — строка не режется.
+- Точка самовывоза bd. Dacia 27: `storefront-pickup-location.ts`.
+- Меню для апсейла LOSOS использует `menu_categories.show_in_upsell`.
+- Storefront-разработка: использовать `storefront-modal-*`, `storefront-checkout-*`, `storefront-input` вместо локальных цветов.
+
+### /account
+
+Клиентская страница, guard через `GET /api/auth/me` с `credentials:'include'`. Без профиля — `router.replace('/')`, UI пустой до успеха.
+
+Секции:
+- Бонусы: `GET /api/bonus/balance?profileId=`.
+- Последние 10 заказов: `GET /api/account/orders`.
+- Профиль: `PATCH /api/account/profile` (`{ name }`), телефон read-only.
+- Аватар: `GET /api/avatar/{profileId}` (SVG DiceBear thumbs, `Cache-Control: public, max-age=31536000`).
+- Выход: `POST /api/auth/logout` + `clearProfile()`.
+
+URL аккаунта по бренду: `storefront-account-path.ts` (`/account`, `/losos/account`, `/thespot/account`).
+
+### AuthModal
+
+`AuthModal` — Vaul при ширине ≤1023px, shadcn Dialog на десктопе. Тексты — `t.auth.modal`. Управление — `auth-store` (`openAuth(onAuthSuccess?)`, `closeAuth`, `dismissAuth`, `fetchMe`).
+
+### Leaflet
+
+Компоненты с `leaflet`/`react-leaflet` подключать **только client-side** через `dynamic(..., { ssr: false })`. **Не вызывать `import('react')` внутри фабрики `dynamic`** (ломает Turbopack/HMR). Не реэкспортировать карту из barrel-файлов.
 
 ## Админка
 
-- Auth: Supabase email/password.
-- Защита: middleware редиректит `/admin/*` без сессии на `/admin/login`. Маршруты **`/api/admin/*`** без сессии Supabase Auth — ответ **401 JSON** (без редиректа на логин).
-- **`src/app/(admin)/admin/layout.tsx`:** `Promise.all` для `getBrands()`, `getAdminBrandSlug()` и `createClient()`, затем `supabase.auth.getUser()` — email передаётся в оболочку для карточки внизу сайдбара.
-- **`AdminShell`** (`src/components/admin/AdminShell.tsx`): **`TooltipProvider`** + **`SidebarProvider`** → **`AdminSidebar`** и **`SidebarInset`**. В **`SidebarInset`** сверху полоска **`SidebarTrigger`** (`sticky top-0`, в зоне основного контента, не внутри выезжающей панели), ниже контент страниц с `p-8`; **`Sonner`**.
-- **`AdminSidebar`:** **`Sidebar`** (`src/components/ui/sidebar`) с **`collapsible="offcanvas"`** и **`variant="inset"`** — при сворачивании панель полностью скрывается (без узкого рейла с иконками). В **`SidebarHeader`**: логотип выбранного бренда и **`BrandSwitcher`**. Навигация через **`SidebarGroup`** + **`SidebarGroupLabel`**: группа **«Бренд»** — **Заказы**, **Меню** (категории, позиции меню, топпинги, **«Популярное»** → `/admin/featured-menu`), **Доставка** (зоны); **`SidebarSeparator`**. Группа **«Маркетинг»** (**иконка секции `Megaphone`**): **«Галерея»** → **`/admin/promotions`** (баннеры **`promotions`**, иконка **`Images`**), **«Акции»** (правила **`discount_rules`**) → **`/admin/discount-rules`** (**`Tag`**), **Промокоды** → **`/admin/promo-codes`** (**`Ticket`**), **Клиенты** → **`/admin/customers`** (**`Users`**), **Программа лояльности** → **`/admin/settings/bonus`** (**`Gift`**). **`SidebarSeparator`**. Группа **«Общее»** — **Склад** (**`Collapsible`**): остатки, поставщики, **категории ингредиентов** → **`/admin/inventory/ingredient-categories`**, ингредиенты, полуфабрикаты, техкарты, поставки, **Списания** → **`/admin/inventory/writeoffs`** (икона **`Trash2`**), инвентаризации, **«История движений»** → **`/admin/finance/ledger`** (**`ArrowLeftRight`**). Отдельной секции **«Финансы»** нет — журнал движений вынесен в ту же группу **«Склад»**. Далее **«Персонал»** (**`Collapsible`**): **Сотрудники** → `/admin/staff`, **Смены** → `/admin/staff/shifts`. Отдельных групп **«Клиенты»** и **«Настройки»** в сайдбаре нет (эти пункты перенесены в **«Маркетинг»**). Многоуровневые разделы — **`Collapsible`** + **`SidebarMenuSub`**; одиночные пункты — прямая ссылка в **`SidebarMenu`**; активная ссылка по **`usePathname`**. **`SidebarFooter`:** email и кнопка выхода (**`signOut`**, редирект на `/admin/login`).
-- На серверных страницах админки **независимые** запросы к Supabase по возможности выполняются через **`Promise.all`** (например: `menu`, `featured-menu`, `supplies`, `ingredient-categories`, `tech-cards`, `semi-finished`, `toppings`).
-- CRUD и выборки **брендового** контента (меню, промо, зоны и т.д.) работают в контексте **`getAdminBrandId()`**; **список `/admin/orders`** — см. отдельный пункт ниже (**`getOrders`** без принудительного **`eq(brand_id, cookie)`**). **Склад** и **персонал** — без привязки к выбранному в **`BrandSwitcher`** бренду (см. **Multi-brand**).
-- **Заказы (`/admin/orders`):** сверху страницы — карточки метрик за текущие сутки UTC (**`getAdminOrdersTodayMetrics`** в **`lib/admin/orders-today-metrics.ts`**, при **`brand_id`** в URL — по бренду, иначе по всем); список — server-side **`getOrders`** (`src/lib/actions/get-orders.ts`) и **`parseOrdersSearchParams`** (`src/lib/admin/orders-url.ts`). **Фильтры (клиент → URL):** кнопки **«Все / Активные / Выполненные / Отменённые»** → **`status_group`** (по умолчанию **«Активные»** без параметра: `new`…`delivery`); селект бренда (**`getBrands`** на **`page.tsx`**) → **`brand_id`**; источник **«Сайт / POS / Glovo»** → **`order_src`** (`website`/`pos` без aggregator, `glovo` = **`delivery_mode = aggregator`**); поиск **`search`**, период **`date_from`/`date_to`/`time_*`** (при отсутствии дат в query — фильтр **«сегодня»** по UTC, **`orders-url`** + **`filters-bar`**); таблица (**`orders-table.tsx`**): колонка **«Бренд / источник»** — **`BrandLogoCell`** (**`slug`/`name`** из join **`brands(name, slug)`**, картинки из **`public`**, см. конфиг **`brands/index.ts`**), бейджи **WEB**/ **GLOVO**; статус — read-only цветная капсула (палитра по аналогии с POS); **«Состав»** — только число позиций и склонение, без разворота; строки активных статусов **`new`…`delivery`** — фон **#F2FFBC**; **«Время исполнения»** без изменений; **клик по строке** открывает боковую шторку **`OrderDetailSheet`** (`src/app/(admin)/admin/orders/order-detail-sheet.tsx`; state **`selectedOrderId`** в **`orders-client.tsx`**, страница списка — RSC без `useState`). Детальный заказ подгружает **`fetchAdminOrderDetail`** (**`orders/actions.ts`**, service role): хронология статусов/времени (таймлайн), блок **«Состав заказа»** с позициями (**подарки** **`is_gift`**, топпинги **`name_ru`**) и сводкой (подытог без подарков, промо/скидка, бонусы, доставка, итого в MDL), **«Оплата»** (в т.ч. **`mixed`**, **`change_from`**), **«Участники»** (клиент / **`profiles`**, оператор и курьер из **`staff`**, ссылка **`/admin/customers/{profile_id}`** при наличии **`profile_id`**), блок по **`delivery_mode`** (адрес и **`address_*`**, **`comment`**, самовывоз или Glovo одной строкой). Явный **`select`** в **`getOrders`**: колонки заказа (включая **`aggregator`**) + **`brands(name, slug)`** + **`order_items(*)`**. Смена статуса из админки по-прежнему через **`updateOrderStatus`**, если используется вне этого списка.
-- **Статусы в БД и типах** (`OrderStatus` в `src/types/database.ts`): `draft` · `new` · `confirmed` · `cooking` · `ready` · `delivery` · `done` · `cancelled` · `rejected`. У типа **`Order`** в **`database.ts`** также отражены **`delivery_mode`** с **`aggregator`**, **`source`**, **`paid_at`**, **`ready_at`**, **`operator_id`**, финансовые поля split и join **`brands`** в **`OrderWithItems`**. Статус **`draft`** в данных остаётся для старых строк (**`sendPosDraftToKitchen`** переводит в **`cooking`** из **`draft`**, **`new`** или **`confirmed`**). В шторке **`OrderDetailSheet`** для отмен/отказов в таймлайне учитываются данные заказа (**`cancel_reason`** и т.д.); адрес и структурные поля **`address_*`** — в блоке доставки по режиму.
-- Загрузка изображений идёт через `POST /api/upload` в публичный bucket `menu-images`.
+### Layout
 
-Основные разделы:
+`AdminShell`: `TooltipProvider` + `SidebarProvider` → `AdminSidebar` (`collapsible="offcanvas"`, `variant="inset"`) + `SidebarInset`.
 
-| Route | Назначение |
+Активный бренд: cookie `admin-brand-slug` → `getAdminBrandId()` для брендового контента.
+
+Корень `/admin` → `redirect('/admin/orders')`.
+
+`/admin/*` без сессии → редирект на `/admin/login`. `/api/admin/*` без сессии → 401 JSON.
+
+Независимые запросы — `Promise.all`.
+
+### Разделы
+
+| Маршрут | Описание |
 |---|---|
-| `/admin/orders` | метрики за день (UTC); фильтры + таблица; URL (**`status_group`**, **`brand_id`**, **`order_src`**, **`search`**, даты — дефолт сегодня UTC при пустых); **`getOrders`** без обязательного **`getAdminBrandId()`**; таблица: лого бренда (**`BrandLogoCell`**), статусы цветом, счётчик позиций без раскрытия, подсветка активных **#F2FFBC**; **клик по строке** — **`Sheet`** (**`order-detail-sheet`**, **`fetchAdminOrderDetail`**) |
-| `/admin/customers` | таблица профилей: RPC **`admin_customers_list(search_q)`**; поиск **`?q=`**; клик по строке → карточка клиента |
-| `/admin/customers/[id]` | RSC: профиль, баланс (**`SUM(bonus_transactions.amount)`**), до **50** транзакций, до **20** заказов; **BonusAdjustForm** → **`POST /api/admin/bonus/adjust`** (тело snake_case, **`staff_id`** — первый активный **`staff`**; без сотрудника кнопка недоступна) |
-| `/admin/settings/bonus` | настройки лояльности: серверная загрузка **`bonus_settings`** `id=1`, клиентский **`BonusSettingsForm`**, сохранение **`updateBonusSettings`** (проценты 1–100 в UI → доли в БД, **`updated_at`**) |
-| `/admin/categories` | категории меню: отдельные поля **название RU** и **название RO**; slug из RU; в таблице и в выборе категории в меню отображаются оба языка; **картинка категории** → **`menu_categories.image_url`** (bucket **`menu-images`**, путь `categories/…`); переключатель **«Показывать в апсейле корзины»** → **`menu_categories.show_in_upsell`** (используется апсейлом LOSOS на витрине); флаг **«Исключить из скидок»** → **`menu_categories.exclude_from_discounts`** (**`category-dialog`**, **`categories-table`** — колонка/бейдж **«Без скидок»**): такие **`category_id`** не участвуют в **`item_percent`**, **`order_percent`/`order_fixed`**, **`cheapest_item_free`** в **`evaluateDiscounts`** (правила **`free_delivery`**, **`bonus_multiplier`**, подарки без изменений) |
-| `/admin/menu` | позиции меню; страница передаёт **`getAdminBrandId()`** в **`MenuTable`** → проп **`brandId`** в **`RecipeEditorModal`**. Выборка с **`variants:menu_item_variants(id, name_ru, sort_order, price)`** (подписи вкладок редактора рецепта от **`name_ru`**, цены в таблице — по **`price`**). **Покрытие техкартой:** бейджи **«✓ Рецепт»** / **«Нет рецепта»** по **`product_recipes`**, фильтр **«Без рецепта»**; клик открывает **`RecipeEditorModal`**. Параметр URL **`?edit={menu_item_id}`** (после открытия списка) автоматически открывает модалку рецепта (**`menu-table.tsx`** → **`router.replace('/admin/menu')`**). **`RecipeEditorModal`**: вкладки по вариантам / базовый **`variant_id` IS NULL** — как раньше. **Типы строк рецепта:** **Ингредиент** (cmdk), **Полуфабрикат** (cmdk), **Блюдо (комбо)** — первый селект **`menu_items`** того же бренда (**`is_active = true`**), второй при **`has_sizes`** — **`menu_item_variants`**; в **`product_recipes`**: **`menu_item_ref_id`**, **`menu_item_ref_variant_id`** (или `NULL` без размеров), **`ingredient_id`/`semi_finished_id` = NULL**, **`quantity = 1`**, **`quantity_gross` = NULL**. Для комбо превью по выбранному блюду: запрос **`product_recipes`** с join **`ingredients`**, **`semi_finished`/`semi_finished_items`**, read-only **Брутто** / **Нетто** / **Себест.** (серым), формат **`N г`/`мл`/`шт`**, **`X.XX MDL`**; пустой состав — **«—»** и tooltip **«Рецепт не заполнен»**; смешанные единицы массы в сумме — **«—»** и пояснение в tooltip. Таблица внутри **`TooltipProvider`**. Колонка **«Ед.»** для комбо — **«→ рецепт»**. Для строк **Ингредиент/П/ф** логика без изменений: **г / мл / шт**, **`recipe-editor-qty`**, в БД **`quantity`** (нетто), **`quantity_gross`** (брутто; списание через **`recipeIngredientStockStorageQty`**), **Себест.** = брутто × **`avg_cost`**. Итог «Себестоимость» внизу модалки включает превью-комбо (**`costMdlSum`**). Сохранение — браузерный Supabase. **Теор. себестоимость в списке** (`costMap` на **`page.tsx`**): по-прежнему только прямые строки с **`ingredients`**; строки комбо там не разворачиваются. **`menu-item-dialog.tsx`**, **`recipeVariantsForEditor`**, **`legacy-menu-sizes.ts`** — без изменений контракта. |
-| `/admin/featured-menu` | блок «Новое и популярное» (в сайдбаре — **«Популярное»**) |
-| `/admin/toppings` | группы топпингов и топпинги; можно создать новый топпинг или скопировать уже существующий в выбранную группу; у группы — **«Безлимит»** (по умолчанию) или число «сколько можно выбрать» → колонка `topping_groups.max_selections`. В модалке топпинга — **состав рецепта** (ингредиент / п/ф, брутто/нетто) как в **`RecipeEditorModal`**, строки **`topping_recipes`**; сохранение через RPC **`save_topping_with_recipes`** (см. **`src/app/(admin)/admin/toppings/actions.ts`**, **`topping-dialog.tsx`**) |
-| `/admin/promotions` | промо-баннеры RU/RO для слайдера витрины (таблица **`promotions`**; в сайдбаре — **«Галерея»**) |
-| `/admin/discount-rules` | правила скидок **`discount_rules`** (все бренды: выборка без фильтра по **`getAdminBrandId()`**, сортировка **`brand_id`**, **`priority` DESC**); клиент **`PromotionsClient`**, диалог **`rule-dialog`** (react-hook-form + zod), actions **`saveRule`** / **`deleteRule`** / **`toggleRuleActive`**; в сайдбаре — **«Акции»** |
-| `/admin/promo-codes` | промокоды |
-| `/admin/staff` | персонал: CRUD сотрудников (`staff`), PIN через **`bcryptjs`** в server actions; чтение/запись с **`createServiceRoleClient()`** (не светить **`pin_hash`** в anon); для роли **курьер** — генерация deep-link Telegram (`generateTelegramLink`, env **`TELEGRAM_COURIER_BOT_USERNAME`**) |
-| `/admin/staff/shifts` | история смен (`shift_logs` + join **`staff`**, до 200 записей), подсчёт доставленных заказов (`orders.status = done`, **`courier_id`**, **`delivered_at`** в интервале смены); UI: фильтры курьер/даты, сводка, длительность (тикающая для открытых смен); клиент **`ShiftsClient`**, только service role |
-| `/admin/delivery-zones` | несколько зон доставки, полигоны Leaflet Draw, цвет зоны, цена/минималка/время |
-| `/admin/finance/ledger` | **История движений:** журнал **`stock_ledger`** (до **200** последних записей, **`created_at` DESC**), join **`ingredients`**, выборка в **`page.tsx`** через **`createServiceRoleClient()`**; клиентский **`ledger-table.tsx`** — фильтр по **`movement_type`** на клиенте, таблица (дата **ДД.ММ.ГГГГ ЧЧ:мм**, ингредиент, бейджи типов движения с русскими подписями через **`movementTypeLabel`** (**`supply`**, **`sale`**, **`writeoff`**, **`audit`** / **`audit_adjustment`** → «Инвентаризация», **`manual`** и т.д.; неизвестный тип — как в БД), изменение количества и суммы в MDL через **`inventory-units`**). В **`AdminSidebar`** ссылка в группе **«Склад»**. Отдельных server actions для страницы нет. |
-| `/admin/inventory/stock` | **Остатки:** read-only обзор `ingredients` + `ingredient_stock`; сводные карточки; фильтр «Все / В наличии / Нет» на клиенте (пороги по сырому `quantity` из БД); **`InventorySearch`** — поиск по имени ингредиента поверх выбранного фильтра. В таблице остаток и подпись единицы в **кг / л / шт** (`inventory-units`); колонка **себестоимость / ед.** — **`avg_cost`** как **MDL за кг / л / шт** в UI. Страница серверная, таблица — `stock-overview.tsx`. |
-| `/admin/inventory/suppliers` | поставщики: CRUD **без фильтра по бренду**; удаление с проверкой отсутствия связанных `supply_orders`; в списке — **`InventorySearch`** (имя, контакт, телефон, примечание). |
-| `/admin/inventory/ingredient-categories` | **Категории ингредиентов:** справочник **`ingredient_categories`**; CRUD через **`src/lib/actions/inventory/ingredient-categories.ts`** (service role); при удалении категории у связанных **`ingredients`** сбрасывается **`category_id`** |
-| `/admin/inventory/supplies` | **Поставки:** заказы поставок с позициями (`supplies-table.tsx` — **`InventorySearch`** по поставщику, дате, примечанию, суммам и именам ингредиентов в строках). В диалоге **`supply-order-dialog.tsx`** по строкам: **«Заказано»** и опционально **«Получено»** (в БД — **`supply_order_items.received_qty`**, nullable; если пусто — считается равным заказанному **`quantity`**); суммы документа итогов по строкам считаются от **заказанного** кол-ва. Количества в UI в **кг/л/шт**; **цена без НДС** и **цена с НДС** — синхронно (строка VAT % общая), в БД при сохранении — ex-VAT в г/мл и MDL за г/мл через `toStorageQty` / `toStoragePrice`. Контейнер диалога широкий (**`!w-[calc(100vw-16px)]`**, **`!max-w-[1280px]`**, **`sm:!max-w-[calc(100vw-32px)]`**, **`xl:!w-[1280px]`** / **`xl:!max-w-[1280px]`** — перебивает **`sm:max-w-sm`** у базового **`DialogContent`**), **`max-h-[92vh]`**, таблица строк с горизонтальным скроллом при узком экране. Выбор ингредиента — **`IngredientCombobox`** (`ingredient-combobox.tsx`, Popover + **Command**). **`createSupplyOrder`** (`supplies/actions.ts`) — вставка заказа и строк с **`received_qty`**; затем пополнение **`ingredient_stock`** и **`stock_ledger`** по **фактическому** объёму **`received_qty ?? quantity`**, **`avg_cost`** пересчитывается средневзвешенно по цене поставки (ex-VAT). |
-| `/admin/inventory/ingredients` | ингредиенты + остатки; **`InventorySearch`** по названию (`ingredients-table.tsx`). Выборка с join **`ingredient_categories`**. **Фильтр по категории:** таблетки **«Все»** / категория / **«Без категории»**; при **< 500** строк (`INGREDIENT_SERVER_FILTER_THRESHOLD`) фильтрация на клиенте, при **≥ 500** — query **`?category=`** и фильтр на сервере. В форме — select **«Категория»** (**`ingredients.category_id`**, значение **«Без категории»** = `null`), подписи единиц **кг / л / шт** (в БД `g` / `ml` / `pcs`), поле **«% потерь при очистке»** → **`ingredients.waste_percent`** (0–100; для техкарты: нетто = брутто × (1 − %/100)); при создании — строка **`ingredient_stock`** (`quantity` 0, **`avg_cost`** 0); в таблице остаток и **средн. себестоимость** в отображаемых единицах (`inventory-units`). |
-| `/admin/inventory/writeoffs` | **Списания (`stock_writeoffs`):** список с **`dynamic = 'force-dynamic'`**, выборка через **`createServiceRoleClient()`** в **`inventory/writeoffs/page.tsx`**, сортировка по **`date` DESC**; столбцы: дата (**ДД.ММ.ГГГГ**), причина ( **`waste` / `spoilage` / `tasting` / `staff_meal` / `other`** → русские подписи), заметка, число строк **`stock_writeoff_items`**, сумма **`total_cost`** по строкам (generated). Пустое состояние **«Списаний пока нет»**; кнопка **«Новое списание»** → **`/admin/inventory/writeoffs/new`**. |
-| `/admin/inventory/writeoffs/new` | Новое списание: клиент **`writeoff-form.tsx`** (дата, причина, заметка, таблица позиций с **`IngredientCombobox`** из **`supplies/`**, количество в кг/л/шт через **`inventory-units`**, read-only колонка **«Стоимость»** = **`ingredient_stock.avg_cost × quantity`** в MDL при выборе ингредиента, итог внизу). Данные ингредиентов с **`ingredient_stock(avg_cost)`** на серверной **`new/page.tsx`**. **`createWriteoff`** — **`inventory/writeoffs/actions.ts`**, только **service role**: вставка **`stock_writeoffs`** (**`brand_id: null`**), строк **`stock_writeoff_items`** с **`cost_per_unit`** из текущего **`avg_cost`**, уменьшение **`ingredient_stock.quantity`**, записи **`stock_ledger`** (**`movement_type: writeoff`**, **`reference_type: stock_writeoff`**, отрицательный **`quantity_delta`**), затем **`redirect`** на **`/admin/inventory/writeoffs`**. |
-| `/admin/inventory/audits` | **Список инвентаризаций (`stock_audits`):** хлебные крошки **Склад / Инвентаризации**; таблица с **`InventorySearch`**; колонка **«Расхождение (MDL)»** — сумма **`diff_cost`** по строкам (если все `null` — «—»). **«Открыть»** — ссылка на **`/admin/inventory/audits/[id]`**. **«Новая инвентаризация»** — server action **`createAudit`** в **`audits/actions.ts`**: вставка **`stock_audits`** с **`brand_id`** из **`getAdminBrandId()`**, строки **`stock_audit_items`** (ожидание из остатка, **`actual_qty: null`**), **`redirect`** на карточку аудита. |
-| `/admin/inventory/audits/[id]` | **Карточка инвентаризации:** серверная загрузка аудита и **`stock_audit_items`** (в т.ч. **`diff_cost`**, **`cost_per_unit`**, join **`ingredients`**); черновик / подтверждена; таблица позиций (**`audit-items-table.tsx`**) — кг/л/шт, колонка **«Стоимость»**, итог по **`diff_cost`**; подтверждение — server actions в **`audits/[id]/actions.ts`** (**`createServiceSupabaseClient`**, обновление остатков, **`stock_ledger`** с **`movement_type: audit_adjustment`**, запись **`cost_per_unit`** / строки **`cost_per_unit`**, **`diff_cost`**). |
-| `/admin/inventory/semi-finished` | полуфабрикаты и состав `semi_finished_items`; **`InventorySearch`** по названию и тексту состава (`semi-finished-table.tsx`). Диалог **`semi-finished-dialog.tsx`** (`sm:max-w-4xl`): при открытии загрузка ингредиентов с `ingredient_stock(avg_cost)`; **ввод количеств и выхода — в г / мл / шт** (как в БД), селект единиц с подписями **г / мл / шт**, сохранение **без** `toStorageQty`; сводка себестоимости — **`qty × avg_cost`** в MDL за единицу хранения. **Таблица списка** (`semi-finished-table.tsx`) по-прежнему показывает кг/л/шт через **`inventory-units`**. |
-| `/admin/inventory/tech-cards` | **Только чтение — обзор себестоимости по техкартам:** хлебные крошки **Склад / Техкарты**; выборка **`menu_items`** с вложением **`product_recipes!product_recipes_menu_item_id_fkey`** (явный FK из двух связей **`product_recipes` → `menu_items`**) — **`id`, `ingredient_id`, `semi_finished_id`, `quantity`, `quantity_gross`, `ingredients(name, unit, ingredient_stock(avg_cost))`**; строки с **`semi_finished_id`** в сумме себестоимости не участвуют; в MDL суммируются только ингредиенты с известным **`avg_cost`**, объём строки — **`recipeIngredientStockStorageQty`** (брутто, если задан **`quantity_gross`**) (**«—»** только если нет ни одной такой строки). Колонка **«Ред.»** — ссылка **«Открыть в меню»** на **`/admin/menu?edit={id}`**. Редактирование рецепта — **`RecipeEditorModal`** на **`/admin/menu`**. |
+| `/admin/orders` | Метрики за сутки UTC (`getAdminOrdersTodayMetrics`) + фильтры (`status_group`, `brand_id`, `order_src`, `search`, даты — дефолт сегодня UTC) + таблица. Клик по строке → `OrderDetailSheet` через `fetchAdminOrderDetail` (service role). |
+| `/admin/customers` | RPC `admin_customers_list(search_q)`; поиск `?q=`. |
+| `/admin/customers/[id]` | RSC: профиль, баланс (`SUM(amount)`), до 50 транзакций, до 20 заказов. `BonusAdjustForm` → `POST /api/admin/bonus/adjust`. |
+| `/admin/settings/bonus` | `bonus_settings` id=1; `updateBonusSettings` (`%` в UI → доли в БД). |
+| `/admin/categories` | `menu_categories`: RU/RO, slug, `image_url`, `show_in_upsell`, `exclude_from_discounts`, `workshop`. |
+| `/admin/menu` | `menu_items` + `menu_item_variants`. `RecipeEditorModal` (типы строк: ингредиент, п/ф, комбо). `?edit={id}` автооткрытие. Бейджи покрытия рецептом. |
+| `/admin/featured-menu` | «Популярное». |
+| `/admin/toppings` | Группы + топпинги; копирование между группами; состав через `topping_recipes` (RPC). |
+| `/admin/promotions` | Промо-баннеры RU/RO. |
+| `/admin/discount-rules` | `discount_rules` (все бренды, без `getAdminBrandId()`). Actions: `saveRule`, `deleteRule`, `toggleRuleActive` (service role). |
+| `/admin/promo-codes` | `promo_codes`. |
+| `/admin/staff` | `staff` + PIN (`bcryptjs`); deep-link Telegram для курьеров. Service role. |
+| `/admin/staff/shifts` | `shift_logs` + join `staff` + подсчёт доставленных (`orders.status=done`, `courier_id`, `delivered_at` в интервале). |
+| `/admin/delivery-zones` | `delivery_zones`: полигоны Leaflet Draw, color, цена, минималка, время. |
+| `/admin/finance/cash-sessions` | Список смен (фильтры даты/staff/status, до 200; агрегаты по `cash_transactions` + Glovo card из `orders`). |
+| `/admin/finance/cash-sessions/[id]` | Деталь — scaffold (данные через `getCashSessionDetail`). |
+| `/admin/finance/ledger` | `stock_ledger`, до 200 последних; фильтр по `movement_type` на клиенте; service role. |
+| `/admin/inventory/stock` | Остатки (read-only); фильтр «Все/В наличии/Нет» на клиенте; единицы кг/л/шт. |
+| `/admin/inventory/suppliers` | Поставщики (CRUD без бренда; удаление с проверкой `supply_orders`). |
+| `/admin/inventory/ingredient-categories` | `ingredient_categories`; при удалении категории — `category_id=NULL` у связанных ингредиентов. |
+| `/admin/inventory/ingredients` | `ingredients` + `ingredient_stock`. Фильтр категории: клиент при <500 строк (`INGREDIENT_SERVER_FILTER_THRESHOLD`), сервер при ≥500 (`?category=`). Поле `waste_percent`. |
+| `/admin/inventory/semi-finished` | Полуфабрикаты; диалог состава работает напрямую в г/мл/шт. |
+| `/admin/inventory/tech-cards` | Read-only обзор себестоимости. Ссылка «Открыть в меню» → `/admin/menu?edit={id}`. |
+| `/admin/inventory/supplies` | Поставки с `received_qty`. |
+| `/admin/inventory/writeoffs` (+ `/new`) | Списания. |
+| `/admin/inventory/audits` (+ `/[id]`) | Инвентаризации (создание + карточка с подтверждением). |
 
-Примечания:
-
-- Топпинг физически принадлежит одной группе через `toppings.group_id`. Действие «Существующий» в `/admin/toppings` создаёт **копию** топпинга в текущей группе, не переносит оригинал; вместе с заголовком копируются строки **`topping_recipes`**. Дубликаты с тем же `name_ru` / `name_ro` / `price` в группе блокируются.
-- У группы топпингов поле **`max_selections`**: `NULL` — без лимита (можно выбрать несколько), число ≥ 1 — максимум позиций из этой группы в одной позиции заказа; логика в `src/lib/topping-max-selection.ts` на витрине (`ProductModalRoot`) и в POS (`pos-product-modal.tsx`). Миграция: `supabase/migrations/*_topping_group_max_selections.sql`.
-- Зоны доставки хранят HEX-цвет в `delivery_zones.color` (колонка в БД; миграция `supabase/migrations/*_add_delivery_zone_color.sql`). Форма валидирует `#RRGGBB`, карты админки и витрины рисуют полигоны в цвете зоны.
-- **Склад (inventory):** server actions рядом со страницами: `src/app/(admin)/admin/inventory/**/actions.ts` — **поставки `createSupplyOrder`** (в т.ч. **`stock_ledger`** по фактически принятому объёму), **списания `createWriteoff`** (**`stock_writeoffs`** / **`stock_writeoff_items`**, **`stock_ledger`**, только **service role**), **инвентаризации** в **`audits/actions.ts`** (**`createAudit`** с **`brand_id`** из **`getAdminBrandId()`**) и в **`audits/[id]/actions.ts`** (**`updateAuditItem`**, **`confirmAudit`** — **service role**, остатки, **`stock_ledger`**, поля **`stock_audit_items.cost_per_unit`** / **`diff_cost`** при подтверждении); **категории ингредиентов** — **`src/lib/actions/inventory/ingredient-categories.ts`**; поставщики, ингредиенты, полуфабрикаты и т.д. **Топпинги** — также **`src/app/(admin)/admin/toppings/actions.ts`** (RPC **`save_topping_with_recipes`**). Раздел **техкарты** на **`/admin/inventory/tech-cards`** server actions для рецептов **не** использует. Операции по таблицам **`ingredients`**, **`semi_finished`**, **`suppliers`**, **`supply_orders`**, **`stock_writeoffs`** **не** привязаны к **`getAdminBrandId()`** в фильтрах выборок (у списаний в коде **`brand_id: null`**); **`createAudit`** для **`stock_audits`** передаёт **`brand_id`** из cookie. После поставки и списаний — `revalidatePath` в том числе для остатков и ингредиентов. На клиенте списки разделов **`/admin/inventory/*`** с таблицами используют единое поле поиска **`InventorySearch`** (`src/components/admin/inventory-search.tsx`); фильтрация строк без запросов к серверу (имена и релевантные текстовые поля по разделам), **кроме** фильтра **категории** на **`/admin/inventory/ingredients`** при **≥ 500** строк — тогда **`?category=`** на сервере. На **Остатках** поиск накладывается на уже отфильтрованный по наличию набор строк. Журнал движений — **`/admin/finance/ledger`**.
-
-## POS
-
-- URL: **`/pos/manager-login`** — вход менеджера (**Supabase Auth**), затем **`/pos/login`** — PIN (**кука **`pos-session`**), затем **`/pos`** — рабочая зона; **`/pos/kds`** — Kitchen Display (**все заказы `status = cooking`**, без фильтра по **`brand_id`**). На уровень выше см. последовательность гейтов в **`middleware`** (**Multi-brand**, пункт POS). Тот же корневой **`src/app/pos/layout.tsx`**: после PIN и открытой кассы **`PosAppShell`** (в т.ч. для KDS) — гейт открытой кассы и шапка; контекст **`CashSessionProvider`** оборачивает **`children`** (на KDS **`useCashSession`** в UI не используется).
-- **KDS:** клиентский **`KdsScreen`** (`components/pos/kds/kds-screen.tsx`). **Начальная загрузка** — **`reloadCookingOrders`**: **`createClient()`**, **`from('orders').select(KDS_ORDER_QUERY_SELECT)`** (константа в **`components/pos/kds/types.ts`**, та же строка в **`fetch-kds-orders.ts`**): **`brands(slug)`**, **`order_items`** с вложением **`menu_items(name_ru, name_ro, category_id, menu_categories(workshop))`**, колонки **`scheduled_time`**, **`delivery_mode`**, **`aggregator`**; **`.eq('status','cooking')`**, сортировка по **`updated_at`**; строки позиций нормализуются через **`normalizeKdsOrderItemFromRaw`** (срез **`products`** для фильтра — в БД отдельной таблицы **`products`** нет, связь идёт через **`menu_items`**). **`knownOrderIdsRef`** после ответа = множество **`id`** (чтобы звук «нового» не срабатывал на уже показанных). **Подтягивание одной строки** после события Realtime — **`fetchKdsOrderByIdPos`** (**`fetch-kds-orders.ts`**, service role). **Готово** — **`update-order-status-kds.ts`**: при переходе **`cooking` → `ready`** в **`orders`** выставляется **`ready_at`** (ISO). **Realtime:** два канала — **`kds-orders`** и **`kds-order-items`** (**`postgres_changes`**, **`event: *`**, таблицы **`orders`** и **`order_items`**, без server-side **`filter`**); по **`order_items`** всегда **`syncCookingOrder`** (полная подтяжка заказа в **`cooking`**); по **`orders`** — вывод из списка при уходе из **`cooking`**, иначе **`syncCookingOrder`** на **INSERT** или **UPDATE** в **`cooking`**; статусы подписки: **`SUBSCRIBED`** → полный **`reloadCookingOrders`**, **`CHANNEL_ERROR`** / **`TIMED_OUT`** → **`console.error`** + **`reloadCookingOrders`**. Плюс периодический **`reloadCookingOrders`** каждые **30 s**, при **`visibilitychange`** (вкладка снова видима), **`online`** и **`window.focus`**; отдельный **`wakeTick`** раз в **60 s** пересчитывает **`isKdsCardActive`** (**`lib/pos/kds-wakeup.ts`**) для «пробуждения» карточек предзаказа без полной перезагрузки списка. **Звук:** общий **`lib/pos/alert-sound.ts`**; кнопка **Bell** справа в шапке KDS делает **unlock + test ping** (**`playPosStatusUpdateSound`**), а корневой контейнер дополнительно вызывает unlock на **`click` / `pointerdown` / `touchstart` / `touchend`** для Chrome/Android; **`playNewOrderBeep`** вызывает **`playPosStatusUpdateSound()`** при появлении нового **`id`** вне **`knownOrderIdsRef`**. Таймер на карточке: **`cooking_started_at`** / **`updated_at`**; **`send-pos-draft-to-kitchen`** и триггер **`20260506120000_orders_cooking_started_at.sql`**. **Фильтр цеха:** меню **`⋯`** → Popover, секция **«Фильтр цеха»** (чекбоксы Оператор / Пицца / Кебаб / Суши); **`localStorage`** ключ **`kds_workshops`** — JSON-массив строк **`operator`**, **`pizza`**, **`kebab`**, **`sushi`**; пустой массив или отсутствие ключа — фильтр не применяется (все позиции); **`workshop === null`** у категории — строка всегда видима при включённом фильтре; заказ без видимых после фильтра позиций не рендерится; при открытии попапа значение перечитывается из **`localStorage`** (в т.ч. синхронизация вкладок через **`storage`**); **`parseKdsWorkshopsFromStorage`**, **`filterKdsOrderForWorkshops`**, **`orderItemWorkshop`** — в **`types.ts`**. **Верх экрана:** без серой плашки навбара, малые отступы, часы **`text-[18px]`**, справа **Bell** + **`MoreVertical`** (переключателя бренда в шапке нет; **`brandSlug`** / **`brandId`** остаются для подписи и **`slugForCard`**). **`KdsOrderCard`:** один ряд шапки — марка бренда, по центру пилюля таймера (**`kdsTimerPalette`**) или время предзаказа (**`scheduled_time`**), справа **`#номер`**; для **`delivery`** с **`scheduled_time`** в будущем до порога (**`isKdsCardActive`**, **`BrandConfig.openHour`/`closeHour`** и буфер готовки) карточка «спящая» (приглушённая по **`opacity`**); предзаказы агрегатора не «спят». Средняя зона — список позиций (**`flex-1`**, **`overflow-y-auto`**, touch scroll); низ — «Готово» / «Заказ на время».
-- **Звуки POS/KDS:** `src/lib/pos/alert-sound.ts` разделяет два сигнала. **Новый заказ в POS** (`orders INSERT` в `OrdersPanel`) играет **`playPosNewOrderSound()`**: усиленный WebAudio-сигнал и fallback-файл **`/pos-new-order-chime.wav`** с `volume = 1`. **KDS при получении заказа в `cooking`** и **POS при реальной смене `orders.status` у уже известного заказа** играют **`playPosStatusUpdateSound()`** (отдельный двухтональный WebAudio-сигнал). Кнопка **Bell** в POS тестит звук нового заказа, в KDS — статусный звук; `playPosAlertSound()` оставлен алиасом на звук нового заказа для совместимости.
-- Auth (два слоя): **Supabase Auth** (сеанс менеджера, проверка в **`middleware`**) и **PIN-сессия** — `src/lib/actions/pos/auth.ts`, cookie **`pos-session`**, JWT HS256 (**`jose`**), секрет **`POS_SESSION_SECRET`**; **`bcryptjs`** для верификации PIN в actions.
-- Смены: `src/lib/actions/pos/shifts.ts`, таблица `shift_logs`; **`ensureActiveShift`** возвращает **`id`** записи и **`clock_in`**; полное закрытие смены с пересчётом кассы — **`CloseShiftModal`** (**`closeCashSession`**, **`closeShift`**, **`logout`**, **`createClient().auth.signOut()`** — полный выход менеджера Supabase перед редиректом на **`/pos`**). Курьеры могут открывать/закрывать смену и слать live location через **отдельного** Telegram-бота: см. **`POST /api/telegram`**, таблица **`courier_locations`**, команды `/shift_start`, `/shift_end`, привязка по ссылке из админки (`/admin/staff`).
-- **Шапка POS:** **`PosAppShell`** — после открытия кассы: логотип **Food Service** (**`PosFoodServiceLogo`**, **`public/food-service-pos-logo.svg`**), **`PosClockWidget`**, **`PosShiftTimer`**, **`PosLogoutButton`**; слева от имени — **«Карта курьеров»** (**`CourierMapModal`**: OSM-тайлы, маркеры курьеров на смене из **`courier_locations`** + имена **`staff`**; **`react-leaflet`** через **`dynamic(..., { ssr: false })`**, патч иконки — **`lib/leaflet-fix-default-icon.ts`**) и меню **⋯** (**`PosActionsMenu`**: кассовые операции и закрытие смены). **Входящий звонок:** shadcn **`Dialog`** (заголовок, «Звонит», «Бренд» из **`brand_slug`** / **`brands`**), кнопки **Отмена** и **Создать заказ** — **`useIncomingCall`** (канал **`pbx-realtime`**), событие **`INSERT`** **`pbx_calls`** с **`cmd === 'event'`**, **`event_type === 'INCOMING'`** → обогащение **`profile_id`**, **`profile_name`**, **`brand_slug`** (с contact-строки того же **`callid`**); закрытие по **`ACCEPTED` / `COMPLETED` / `CANCELLED`** или после действия в диалоге; очередь при нескольких звонках. Регистрация колбэка создания черновика — **`usePosOrderFromCallBridge`** (**`src/lib/store/pos-order-from-call-bridge.ts`**), задаётся на **`/pos/page.tsx`** (**`openNewOrderFromCall`**). На **`CashSessionGate`** подписка **`useIncomingCall`** уже активна. На **`/pos/login`** тот же Food Service-брендинг вместо «Kitch POS».
-- **Высота экрана (без внешнего скролла):** после логина оболочка **`PosAppShell`** (`src/components/pos/pos-app-shell.tsx`) — **`h-screen` + `overflow-hidden`**, шапка **`shrink-0`** (блок **`p-4` + высота строки **`h-14`** ≈ 72px до контента **`main`**), **`main`** оборачивает **`{children}`** в **`CashSessionProvider`**; области контента ниже — **`min-h-0`**, **`overflow-hidden`**, скролл только внутри панелей списка заказов, мастера, корзины/сводки. Страница **`src/app/pos/page.tsx`**: **`h-full` / `flex-1`**, колонки сетки **`h-full min-h-0 overflow-hidden`**.
-- Корневая страница `src/app/pos/page.tsx`: слева список заказов (**`OrdersPanel`**, `forwardRef` + **`OrdersPanelHandle`**: **`updateOrderLocalState`** для живого отображения карточки при вводе на шаге «Детали»; **`updateOrderStatus(orderId, status)`** — optimistic смена статуса через **`usePosOrderMutations`** + **`updateOrderStatusPos`**; **`refetchOrders()`** — полная перезагрузка списков активных и выданных заказов с сервера). Опциональный колбэк **`onMainOrdersChange(mainOrders)`** синхронизирует у родителя **`mainOrdersSnapshot`** — по нему в мастер передаётся **`listOrder`** (активный **`PosOrder`** для текущего **`orderId`**). При монтировании страницы один раз запрашиваются строки **`brands`** (`id`, `name`, `slug`) через клиентский Supabase и склеиваются с каноническим **`BrandConfig`** из **`src/brands/index.ts`** в массив **`wizardBrands`** (**тип `PosWizardBrandOption`** в **`src/types/pos.ts`**: конфиг витрины + **`dbId`** из БД); после появления **`dbId`** страница в фоне вызывает **`usePosMenuCache.getState().loadBrandsMenu(...)`** и предзагружает меню всех POS-брендов на браузерную POS-сессию. **`wizardBrands`** пробрасываются в **`OrderForm`** вместе с **`listOrder`**. У мастера **`key={panel.orderId}`** смена ключа только при явном выборе другого заказа или нового черновика. После успешной отправки **«Отправить бегунок»** мастер **не** сбрасывается: **`refetchOrders`**, **`toast.success`**, тот же **`orderId`** в статусе **`cooking`** (новый черновик **не** создаётся). Справа состояние **idle** (подсказка + три типа заказа через **`OrderTypeSelectModal`**: доставка, навынос, **Glovo** — оранжевая кнопка **`#ff5a00`**, иконка велосипеда), **wizard** (мастер **`OrderForm`**, ref панели **`ordersPanelRef`**) или **detail** (`OrderDetail` только чтение для заказа со статусом **`done`**). Выбор строки списка: **`isWizardOrderStatus`** в **`order-wizard-status.ts`** (`draft`, `new`, `confirmed`, `cooking`, `ready`, `delivery`) открывает мастер, иначе при необходимости **`fetchPosOrderById`**. Новый заказ с кнопок idle: **`createDraftOrderPos({ deliveryMode: 'delivery' | 'pickup' | 'aggregator' })`** — при **`aggregator`** черновик **Glovo** (**`aggregator: 'glovo'`**, **`payment_method: 'aggregator_card'`**, **`prep_deadline_at` +15 мин**); иначе — выбранный тип доставки/навынос; мастер с шага 1. Дальнейшая смена доставка↔навынос — только через меню **⋯** (**`updateOrderDeliveryModePos`** сбрасывает **`aggregator`**, **`prep_deadline_at`**, **`scheduled_time`** при переходе на **`pickup`**, нормализует **`aggregator_card` → `cash`**). **Из входящего звонка** (Dialog в **`PosAppShell`**): **`openNewOrderFromCall`** на странице регистрирует колбэк в **`usePosOrderFromCallBridge`**; **`createDraftOrderPos({ brandSlug, userPhone, profileId, userName })`** — резолв **`brand_id`**, заполнение **`orders.user_phone`**, **`profile_id`**, **`user_name`** (тип по умолчанию — доставка); панель **`refetchOrders`**, **`setPanel({ mode: 'wizard', orderId })`** — при уже заданном **`brand_id`** **`OrderForm`** по prefetch открывает **шаг 2** («Оформление»). У **`OrdersPanel`**: кнопка «Выданные» в шапке списка — без белого фона и тени, иконка серым (**`#808080`**); выделенная **`OrderCard`** — **`ring-inset`**, чтобы обводка не обрезалась при **`overflow`**. Марки брендов в карточках: **`PosBrandMark`** рендерит локальные SVG из **`/public`** через **`<img>`** (не **`next/image`**).
-- Заказы в POS: **`src/lib/pos/fetch-orders.ts`** — константа **`ORDERS_POS_SELECT`** (в т.ч. **`operator_id`**, **`ready_at`**, **`courier_id`**, **`discount`**, **`aggregator`**, **`prep_deadline_at`**, **`scheduled_time`**, **`cash_amount`**, **`card_amount`**) + вложения **`brands(slug)`**, **`order_items(count)`**; имена курьеров для списка — отдельный запрос к **`staff`** по id, в **`PosOrder`** также **`courier_name`**, **`operator_id`**, **`ready_at`**. В **`PosOrder`** попадают в том числе **`payment_method`** (**`cash` | `card` | `aggregator_card` | `mixed`**), **`change_from`**, **`cash_amount`**, **`card_amount`**, **`promo_code`**, **`discount`**, **`bonuses_redeemed`**, **`aggregator`**, **`prep_deadline_at`**, **`scheduled_time`** (для карточек, промо-строчки и синхронизации формы «Детали» из **`listOrder`**). Если slug из join отсутствует (**`null`**, пустой массив или пустая строка), но задан **`brand_id`**, выполняется запрос **`brands(id, slug)`** по нужным id; **`mapOrderRowToPosOrder`** применяет **`normalizePosBrandSlug`**. Основной список за последние 24 ч, статусы **`MAIN_POS_ORDER_STATUSES`**: `draft`, `new`, `confirmed`, `cooking`, `ready`, `delivery`; архив «Выданные» — **`fetchCompletedPosOrders`**: **`done`**, по `updated_at`, limit 50. Канон статусов: `src/types/pos.ts` — **`PosOrderStatus`** совпадает с **`OrderStatus`** в **`database.ts`**.
-- **Realtime (POS):** публикации **`orders`** и **`order_items`** в `supabase_realtime` обязательны. В **`orders-panel.tsx`** два канала на клиентском **`createClient()`**: **`pos-orders`** (`postgres_changes`, `event: '*'`, таблица `orders`) — на каждое событие **`reloadOrders()`**; при **`INSERT`** дополнительно звук через **`playPosAlertSound()`** из **`lib/pos/alert-sound.ts`** (WebAudio ping + fallback **`/pos-new-order-chime.wav`** из **`public/`**). В шапке списка слева — кнопка **Bell**: на Chrome/Android её нужно нажать на устройстве, чтобы сделать **unlock + test ping** и разрешить дальнейшие Realtime-звуки. **`pos-order-items`** (`event: '*'`, таблица **`order_items`**) — на каждое событие **`reloadOrders()`**. После **`reloadOrders`** список пересобирается из **`fetchPosOrders`** / **`fetchCompletedPosOrders`** с функцией **`mergeOrdersPreserveBrandSlug`**, чтобы не терять **`brand_slug`** у строки, если ответ пришёл без slug при том же **`brand_id`**. Подписки снимаются в cleanup через **`removeChannel`**. **Входящие звонки (ОАТС):** не через отдельный канал имени **`incoming_calls`**, а через **`PosAppShell` + `useIncomingCall`** (см. **Шапка POS**) — **`INSERT`** в **`pbx_calls`** (**`cmd = 'event'`**), см. **`POST /api/pbx/incoming`** и RLS-политики для чтения anon при подписке.
-- **Мастер заказа:** `src/components/pos/order-form.tsx` привязан к **`orderId`** и пропам **`wizardBrands`**, **`listOrder`**: шаги «Бренд» → «Оформление» (меню и корзина) → «Детали». Для **обычной доставки и навыноса** на «Детали» — контакт (**телефон** обязателен для не-агрегатора; **имя** необязательно), адрес при **`delivery`** (строка и/или **`address_*`**), зона (**`checkDeliveryZoneByAddress`** при **`delivery_mode === 'delivery'`**), для **`delivery`** — время (**`ScheduledTimePicker`**, **`generateScheduledSlots`**, **`asap`** или **`HH:MM`** → **`orders.scheduled_time`** через **`updateOrderDetailsPos`**; слоты по **`BrandConfig.openHour`/`closeHour`**), оплата (**«Наличными»** / **«Картой курьеру»** / **«Разделить»** (**`ModeButton`**, только иконка, **`hideLabel`**) → **`mixed`** с двумя полями сумм в MDL, хранение в бани **`cash_amount`/`card_amount`**, итог как **«К оплате»** — **`payableAfterBonusBani`**); см. **`split-composite-delivery-address.ts`** для заказов с сайта. Для **Glovo** (**`delivery_mode: 'aggregator'`**) на «Детали» — только верхний оранжевый блок **«Заказ Glovo»**, заголовок **«Детали заказа Glovo»**, оплата (**«Наличные»** / **«Карта Glovo»** → **`aggregator_card`**), комментарий; контакты и адрес **не** показываются; в Zod и **`detailsArePersistable`** для aggregator **нет** требований к имени, телефону и адресу; для обычной доставки без агрегатора телефон и адрес обязательны, имя — нет; **`runDetailsSaveToServer`** для aggregator передаёт в **`updateOrderDetailsPos`** **`deliveryAddress`** как у pickup (**undefined**) и **`delivery_lat`/`delivery_lng`: null**. Тип заказа **не переключается** отдельным селектором на «Детали»: доставка / навынос / **Glovo** задаются при создании черновика (**`OrderType`** в idle). Смена только доставка↔навынос — меню **⋯** (**`updateOrderDeliveryModePos`**, пересчёт **`delivery_fee`** / **`total`**, очистка зоны для pickup); **`updateOrderDetailsPos`** при агрегаторе держит **`aggregator: 'glovo'`**, иначе обнуляет **`aggregator`** / **`prep_deadline_at`**. В **`PayOrderModal`** локально **`aggregator_card`** отображается как «Карта», сервер по **`orders.delivery_mode`** различает Glovo vs обычную доставку; при **`mixed`** — без переключателя нал/карта (**`payOrder`** читает **`cash_amount`/`card_amount`** из строки **`orders`**); чтобы в **`PayOrderModal`** показывалась сводка сумм в MDL, вызывающий код передаёт пропы **`cashAmount`/`cardAmount`** с **`listOrder`**. **Цены и скидки в мастере:** загрузка авто-правил **`discount_rules`** (trigger **`auto`**) через **`getActiveDiscountRules`** (**`src/lib/actions/discounts.ts`**, service role); на клиенте **`PromoPanel`** (**`promo-panel.tsx`**) держит промокод: обычно **`resolvePromoCode`** → **`evaluateDiscounts`** (**`src/lib/discount-engine.ts`**) с **`excludedCategoryIds`** из **`usePosMenuCache`** (флаг **`exclude_from_discounts`** на **`menu_categories`**), для заказов с витрины (**`listOrder.source === 'website'`** и непустой **`promo_code`**) — флаг **`skipSeedResolve`**: **`useLayoutEffect`** сразу заполняет поле промокода и статус «применён» без ожидания **`resolvePromoCode`**. Сводка и итог: **`evaluateDiscounts`** по **`CartItemForEngine`** (корзина + **`menu_items.category_id`**) и зоне доставки; **`mergePersistedWebsitePromoDiscount`** в **`order-form.tsx`** подмешивает сохранённые **`listOrder.promo_code`** / **`listOrder.discount`**, если движок ещё полностью не отразил промо с сайта (в том числе пересчёт **`totalBani`**, пока **`delivery_fee` ещё `null`** в выходе движка). **`DiscountBreakdown`** читает уже объединённый выход (**`effectiveEngineOutput`**) и принимает **`bonusRedeemedBani`**, при необходимости **`excludedCategories`** для подстрочных пояснений (**Сводка POS** ниже). Шаг «Бренд» рендерится из **`wizardBrands`** (лого и стили из **`BrandConfig`**, UUID бренда из **`dbId`** после загрузки каталога на **`/pos`**); **`brand_id`** для запросов меню берётся из **`dbId`** при наличии, иначе — запасной запрос к таблице **`brands`** по slug (**`resolveBrandId`**). При **`selectedBrand`** обновляется cookie **`pos-brand-slug`** (**`writePosBrandSlugCookie`**) для синхронизации с **`/pos/kds`**. Индикатор шагов в шапке — **три отдельные кнопки** (белый фон, без тени, без стрелок между шагами). После успешного **`updateOrderBrandPos`** вызывается **`syncBrandSlugOnOrdersPanel`**: **`refetchOrders`** панели и **`updateOrderLocalState`** с **`normalizePosBrandSlug`** (в т.ч. из **`persistBrandOrError`** при уходе со шага 1). В шапке: закрытие панели и меню **«⋯»** (Popover) — **«Сделать доставкой»**, **«Сделать навыносом»**, **«Очистить корзину»** (`replaceOrderItemsPos`, затем **`refreshCartFromDb`** и **`refetchOrders`**) и **«Закрыть заказ»** (диалог причины → **`cancelOrderPos`**, выход в **idle**). **`PopoverTrigger` с `asChild`** — **`src/components/ui/button.tsx`** и **`PosHeaderIconButton`** с **`forwardRef`**.
-- **Prefetch заказа в мастере:** начальная загрузка заказа в **`useEffect`** при смене **`orderId`** (в коде **`posOrderId`**; массив зависимостей без **`form`**): выборка **`orders`** с **`discount`**, **`promo_code`**, **`delivery_fee`**, **`payment_method`**, **`change_from`**, **`cash_amount`**, **`card_amount`**, вложением **`order_items`** и др.; сборка локальной корзины; **`setEngineOutput(null)`** в начале; при успешном ответе с **`discount > 0`** — начальный **`engineOutput`** через **`buildPersistedDiscountEngineSeed`** (суммы по сохранённой скидке до первого асинхронного прохода **`PromoPanel`** / **`evaluateDiscounts`**). Дополнительно при появлении **`listOrder.discount`** с панели, если **`engineOutput` ещё `null`** — один раз то же засеивание. Объект **`form`** из React Hook Form **не** входит в массив зависимостей (во избежание повторной загрузки и сброса модалки товара при ререндере). Открытый заказ и **`step` (1–3)** задаются в **`OrderForm`** и не сбрасываются при **`refetchOrders`** на панели (при условии того же **`orderId`** и открытого мастера).
-- **Кэш меню и переходы без лишней записи корзины:** **`src/lib/store/pos-menu-cache.ts`** хранит меню на время браузерной POS-сессии: по **`brandId`** — активные **`menu_categories`** (включая **`exclude_from_discounts`**), активные **`menu_items`** с **`menu_item_variants`** и **`menu_item_topping_groups`**, индексы **`itemsByCategory`** / **`itemsById`**. `/pos/page.tsx` предзагружает меню всех брендов после загрузки **`wizardBrands`**; **`OrderForm`** сначала читает категории, товары и строку для модалки из **`usePosMenuCache`**, а старые Supabase-запросы остаются fallback при ошибке/пустом кэше. При переходе со шага **2** на **1** или **3**, если отпечаток локальной корзины совпадает с последним состоянием после БД (**`cartFingerprint`** / **`lastSyncedCartFingerprintRef`** после prefetch или **`refreshCartFromDb`**), **`persistCartToServer`** (**`replaceOrderItemsPos`**) не вызывается — переход без задержки; иначе выполняется сохранение, затем смена шага.
-- **Корзина в мастере (шаг «Оформление» и сводка на «Детали»):** **`PosCartItem`** (`src/types/pos.ts`) — **`category_id`** (`menu_items.category_id`, для правил скидок); **`size`** (текстовый снимок варианта или исторические **`s`**/**`l`**), **`variantId`** (nullable), опционально **`orderItemId`**. Строки с тем же товаром различаются по **`variantId`** и набору топпингов. Частые действия корзины работают **optimistic** в **`OrderForm`**: **`addCartItem`**, **`updateQty`**, **`removeLine`**, **`saveCartLineFromModal`**, **`handleClearCart`** сначала меняют локальный **`cart`** через **`applyOptimisticCart`**, сразу пересчитывают карточку слева через **`updateOrderLocalState`** (**`item_count`**, **`total`**, **`discount`**, **`delivery_fee`**, **`bonuses_redeemed`**), затем вызывают server actions (**`addOrderItemsPos`**, **`updateOrderItemQuantityPos`**, **`removeOrderItemPos`**, **`updateOrderItemCompositionPos`**, **`replaceOrderItemsPos`**) в фоне. На ошибке вызывается **`rollbackOptimisticCart(snapshot, message)`** + **Sonner**; явные **`await refreshCartFromDb()`** / **`await refetchOrders()`** убраны из успешного пути быстрых кликов. Для новой строки без **`orderItemId`** после успешной вставки запускается неблокирующий **`void refreshCartFromDb()`**, чтобы подтянуть id; Realtime списка остаётся финальной сверкой. Prefetch / **`refreshCartFromDb`** выбирают **`order_items.variant_id`** и **`menu_items(category_id)`** для полей движка. Принять/отклонить сайтовый **`new`** — только в **`OrderDetail`** (**`accept-order-pos`** / **`reject-order-pos`**), не с левой **`OrderCard`**.
-- **Левая панель списка — только просмотр по статусу и курьеру:** в **`orders-panel.tsx`** у **`OrderCard`** нет кнопок смены статуса и назначения/смены курьера; статус (**`StatusBadge`**) и строка курьера (**`courier_name`**, доставка в **`delivery`**) только для отображения. Переходы статусов с карточки списка не выполняются — **`cooking` → `ready`** в KDS (**`update-order-status-kds`**), **`ready` → `delivery`** без выбора курьера — кнопка **«Передать курьеру»** в **`OrderDetail`** через **`onStatusChange`** → **`OrdersPanelHandle.updateOrderStatus`** → **`usePosOrderMutations(setMainOrders)`** → server action **`updateOrderStatusPos`**; детальная панель локально меняет **`order.status`** сразу и откатывает при ошибке. Выдача и касса — **«Принять оплату»** в **`OrderDetail`** / **`PayOrderModal`** (**`delivery`**, **`ready` + Glovo**, **`ready` + навынос**) без optimistic-обхода кассовой логики. **Назначение курьера** — только мастер **`OrderForm`**, шаг «Оформление»: при **`status === ready`** и **`delivery_mode === delivery`** — **«Назначить курьера»** → **`AssignCourierModal`** (для **`delivery_mode === aggregator`** курьер не назначается, **`readyForCourierAssign`** ложен). При незаполненном **`user_phone`** и/или (для доставки) пустом **`delivery_address`** кнопки **«Назначить»** и **«Сменить»** недоступны (**`disabled`**, подсказки под кнопкой, общий расчёт **`courierButtonGate`** в **`OrderForm`**; **Glovo** телефон/адрес для гейта не требуются; **`delivery_mode === pickup`** адрес для блокировки не требует), модалку не открываем (**`openCourierModalWithContactWarnings`** при таком блоке делает **`return`**). **`assignCourierPos`** (service role: **`delivery`**, **`courier_id`**, **`courier_assigned_at`**, Telegram при **`tg_chat_id`** через **`sendCourierAssignmentTelegram`** (**`courier-telegram-message.ts`**): текст карточки **`sendMessage`**, затем **`sendLocation`** с **`reply_to_message_id`** к этой карточке при координатах (если в заказе пусто — **`withResolvedDeliveryCoords`** и **`checkDeliveryZoneByAddress`** по адресу и slug бренда); в тексте оплата с **💳** / **💵**, сумма **💰**; в **`orders`** сохраняются **`courier_tg_chat_id`**, **`courier_tg_message_id`** (только текстовая карточка для **`editMessageText`**), **`courier_tg_message_updated_at`**). **Редактирование:** **`refreshCourierOrderTelegramMessage(orderId, reason)`** после успешных **`update-order-items`** и **`update-order-details-pos`** в **`delivery`** — **`editMessageText`**; при **`reason === 'details'`** дополнительно **`sendLocation`**; короткий update-notice через **`sendMessage`** не чаще минуты (**`courier_tg_message_updated_at`**). **Смена курьера** у заказа уже в доставке — **«Курьер · … [Сменить]»** в **`CartPanel`**, те же ограничения контакта (**`courierButtonGate`**); старое сообщение редактируется в «заказ передан другому курьеру», новый курьер получает актуальное Telegram-уведомление и новые `courier_tg_*` сохраняются в заказе. Модалка **`AssignCourierModal`**: режимы **`assign`** / **`reassign`**, список курьеров на смене из **`courier_locations`** + **`staff`**.
-- **Шаг «Детали»:** для доставки/навыноса — имя (необязательно), телефон (обязателен для не-агрегатора), адрес и структурные поля адреса при доставке при вводе сразу обновляют объект заказа в списке слева через **`updateOrderLocalState`**; **`updateOrderDetailsPos`** вызывается с **debounce 600 ms** после паузы во вводе (в т.ч. **`profile_id`** при идентификации клиента; при доставке **`delivery_lat`/`delivery_lng`** — с последней геопроверки зоны либo **best-effort** **`geocodeAddress`** по адресу на сервере; суммы **`discount`**, **`delivery_fee`**, **`bonus_multiplier`** из выхода движка скидок (**`DiscountEngineOutput.bonusMultiplier`**, по умолчанию **1**), поле **`discount_rules_applied`** (JSON применённых правил), **`promo_code`**, синхронизация **подарочных** строк **`order_items`** с флагами **`is_gift`** / **`gift_rule_id`** по результату движка). **Клиенты (справочник адресов):** по телефону — debounce 500 ms + дедупликация последнего нормализованного номера через **`lastCustomerLookupPhoneRef`**, чтобы автосохранение формы не запускало бесконечный lookup; **`posLookupCustomer`** (**`customers-pos-actions.ts`**, service role): профиль + **`customer_addresses`** через **`lib/customers.ts`**, **`getUserBalance`**, параллельно чтение **`bonus_settings.max_redemption_rate`** (`id=1`, при ошибке — **0.3**); в **`OrderForm`** — бейдж «Новый клиент», кнопка **«Сохранить клиента»** (**`posSaveCustomer`**), несколько адресов — селект и **«+ Новый адрес»**, чекбокс **«Сохранить адрес»** при отправке заказа на кухню (**`posSaveCustomerAddress`**). **Списание бонусов (мастер):** при найденном клиенте, **`total > 0`** и балансе **`> 0`** — поле **«Списать бонусов»**; потолок **`Math.floor(min(баланс, (totalBani/100) × maxRedemptionRate))`** (целые пункты, 1 п. = 1 MDL = 100 бан, как на витрине), **`totalBani`** — из **`evaluateDiscounts`** после скидок и доставки; подсказка лимита и **%** до первого ввода; при превышении — inline-ошибка; суммы **«К оплате»** / сводка справа — с учётом ввода; **`detailsPricingRef`** держит **`engineOutput`** и **`bonusesToRedeem`** для отправки. Промокод вводится только в **`PromoPanel`** (не дублируется отдельным полем в форме «Детали»). При обновлении **`listOrder`** с панели и **`!form.formState.isDirty`** выполняется **`form.reset`** из данных заказа списка (без отдельного запроса только ради полей формы). Способ оплаты сохраняется **сразу** по клику (кроме первого выбора **«Разделить»** без сумм: **`updateOrderDetailsPos`** не вызывается, пока split не согласован с итогом — защита constraint в БД); тип заказа на этом шаге не переключается (см. меню **⋯** мастера). **Составной адрес с сайта:** в **`executeCreateOrder`** (**`create-order.ts`**) в БД уходит одна строка **`delivery_address`**; отдельные **`address_*`** с витрины не заполняются. При первичной загрузке заказа в мастере и в **`checkoutValuesFromPosListOrder`** вызывается **`posCheckoutAddressFieldsFromOrder`** (**`split-composite-delivery-address.ts`**): если все четыре структурных поля заказа пусты, из **`delivery_address`** извлекаются фрагменты с подписями **Scara / Etaj / Apartament / Interfon** (и RU-аналоги **подъезд / этаж / квартира / домофон**, **en: entrance / floor / apartment / intercom**) — остаток строки идёт в «Улица и дом», значения — в соответствующие инпуты (удобнее геокод зоны доставки). Если хотя бы одно из **`address_entrance`**, **`address_floor`**, **`address_apartment`**, **`address_intercom`** в данных заказа уже заполнено, строка **не** режется (ручной/ранний ввод в БД).
-- **Зона доставки в POS:** **`checkDeliveryZoneByAddress`** (`check-delivery-zone-pos.ts`) — Nominatim + активные полигоны бренда; перед поиском строится **viewbox** по зонам, запрос идёт с **`countrycodes=md`**, **`bounded=1`**, **`limit=5`**, затем выбирается первый кандидат внутри полигона (**`findZoneForPoint`**), иначе первый кандидат внутри ограниченного viewbox. В ответах **`in_zone` / `out_of_zone`** возвращаются **`lat` / `lng`** (для привязки **`orders`**, **`customer_addresses`** и ссылок курьера).
-- **«Отправить бегунок» на шаге 3 (детали):** валидация Zod (в т.ч. телефон и при **`delivery`** — адрес и время доставки; имя не требуется); при **`paymentMethod === 'mixed'`** — обе части > 0, сумма в банях = **«К оплате»** (±1 баня), иначе **`toast.error('Укажите суммы split-оплаты')`**; **`persistCartToServer`**; **`runDetailsSaveToServer`**; **`sendPosDraftToKitchen`** — отправляет на кухню заказы в статусах **`draft`**, **`new`**, **`confirmed`**: **`status = cooking`**, **`cooking_started_at`**, **`updated_at`**, **`total`** уменьшен на целые пункты списания (**`floor(MDL×100/100)`** пунктов × 100 бан, не ниже нуля), **`bonuses_redeemed`** = число пунктов. Если заказ уже **`cooking`**, action идемпотентно возвращает успех с номером заказа; остальные статусы не переводятся. Затем при **`bonuses_redeemed > 0`** и **`profile_id`** — **`redeemBonus`** из **`lib/bonus.ts`** (ошибки только **`console.error`**, заказ не откатывается). В мастер передаются **`bonusesToRedeem`** и опционально **`profileId`** из **`detailsPricingRef`**; после успеха поле списания сбрасывается в **0**. После успеха: **`toast.success`** и неблокирующий **`refetchOrders`**; **мастер остаётся открытым** на том же **`orderId`**. Защита от двойного нажатия: ref + **`submitting`** / **`runnerBusy`**; при **`listOrder.status === cooking`** — состояние «Бегунок отправлен». Кнопка блокируется при пустой корзине, фоновой операции корзины или отсутствии платных позиций (**`itemSubtotalBani <= 0`**), а не при нерассчитанном **`totalBani`** доставки. Уведомления об ошибках сохранения бренда/корзины/отправки — **Sonner**.
-- **«Отправить бегунок» на шаге 2 (корзина):** кнопка **«Отправить бегунок»** рендерится для **`listOrder.status` в **`draft`**, **`new`** или **`confirmed`** (заказы в работе POS / с сайта до кухни) и вызывает **`sendPosDraftToKitchen`** с теми же опциями бонусов, что накапливаются на шаге «Детали». При **`ready`** и **`delivery_mode === delivery`** — **«Назначить курьера»** (**`AssignCourierModal`**, см. блок выше про **`courierButtonGate`**); после назначения (**`status === delivery`**) — **«Принять оплату»** (**`PayOrderModal`**). При **`ready`** и **`delivery_mode === aggregator`** — сразу **«Принять оплату»** (**`showPayOrderCta`**), без бегунка и без **`delivery`**; при **`ready`** и **`pickup`** — тоже **«Принять оплату»**; для **`ready`** + обычная **доставка** на шаге «Оформление» — **«Назначить курьера»**, на шаге «Детали» в узкой сводке без блока курьера CTA может отсутствовать до возврата на шаг 2. Локальное состояние заказа при назначении курьера обновляется (**`updateOrderLocalState`** + **`refetchOrders`**).
-- Переход по индикатору шагов и кнопкам «Назад» / «К деталям» **не блокируется** валидацией формы шага 3. При уходе **со шага 2** на шаг **1** или **3** см. выше (**условный `persistCartToServer`** по отпечатку корзины); при необходимости сохранения — только после успеха переключается шаг. При уходе **со шага 1** в фоне вызывается **`persistBrandOrError`** (**`updateOrderBrandPos`** при необходимости), без ожидания навигации и без **`form.trigger`**.
-- **Карточка заказа / детали:** `src/components/pos/order-card.tsx` — компактная карточка в списке слева: **без** кнопок смены статуса и **без** смены курьера; компонент **`WebsiteNewActions`** (принять/отклонить сайтовый **`new`**) остаётся в файле для переиспользования в **`OrderDetail`**, на карточке списка не рендерится. Заказ **Glovo** (**`delivery_mode === aggregator`**): иконка **`Bike`** (lucide), **оранжевая** полоса на всю ширину с подписью **GLOVO** вместо строки адреса, блок имя/телефон скрыт. **`order-detail.tsx`** — загрузка и Realtime по заказу и строкам; нижняя панель: **`WebsiteNewActions`** только при **`status === 'new'`** и **`source === 'website'`**, **`ready` + обычная доставка** → «Передать курьеру», **`delivery`** или (**`ready` + aggregator**) → **«Принять оплату»** (**`PayOrderModal`** с **`isAggregatorOrder`** при Glovo); в шапке деталки и в мастере рядом с номером — бейдж **GLOVO**; блок **«Данные клиента»** для Glovo скрыт, карточка доставки — режим **Glovo** и бейдж вместо адреса. При **`interactionMode="readonly"`** ( **`done`** и лист «Выданные» в Sheet) — только просмотр; иначе редактирование состава (минус при **qty 1** снимает строку). Подпись размера: **`orderItemSizeDisplayLabel`** (`src/lib/order-item-size-display.ts`). Редактирование позиции: **`POS_MENU_ITEM_FOR_MODAL_SELECT`**, **`posMenuRowForModal`**, **`PosProductModal`**. Вёрстка деталей: **`@container`** на области скролла — узкая ширина vs **`≥640px`**. **Активный заказ в мастере** — **`OrderForm`**.
-- **Мастер — меню и модалка:** список позиций берётся из **`usePosMenuCache`** (fallback — Supabase-запрос с **`POS_MENU_ITEM_FOR_MODAL_SELECT`**) и содержит вложенные **`menu_item_variants`**; открытие карточки и правка строки корзины подставляют в модалку **`posMenuRowForModal`** из кэша по **`itemsById`**. **`PosProductModal`** выбирает вариант по **`variantId`** или по снимку **`size`** / эвристике для старых **`s`/`l`**.
-- Строки заказа: `src/lib/actions/pos/update-order-items.ts` — вставка и обновление **`order_items`** с колонкой **`variant_id`**; **`replaceOrderItemsPos`** / **`addOrderItemsPos`** получают **`size: string | null`** и **`variantId`**; топпинги в модалке с учётом **`topping_groups.max_selections`**.
-- Свайп-удаление строк в активной работе — `src/components/pos/swipe-to-delete.tsx`; модалка товара — `pos-product-modal.tsx`.
+Единое поле поиска для всех inventory-таблиц — `InventorySearch` (`src/components/admin/inventory-search.tsx`); клиентский фильтр поверх данных, **кроме** фильтра категории на `/admin/inventory/ingredients` при ≥500 строк (сервер).
 
 ## Данные и БД
 
-Основные таблицы:
+### Брендовое и общее
 
-- `brands` — slug, name и UUID бренда.
-- `menu_categories` — в т.ч. **`is_condiment`** (флаг в БД / legacy; **отдельного раздела админки и UI кондиментов на витрине в коде нет**), **`image_url`** (превью для полосы категорий в апсейле LOSOS), **`show_in_upsell`** (включить категорию в апсейл корзины для LOSOS), **`exclude_from_discounts`** (boolean — позиции из категории не попадают в базу процентных/фиксированных/«самое дешёвое» скидок в **`evaluateDiscounts`**, см. **`DiscountEngineInput.excludedCategoryIds`**), **`workshop`** (`text`, nullable — цех для фильтра KDS: **`operator`**, **`pizza`**, **`kebab`**, **`sushi`**; миграция **`20260516120000_menu_categories_workshop.sql`**; назначение значений категориям — по процессу команды / админке после появления колонки).
-- `menu_items` — в т.ч. **`has_sizes`**: при `true` цены и подписи размера на витрине и в POS берутся из дочерних **`menu_item_variants`**, а не из устаревших колонок S/L. Дополнительно колонки **`is_default_condiment`**, **`condiment_default_qty`** (могут оставаться в схеме после миграций); **в текущем приложении не используются** при корзине и **`createOrder`**. **`included_items`** (JSON `{ name_ru, name_ro }[]` для «Входит в заказ»; при чтении **`(item.included_items ?? [])`**). Объявления типов **`src/types/database.ts`** задают контракт витринных моделей (**`MenuItem`**, **`MenuItemVariant`** и др.); при расширении схемы БД файл стоит обновлять. Клиент **Supabase** в приложении в основном **без** полного генерированного **`Database`**; минимальные наброски см. **`src/lib/supabase/types.ts`** — в т.ч. **`orders`** (**`delivery_mode`**, **`aggregator`**, **`prep_deadline_at`**, способы оплаты), **`menu_items` / `menu_item_variants` / `toppings`** (поля цен для агрегаторов в бани), **`promo_codes.valid_channels`**, **`aggregator_settings`**.
-- **`menu_item_variants`** — строки варианта позиции: **`name_ru`**, **`name_ro`**, **`price`** (бани), **`sort_order`**, **`weight_grams`**, FK на **`menu_item_id`**.
-- `topping_groups` (**`max_selections`** — лимит выбора из группы, `NULL` = без лимита), `toppings`, **`topping_recipes`** (состав топпинга; RPC **`save_topping_with_recipes`** — **`20260515200000_topping_recipes.sql`**), `menu_item_topping_groups`.
-- `promotions`, `featured_menu_items`.
-- `promo_codes`.
-- `delivery_zones` — `polygon` JSONB как массив `[lat, lng]`, `color` (TEXT, HEX `#RRGGBB`, default) для отрисовки полигона, цена/минималка/время доставки.
-- `orders`, `order_items` — **`orders.status`**: канон в **`OrderStatus`** (`src/types/database.ts`: `draft` · `new` · `confirmed` · `cooking` · `ready` · `delivery` · `done` · `cancelled` · `rejected`). **`delivery_mode`**: `delivery` · `pickup` · `aggregator` (канал агрегатора в **`orders.aggregator`**, например **`glovo`**; дедлайн приготовления — **`prep_deadline_at`**; оплата через агрегатор — **`payment_method` = `aggregator_card`**). **`cooking_started_at`** (миграция **`20260506120000_orders_cooking_started_at.sql`**) — таймер KDS. **`scheduled_time`** (timestamptz, nullable) — время предзаказа на доставку из POS (**`ScheduledTimePicker`** / **`updateOrderDetailsPos`**); при смене режима на **`pickup`** сбрасывается (**`updateOrderDeliveryModePos`**). **`profile_id`** (UUID профиля витрины, FK на **`profiles`** в миграции репозитория), **`bonuses_redeemed`**, **`bonuses_earned`**, **`bonus_multiplier`** (numeric / multiplier начисления баллов при **`done`**, из POS-движка скидок (**`effect_type` = `bonus_multiplier`**), по умолчанию **1**) — лояльность (миграции **`20260513140000_orders_bonuses_redeemed.sql`**, **`20260513160000_orders_bonuses_earned.sql`** и др.). **`delivery_address`**, **`address_entrance`**, **`address_floor`**, **`address_apartment`**, **`address_intercom`**: с витрины при создании заказа обычно заполняется только **`delivery_address`** (доп. сведения нередко в той же строке); POS при открытии мастера может разнести текст по полям (**`split-composite-delivery-address.ts`**), если все **`address_*`** пусты. Доставка/курьер: **`courier_id`**, **`courier_assigned_at`**, **`delivered_at`**, **`delivery_lat`**, **`delivery_lng`**, **`courier_tg_chat_id`**, **`courier_tg_message_id`**, **`courier_tg_message_updated_at`** (**`courier_tg_message_id`** — только первая **текстовая** карточка для **`editMessageText`**; геолокация доставки — отдельное сообщение **`sendLocation`** с **`reply_to_message_id`** к карточке; миграция **`20260517130000_orders_courier_telegram_message.sql`**). Оплата на кассе: в **`cash-session.ts`** action **`payOrder`** разрешён только из **`status === 'delivery'`** или из **`status === 'ready'`** при **`delivery_mode`** **`pickup`** / **`aggregator`**; атомарно **`paid_at`**, **`status: done`** (в **`UPDATE`** ожидается текущий **`status`** **`delivery`** или **`ready`**). После успешной записи **`cash_transactions`** — **`processBonusAccrualOnOrderDone(profileId, orderId, totalBani, bonus_multiplier ?? 1)`** из **`bonus.ts`** (**`totalBani`** = **`orders.total`**, уже с учётом списанных бонусов; **`bonus_multiplier`** из первой выборки строки заказа до апдейта). При отсутствии колонки/типов — добавить в Supabase и синхронизировать **`database.ts` / `supabase/types.ts`**. **`user_birthday`** в приложении не используется. У **`order_items`**: **`variant_id`** (nullable, FK **`menu_item_variants`**), **`size`** — снимок подписи варианта; старые строки могут иметь **`s`** / **`l`** только для отображения.
-- **`pbx_calls`** — журнал звонков ОАТС: **`cmd`** **`contact`** / **`event`** / **`history`**, **`callid`**, **`event_type`**, **`caller`**, **`raw_body`**, **`brand_slug`** (линия **`diversion` / `called` / `to`** → slug бренда, см. **`lib/pbx/diversion-brand-slug.ts`**), опционально **`profile_id`** (для **`contact`**). **`POST /api/pbx/incoming`** ( **`PBX_WEBHOOK_TOKEN`**, **`crm_token`**) пишет строки через **service role**; **`brand_slug`** заполняется для **`contact`** и **`event`**. Клиент POS подписывается на Realtime **`INSERT`** по **`cmd = event`**. LEGACY / параллельно: **`incoming_calls`** (**`POST /api/pbx-webhook`**, upsert по **`call_id`**, тот же хелпер маппинга **`brand_slug`**) и **отдельный** баннер в **`orders-panel.tsx`** по **`incoming_calls`** (без изменения флоу ОАТС).
-- `profiles`, `otp_codes` — storefront phone auth; у **`profiles`** опционально legacy-поле **`address`** (текст).
-- **`customer_addresses`** — сохранённые адреса клиента (**`profile_id`**, **`label`**, **`address`**, **`entrance`**, **`floor`**, **`apartment`**, **`intercom`**, **`delivery_lat`/`delivery_lng`**, **`is_default`**, …); RLS для **`authenticated`** с **`profile_id = auth.uid()`** (на практике витрина ходит через service role / API; POS — **`lib/customers.ts`** + actions). В той же миграции — колонка **`profiles.address`**. Файл **`20260516100000_customer_addresses.sql`**.
-- **`bonus_transactions`**, **`bonus_settings`** — лояльность (начисления/списания, ставки **`accrual_rate`**, **`max_redemption_rate`**, флаг **`is_enabled`**, при необходимости **`updated_at`** на **`bonus_settings`**); типизировать после миграций через **`supabase gen types`**. У админского API корректировки баланс считается как **`SUM(amount)`** по строкам профиля (расходится с **`getUserBalance`** на витрине, если в истории смешаны разные соглашения о знаке **`amount`**).
-- `staff`, `shift_logs` — POS и админка персонала; у **`staff`** — Telegram-поля (**`tg_chat_id`**, **`tg_link_token`**, **`tg_link_token_expires_at`**) для привязки **курьерского** бота; таблица **без привязки к бренду**. **`courier_locations`** — геопозиция и **`is_on_shift`** (вебхук **`/api/telegram`**). **`cash_sessions`**, **`cash_transactions`** — учёт кассы в смену (связь смены с **`shift_logs`**, статусы **`open`/`closed`**, строки **`order_payment`**, **`opening`**, **`expense`**, **`income`**, **`encashment`** и т.д.); server actions — **`src/lib/actions/pos/cash-session.ts`** (**`createServiceRoleClient`**). Таблицы могут отсутствовать в сгенерированных типах Supabase-клиента; запросы в коде используют текущий клиент без обязательного **`Database`**-дженерика. Миграции под эти таблицы — в репозитории при необходимости дополнить вручную.
-- **Склад** (типы в `src/types/database.ts`): **`ingredient_categories`**, **`ingredients`** (опционально **`category_id`** FK на категорию; единица хранения `g` / `ml` / `pcs`; **`waste_percent`** — % потерь при очистке для техкарт; без колонки закупной цены в приложении); **`ingredient_stock`** (`ingredient_id`, **`quantity`** (г / мл / шт), **`updated_at`**, **`avg_cost`** — MDL **за г / мл / шт** в БД); **`stock_ledger`** (журнал: **`ingredient_id`**, **`movement_type`** — в коде в т.ч. **`supply`**, **`writeoff`**, **`audit_adjustment`**; CHECK в миграции **`20260511160000_stock_ledger_movement_type_check.sql`** — допустимые значения включают **`manual`**; **`reference_id`**, **`reference_type`** — например **`supply_order`**, **`stock_writeoff`**, **`stock_audit`**; **`quantity_delta`**, **`cost_per_unit`**, **`note`**, **`created_at`**); `semi_finished`, `semi_finished_items`; **`product_recipes`**: **`quantity`** (нетто), **`quantity_gross`** (брутто; объём для списания/себестоимости строки с **`ingredient_id`** — через **`recipeIngredientStockStorageQty`**); вложенное блюдо в комбо — **`menu_item_ref_id`**, **`menu_item_ref_variant_id`** (миграция **`20260515190000_product_recipes_menu_item_ref.sql`**, правило: при ссылке **`quantity = 1`**, **`ingredient_id`/`semi_finished_id` = NULL**); **`product_recipe_meta`** (`menu_item_id`, `variant_id`, **`output_qty`**, **`output_unit`**); `suppliers`, `supply_orders`, **`supply_order_items`** ( **`received_qty`** nullable — факт принятого количества; цены позиций — за единицу хранения); **`stock_writeoffs`** (дата, причина, заметка, опционально **`brand_id`**), **`stock_writeoff_items`**; **`stock_audits`**, **`stock_audit_items`** (`diff` — generated; при подтверждении аудита могут заполняться **`cost_per_unit`**, **`diff_cost`**). Тип **`CourierLocation`** — геолокация курьера (**`staff_id`**, координаты, **`updated_at`** и т.д.) по мере использования. Схема согласована с миграциями в `supabase/migrations/`. **Списание ингредиентов при оплате заказа** в server actions (например **`payOrder`**) в коде не подключено; для расчёта объёмов по заказу и рецепту (в т.ч. комбо на одном уровне) — **`src/lib/order-recipe-stock-deduction.ts`** (**`computeIngredientTotalsForOrder`**); на уровне строки рецепта — **`recipeIngredientStockStorageQty`**.
+См. раздел «Multi-brand: что брендовое, что общее».
 
-Правила:
+### Основные таблицы
 
-- Контентные таблицы содержат `brand_id`; витрина и админка фильтруют по текущему бренду там, где контент брендовый. **Исключение:** разделы **склада** и **персонала** в админке работают с полным набором строк (см. **Multi-brand**); колонка `brand_id` у части складских таблиц может оставаться в БД без заполнения из cookie.
-- Дочерние таблицы без `brand_id` фильтруются через родительские сущности.
-- Денежные поля (`total`, `price`, `discount`, `delivery_fee`, `*_bani`) хранятся в банях.
-- Суммы **склада** в заказах поставок и **`ingredient_stock.avg_cost`** — в **леях (numeric MDL)**, не в бани; **`avg_cost`** и цены в **`supply_order_items`** в БД привязаны к **единице хранения** (за г / мл / шт), в UI админки склада отображаются как за кг / л / шт через **`inventory-units`**.
-- Записи, которые обходят RLS, выполняются через service role client в `src/lib/supabase/service-role.ts`.
-- **Realtime Postgres Changes:** для подписки из клиента нужны включённые таблицы в публикации `supabase_realtime` и возможность клиента читать строки (или RLS будет скрывать события). Для **`pbx_calls`** в репозитории заданы политики **`SELECT`** для **`anon`** (строки **`cmd`** в **`contact` / `event`**) и связанное чтение **`profiles.name`** для UI входящего — иначе браузер POS не получит события INSERT. Для списка заказов POS желательно разрешить чтение **`brands`** (минимум **`id`**, **`slug`**) для роли с тем же ключом, что и клиент POS — иначе join и запрос slug по id могут возвращать пусто. Для локальной истории см. файлы в `supabase/migrations/`; продакшен применять через Supabase MCP/CLI/dashboard согласно процессу команды.
+- `brands` — slug, name, UUID.
+- `menu_categories` — `name_ru/ro`, slug, `image_url`, `is_active`, `sort_order`, `is_condiment` (legacy), `show_in_upsell`, `exclude_from_discounts`, `workshop` (KDS-фильтр).
+- `menu_items` — `has_sizes` (true → цены из variants), `included_items` (JSON `{name_ru,name_ro}[]`), `category_id`, `brand_id`. Legacy: `is_default_condiment`, `condiment_default_qty` (не используются).
+- `menu_item_variants` — `name_ru/ro`, `price` (bani), `sort_order`, `weight_grams`, `menu_item_id`.
+- `topping_groups` (`max_selections` NULL/число), `toppings`, `topping_recipes`, `menu_item_topping_groups`.
+- `promotions`, `featured_menu_items`, `promo_codes` (с `valid_channels`), `discount_rules`.
+- `delivery_zones` — `polygon` JSONB `[lat,lng][]`, `color` (TEXT, HEX), цена, минималка, время.
+- `orders`, `order_items` — см. раздел Контракты.
+- `profiles`, `otp_codes`, `customer_addresses` (`profile_id`, `label`, `address`, `entrance/floor/apartment/intercom`, `delivery_lat/lng`, `is_default`).
+- `bonus_settings`, `bonus_transactions`.
+- `staff`, `shift_logs`, `courier_locations`.
+- `cash_sessions`, `cash_transactions`.
+- `pbx_calls` (ОАТС), `incoming_calls` (legacy MoldCell).
+- Склад: `ingredient_categories`, `ingredients`, `ingredient_stock`, `stock_ledger`, `semi_finished`, `semi_finished_items`, `product_recipes`, `product_recipe_meta`, `suppliers`, `supply_orders`, `supply_order_items`, `stock_writeoffs`, `stock_writeoff_items`, `stock_audits`, `stock_audit_items`.
 
-## Миграции Supabase
+### Типы
 
-- SQL для схемы хранится в `supabase/migrations/` и должен синхронизироваться с подключённым проектом.
-- **Агрегаторы (Glovo):** в POS задействованы **`orders.delivery_mode`**, **`aggregator`**, **`prep_deadline_at`**, **`payment_method`** (в т.ч. **`aggregator_card`**), опционально цены меню в бани и **`aggregator_settings`** — отдельной миграции под эти поля в текущем списке файлов может не быть; ориентир по контракту — **`src/lib/supabase/types.ts`** и фактическая схема Supabase.
-- Типичные добавления: колонка `delivery_zones.color`; `topping_groups.max_selections`; **`menu_item_variants`** и **`order_items.variant_id`** (связь вариантов с позициями и строками заказа); **`orders.cooking_started_at`** и триггер времени входа в **`cooking`** (`*_orders_cooking_started_at.sql`); **`orders.courier_tg_chat_id`**, **`orders.courier_tg_message_id`**, **`orders.courier_tg_message_updated_at`** для редактирования Telegram-сообщения курьеру (**`20260517130000_orders_courier_telegram_message.sql`**); **`orders.cash_amount`**, **`orders.card_amount`**, расширение **`orders.payment_method`** значением **`mixed`** (миграция команды / constraint на split); **`menu_categories.workshop`** (цех для KDS — **`20260516120000_menu_categories_workshop.sql`**); **`menu_categories.is_condiment`**, **`menu_categories.image_url`**, **`menu_categories.show_in_upsell`**, **`menu_categories.exclude_from_discounts`** (**исключение категорий из процентных/фикс./«самое дешёвое» в **`evaluateDiscounts`** — витрина + POS через bootstrap/кэш**), **`menu_items.is_default_condiment`**, **`menu_items.included_items`**, **`menu_items.condiment_default_qty`** (см. `*_menu_items_condiment_default_qty.sql`); публикация Realtime для `orders` и `order_items`; таблица **`pbx_calls`** + публикация **`supabase_realtime`** + политики SELECT для anon (**`20260516140000_pbx_calls.sql`**, **`20260516150000_pbx_calls_realtime_policies.sql`**) — входящие ОАТС в POS (**`useIncomingCall`**); колонка **`pbx_calls.brand_slug`** (**`20260517120000_pbx_calls_brand_slug.sql`**); опционально legacy **`incoming_calls`** (**`/api/pbx-webhook`**). Для техкарт с выходом блюда — таблица **`product_recipe_meta`** и ограничение уникальности по **`(menu_item_id, variant_id)`** для `upsert` из **`RecipeEditorModal`** / меню. **Техкарты / ингредиенты:** **`ingredients.waste_percent`** (**`20260515140000_ingredients_waste_percent.sql`**); **`product_recipes.quantity_gross`** (**`20260515160000_product_recipes_quantity_gross.sql`**); ссылки комбо в техкарте (**`menu_item_ref_id`**, **`menu_item_ref_variant_id`**, CHECK на **`quantity = 1`** при ссылке — **`20260515190000_product_recipes_menu_item_ref.sql`**); **состав топпинга** — **`topping_recipes`** + **`save_topping_with_recipes`** (**`20260515200000_topping_recipes.sql`**). Справочник **`ingredient_categories`** и **`ingredients.category_id`** — в **`database.ts`**; отдельная миграция под таблицу в репозитории может отсутствовать (создание в БД вручную или добавить SQL в `supabase/migrations/`). Для кассы POS — при необходимости: **`cash_sessions`**, **`cash_transactions`**, **`orders.paid_at`** (с **`cash-session.ts`**). Для журнала склада — таблица **`stock_ledger`** и при необходимости **`CHECK`** на **`movement_type`** (репозиторий: **`20260511160000_stock_ledger_movement_type_check.sql`**); типы в **`database.ts`** дополнять по мере появления миграции. Для поставок с полем фактической приёмки — **`supply_order_items.received_qty`** (репозиторий: **`20260511130000_supply_order_items_received_qty.sql`**). Для списаний — **`stock_writeoffs`**, **`stock_writeoff_items`** (ключ на заголовок, в коде — **`writeoff_id`** при вставке). **Лояльность (витрина):** таблицы **`bonus_transactions`**, **`bonus_settings`**; в **`orders`** — **`profile_id`**, **`bonuses_redeemed`**, **`bonuses_earned`**, при необходимости **`bonus_multiplier`** (начисление при **`done`** с кассы — см. **`bonus.ts`**, **`payOrder`**) (в репозитории см. **`20260513140000_orders_bonuses_redeemed.sql`**, **`20260513160000_orders_bonuses_earned.sql`** — в т.ч. **`profile_id`** при необходимости). **Админка (клиенты и бонусы):** **`20260513180000_admin_customers_stats.sql`** (устар. **`admin_customers_stats`**), **`20260513200000_admin_customers_list.sql`** (**`admin_customers_list`**), **`20260513210000_bonus_settings_updated_at.sql`**. **Адреса клиентов (витрина / POS):** **`20260516100000_customer_addresses.sql`** — **`customer_addresses`** + **`profiles.address`**. **Скидки POS:** таблица **`discount_rules`** (типы эффектов и расписание — **`src/types/promotions.ts`**, движок **`discount-engine.ts`**); админка **`/admin/discount-rules`** (**`promotions-client`**, **`rule-dialog`**, **`actions.ts`**). В **`orders`** — **`discount_rules_applied`** (JSON), **`bonus_multiplier`** (множитель начисления баллов при **`done`**, по умолчанию **1**); при подарках по правилам — колонки **`order_items.is_gift`**, **`order_items.gift_rule_id`** (если используются в БД) — типы через **`supabase gen types`** после миграции.
+`src/types/database.ts` задаёт контракт (`OrderStatus`, `Order`, `OrderWithItems`, `MenuItem`, `MenuItemVariant`, `CashSession`, `CashTransaction` и др.).
 
-## Server Actions и API
+`src/lib/supabase/types.ts` — частично генерированный Database (минимальные наброски). Перегенерировать через `supabase gen types` при появлении новых миграций.
 
-Server Actions в `src/lib/actions/`:
+### Realtime
 
-- `create-order.ts` — заказ с витрины; строки **`order_items`** только из позиций корзины: **`variant_id`** и **`size`** (текстовый снимок варианта). Payload: **`bonuses_redeemed`** (пункты), **`profile_id`** (nullable), **`delivery_lat`/`delivery_lng`** (nullable при доставке — из **`delivery-store`** или серверный **`geocodeAddress`**). Insert **`orders`**: **`bonuses_redeemed`**, **`bonuses_earned: 0`**, **`profile_id`**, при доставке **`delivery_lat`/`delivery_lng`** (best-effort). После успешной вставки **`order_items`** — **`redeemBonus`** при **`bonuses_redeemed > 0`** и непустом **`profile_id`** (ошибки логируются); опционально **`profiles.name`** из **`user_name`**, если в профиле имя ещё пустое. Адрес доставки сохраняется в **`orders.delivery_address`** одной строкой (в т.ч. доп. сведения в том же тексте); колонки **`address_entrance`**, **`address_floor`**, **`address_apartment`**, **`address_intercom`** при вставке с витрины не заполняются — разнесение в POS см. **`split-composite-delivery-address.ts`**. После успешного сохранения (при наличии **`TELEGRAM_BOT_TOKEN`** и **`TELEGRAM_CHAT_ID`**) уходит уведомление в **отдельный** Telegram-чат (**`sendTelegramNotification`** в этом же модуле; не путать с курьерским ботом для смен и ссылок в **`/admin/staff`**): позиции, при необходимости строка доставки, блок сумм — при **`discount > 0`** строка **`💰 После скидки`** (расчёт от **`grandTotalBani`** и **`discountBani`** в подписи), при **`bonuses_redeemed > 0`** — **`🎁 Бонусы: -{пункты} MDL`**, финал **`💳 К оплате`** по фактической сумме **`grandTotalBani`** (MDL через **`formatTelegramMdl`**, два знака).
-- `create-order-admin.ts` — заказ из админки.
-- `validate-promo-code.ts` — **`validatePromoCode(code, subtotalBani, brandIdForOrder?)`**: без третьего аргумента бренд из **`getBrandId()`** (витрина). Используется **витриной/корзиной** при гидратации и ввода промокода. **POS:** в **`promo-panel.tsx`** промокод вводится оператором через **`resolvePromoCode`** (**`discounts.ts`**) и включается в **`evaluateDiscounts`**; для заказов с витрины с сохранённым **`promo_code`** при открытии мастера — **`skipSeedResolve`** (быстрый показ текста промокода без **`resolvePromoCode`**, см. **`order-form.tsx`**); **`validatePromoCode`** из этого файла напрямую мастером не вызывается.
-- `discounts.ts` — **`getActiveDiscountRules`**, **`resolvePromoCode`** (service role, таблица **`discount_rules`**; синтетическое правило для применённого промокода — см. код actions), **`getStorefrontCartPricingBootstrap`** (**авто-правила**, **`excludedDiscountCategoryIds`**, **`storefrontExcludedDiscountCategories`** для **`storefront-cart-pricing.ts`** / корзины / checkout-клиента).
-- **`src/app/(admin)/admin/discount-rules/actions.ts`** — **`saveRule`**, **`deleteRule`**, **`toggleRuleActive`** (**`discount_rules`**, **`createServiceRoleClient`** из **`service-role.ts`**, **`revalidatePath('/admin/discount-rules')`**).
-- `check-delivery-zone.ts` — зоны и **`geocodeAddress(query, zones?)`** / **`reverseGeocode`** (Nominatim). Если переданы зоны, строится **viewbox** по полигонам активных зон, запрос идёт с **`bounded=1`**, берётся до 5 кандидатов и предпочитается точка внутри полигона (**`findZoneForPoint`**); без зон — обычный best-effort поиск по Молдове. Переиспользуется при сохранении адресов клиентов и при **`createOrder`** / **`updateOrderDetailsPos`** (best-effort координаты); витринная **`DeliveryContent`** передаёт свои зоны, чтобы адрес не уводило в другие города.
-- `get-orders.ts`, `update-order-status.ts`.
-- `get-brands.ts`, `set-admin-brand.ts`.
-- `account/update-profile.ts`.
-- `pos/*` — auth, shifts (**`ensureActiveShift`**, **`closeShift`**), **`cash-session`** (**`openCashSession`**, **`getCashSession`**, **`createCashTransaction`**, **`closeCashSession`**, **`payOrder`** — оплата из **`status === delivery`** или (**`status === ready`** и **`delivery_mode === aggregator`**) или (**`status === ready`** и **`delivery_mode === pickup`**) для кнопки «Принять оплату»; **`paid_at`**, **`done`**; для **Glovo** оплата **картой** не пишет **`cash_transactions`** (деньги от агрегатора); для **`mixed`** — **две** строки **`order_payment`** (нал + карта); иначе — одна строка **`order_payment`**; затем **`processBonusAccrualOnOrderDone(profileId, orderId, totalBani, bonus_multiplier ?? 1)`** из **`bonus.ts`**, ошибки не блокируют оплату), **`assign-courier-pos`** (назначение/смена курьера; Telegram при **`tg_chat_id`** — **`sendCourierAssignmentTelegram`**: **`sendMessage`** + **`sendLocation`** (reply к карточке), гео из заказа или **`withResolvedDeliveryCoords`**; в **`orders.courier_tg_*`** — id текстового сообщения для **`editMessageText`**; при смене курьера старое сообщение правится через **`editPreviousCourierAssignmentTelegram`**, новому курьеру уходит новая пара сообщений), **`courier-telegram-message`** (**`COURIER_ORDER_TELEGRAM_SELECT`**, **`sendCourierAssignmentTelegram`**, **`editPreviousCourierAssignmentTelegram`**, **`refreshCourierOrderTelegramMessage`** — **`editMessageText`**, при **`reason === 'details'`** повторный **`sendLocation`**, короткое уведомление с throttle **60 s**), черновик (`create-draft-order` / `createDraftOrderPos`, опционально **`brandSlug`**, **`userPhone`**, **`profileId`**, **`userName`**, **`deliveryMode`** `delivery` | `pickup` | `aggregator` — ветка **`aggregator`** задаёт Glovo и поля **`aggregator`**, **`prep_deadline_at`**, **`aggregator_card`**; флоу звонка и ручное создание), смена бренда черновика (`update-order-brand-pos`), принятие/отклонение заказа с сайта (**`accept-order-pos`** → **`confirmed`**, **`reject-order-pos`**), отмена (`cancel-order-pos`), **`send-pos-draft-to-kitchen`** (отправка бегунка: **`draft` / `new` / `confirmed` → `cooking`**, **`cooking_started_at`**, пересчёт **`total`** / **`bonuses_redeemed`**, затем **`redeemBonus`** при списании; мастер остаётся на заказе), **`create-order-pos`**, **`delete-draft-order-pos`**, **`fetch-kds-orders`** (**`fetchKdsCookingOrdersPos`**, **`fetchKdsOrderByIdPos`** — **`KDS_ORDER_QUERY_SELECT`** из **`components/pos/kds/types.ts`**, позиции с **`menu_categories(workshop)`** через **`menu_items`**), **`update-order-status-kds`** (`cooking` → **`ready`**), `update-order-details-pos` (в т.ч. **`profile_id`**, **`delivery_lat`/`delivery_lng`**, **`discount`**, **`delivery_fee`**, **`bonus_multiplier`**, **`discount_rules_applied`**, **`promo_code`**, подарочные **`order_items`**, нормализация **`aggregator`**, **`prep_deadline_at`** и **`aggregator_card`** вне режима агрегатора; отдельный **`updateOrderDeliveryModePos`** — смена доставка/навынос из меню мастера (сброс агрегатора); после успеха вызывает **`refreshCourierOrderTelegramMessage(..., 'details'/'delivery_mode')`**), `update-order-items` (после успешных изменений строк вызывает **`refreshCourierOrderTelegramMessage(..., 'items')`**), **`customers-pos-actions`** (клиенты POS, **`bonus_settings`** в **`posLookupCustomer`**), zone check и др.
-- `admin/bonus-settings-action.ts` — **`updateBonusSettings`** (**`src/lib/actions/admin/bonus-settings-action.ts`**): проверка Supabase Auth через **`createClient`**, запись **`bonus_settings`** через **`createServiceSupabaseClient`**, **`revalidatePath('/admin/settings/bonus')`**.
-- **Склад (админка):** не в `src/lib/actions/`, а в `src/app/(admin)/admin/inventory/**/actions.ts` — см. раздел **Админка** / таблицу маршрутов **Склад** (**`supplies/actions.ts`** — **`createSupplyOrder`**; **`writeoffs/actions.ts`** — **`createWriteoff`** с **service role**). **Персонал (админка):** `src/lib/actions/staff/staff-actions.ts` — CRUD, **`generateTelegramLink`** (deep-link с **`TELEGRAM_COURIER_BOT_USERNAME`**), только service role.
+Publication `supabase_realtime` обязательна для `orders`, `order_items`, `pbx_calls`. RLS должна разрешать чтение нужных строк ролью, которой подписывается клиент (иначе события скроются):
+- `pbx_calls`: SELECT для `anon` на `cmd ∈ ('contact','event')`. Связанное чтение `profiles.name`.
+- `brands` для anon на чтение `id`, `slug` (иначе join и фолбек по `brand_id` вернут пусто).
 
-API routes:
+### Service role
 
-| Route | Назначение |
+Обход RLS — `src/lib/supabase/service-role.ts` (`createServiceRoleClient` = `createServiceSupabaseClient`). Использовать для server actions, где нужен полный доступ.
+
+### Загрузка изображений
+
+`POST /api/upload` → публичный bucket `menu-images`.
+
+### Миграции
+
+SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI / dashboard. Не дублировать список файлов в этом документе.
+
+## API endpoints
+
+| Endpoint | Описание |
 |---|---|
-| `POST /api/upload` | загрузка файлов в Supabase Storage |
-| `POST /api/auth/send-otp` | отправка OTP (SMS.md), код **4** цифры (`randomInt(1000, 10000)`) |
-| `POST /api/auth/verify-otp` | проверка OTP и cookie `storefront-session` |
-| `GET /api/auth/me` | кука **`storefront-session`** через **`getStorefrontSession()`**; при наличии — **`profiles`** по **`id = session.profileId`** (**`createServiceSupabaseClient`**), ответ **`{ profile: { id, profileId, phone, name } }`**; без сессии **`profile: null`** |
-| `GET /api/account/orders` | сессия обязательна (**401** иначе); последние **10** **`orders`** по **`profile_id`**, **`brand_slug`** из **`brands`** |
-| `PATCH /api/account/profile` | сессия обязательна; тело **`{ name }`** → **`profiles.name`** для текущего профиля |
-| `GET /api/bonus/settings` | публично: **`getBonusSettings()`** из **`lib/bonus.ts`** → **`{ accrualRate, maxRedemptionRate, isEnabled }`** |
-| `GET /api/bonus/balance?profileId=` | **`getUserBalance(profileId)`** из **`lib/bonus.ts`** (последняя **`balance_after`** в **`bonus_transactions`**); без **`profileId`** → **`{ balance: 0 }`** |
-| `GET /api/admin/bonus/settings` | **`getAdminSession()`**, затем **`getBonusSettings()`**; JSON **`{ isEnabled, accrualPercent, maxRedemptionPercent }`** (проценты ×100 для формы админки) |
-| `POST /api/admin/bonus/adjust` | сессия обязательна (**`middleware`**); **`createServiceSupabaseClient`**: баланс **`SUM(amount)`**, вставка строки **`bonus_transactions`** (подписанный **`amount`** в колонке, **`created_by`** = **`staff_id`** из тела) |
-| `GET /api/avatar/[profileId]` | SVG DiceBear **`thumbs`**, **`seed`** = **`profileId`**, **`Content-Type: image/svg+xml`**, **`Cache-Control: public, max-age=31536000`** |
-| `POST /api/auth/logout` | очистка storefront session |
-| `POST /api/pbx-webhook` | legacy MoldCell: **`crm_token`**, form или JSON → upsert **`incoming_calls`** по **`call_id`**, маппинг **`diversion` → `brand_slug`**; **`200`** + **`OK`** |
-| `POST /api/pbx/incoming` | ОАТС (contact / event / history): **`crm_token`** === **`PBX_WEBHOOK_TOKEN`**, JSON или **`x-www-form-urlencoded`**; **`contact`** отвечает JSON с **`contact_name`** и **`profile_id`**, пишет **`pbx_calls`** (в т.ч. **`brand_slug`** по линии — **`lib/pbx/diversion-brand-slug.ts`**); **`event`/`history`** — INSERT в **`pbx_calls`** с тем же **`brand_slug`**; ошибки БД логируются, ответ **`200`** чтобы АТС не ретраила; **`401`** / **`400`** только для токена / неизвестного **`cmd`** |
-| `POST /api/telegram` | webhook **курьерского** бота: заголовок **`X-Telegram-Bot-Api-Secret-Token`** = **`TELEGRAM_COURIER_WEBHOOK_SECRET`**; обработка `/start` (привязка по токену), `/shift_start` / `/shift_end`, live location → **`courier_locations`**; исходящие ответы через **`src/lib/telegram/bot.ts`** (**`TELEGRAM_COURIER_BOT_TOKEN`**) |
+| `POST /api/upload` | bucket `menu-images` |
+| `POST /api/auth/send-otp` | OTP 4 цифры через SMS.md |
+| `POST /api/auth/verify-otp` | Проверка + cookie `storefront-session` |
+| `POST /api/auth/logout` | Очистка storefront session |
+| `GET /api/auth/me` | Профиль по session; `{ profile: null }` без сессии |
+| `GET /api/account/orders` | Последние 10 заказов профиля (401 без сессии) |
+| `PATCH /api/account/profile` | `{ name }` → `profiles.name` |
+| `GET /api/bonus/settings` | Публично: `accrualRate`, `maxRedemptionRate`, `isEnabled` |
+| `GET /api/bonus/balance?profileId=` | `getUserBalance`; без `profileId` → `{ balance: 0 }` |
+| `GET /api/admin/bonus/settings` | Для админки (проценты ×100) |
+| `POST /api/admin/bonus/adjust` | Корректировка `bonus_transactions`; `staff_id` из тела |
+| `GET /api/avatar/[profileId]` | SVG DiceBear thumbs |
+| `POST /api/pbx/incoming` | ОАТС (`crm_token` = `PBX_WEBHOOK_TOKEN`); cmd contact/event/history |
+| `POST /api/pbx-webhook` | Legacy MoldCell → `incoming_calls` |
+| `POST /api/telegram` | Курьерский бот webhook (`TELEGRAM_COURIER_WEBHOOK_SECRET`) |
 
-**Входящие звонки (POS):** подписка на **`postgres_changes`** по таблице **`pbx_calls`** (см. **`useIncomingCall`**, канал **`pbx-realtime`**). Legacy-интеграция может писать в **`incoming_calls`** через **`/api/pbx-webhook`** (`diversion` → бренд).
+## Server Actions
 
-## i18n
+Каталог: `src/lib/actions/`. Для брендового контента в админке — фильтр через `getAdminBrandId()`; для склада/персонала — без фильтра.
 
-- Язык витрины: `src/lib/store/language-store.ts`, persist key `lang`.
-- Стартовый язык до гидрации и для новых гостей: **RO** (`DEFAULT_LANG`).
-- Словари и helpers: `src/lib/i18n/storefront.ts`; дефолт языка в `getCartItemSummary` и т.п. согласован с `DEFAULT_LANG`. Под строкой доставки в корзине и сводке: **`cart.deliveryCostAddressHint`**, **`cart.deliveryOutsideZoneHint`** (вне зоны — красный текст в UI, см. **`CartContent`** / **`order-summary.tsx`**).
-- **Бонусы (витрина):** секция **`bonus`** — **`balance`**, **`earn`**, **`points`**, **`redeem`**, **`redeemed`**, **`max`**, плюс вспомогательные строки для **`bonus-redeem-block`** (**`cancel`**, **`redeemUnavailable`**, **`redeemSummary`**).
-- **Модалка входа:** **`auth.modal`** — заголовки шагов телефона/OTP, подзаголовок, плейсхолдер, юридический текст, кнопка продолжить, повторная отправка, тексты ошибок, **`a11y*`** и **`otpDigitAria(n)`** (RU/RO).
-- Динамические названия берутся через `pickLocalizedName` / `pickLocalizedDescription`.
-- Server action `createOrder` принимает язык, чтобы сохранить snapshot заказа и вернуть ошибки на выбранном языке.
+### Витрина и общие
 
-## Дизайн и стили
+- `create-order.ts` — заказ с витрины. `order_items` только из корзины (`variant_id`, `size`). Поля `bonuses_redeemed`, `profile_id`, `delivery_lat/lng` (best-effort через `geocodeAddress`). После вставки — `redeemBonus` при `bonuses_redeemed > 0`. Telegram-уведомление через `sendTelegramNotification` (общий канал, не курьерский). Адрес — одной строкой в `delivery_address`.
+- `validate-promo-code.ts` — `validatePromoCode(code, subtotalBani, brandIdForOrder?)`. Витринная валидация.
+- `discounts.ts` — `getActiveDiscountRules`, `resolvePromoCode`, `getStorefrontCartPricingBootstrap`.
+- `check-delivery-zone.ts` — `geocodeAddress(query, zones?)` / `reverseGeocode`. Nominatim. Если переданы зоны — viewbox + `bounded=1` + `findZoneForPoint`.
+- `account/update-profile.ts` — обновление через FormData (страница `/account` использует REST `PATCH`).
+- `create-order-admin.ts` — заказ из админки.
 
-- Источник правил: `DESIGN.md`.
-- Палитра Food Service: `#ffffff`, `#f2f2f2`, `#242424`, `#808080`, `#ccff00`.
-- Шрифты: Inter 400/700 и Roboto Mono 400/700 из `src/app/layout.tsx`.
-- Глобальные токены и **`[data-brand="…"]`** в **`src/app/globals.css`**: базовые токены в **`:root`**; переопределения для **`the-spot`**, **`losos`**, **`kitch-pizza`**. Ключевые переменные витрины:
-  - **`--color-bg`**, **`--color-text`**, **`--color-accent`**, **`--color-accent-text`** — текст **на сплошном акценте** (лайм / оранжевый): у **kitch-pizza** **`#242424`**, у **the-spot/losos** **`#ffffff`**; кнопки и плашки с **`bg-[var(--color-accent)]`** используют **`text-[var(--color-accent-text)]`** (не «жёсткий» белый на лайме).
-  - **`--color-accent-foreground`** (shadcn **`--accent-foreground`**) — текст на **мягком** акцентном фоне (**`--color-accent-soft`**, экобаннер в корзине, шаги чекаута у бутиков и т.п.).
-  - **`--color-input-bg`** и класс **`.storefront-input`** — фон полей ввода (чекаут, модалка доставки, промо в корзине, имя в аккаунте); на **kitch-pizza** **`#ffffff`**.
-  - **`--color-selector-item-bg`** — фон **неактивных** сегментов в чекауте (оплата, время); на **kitch-pizza** **`#ffffff`**, у **the-spot/losos** **`var(--color-bg)`**.
-  - **`--size-selector-*`** — капсула выбора размера/варианта в **`product-modal/SizeSelector.tsx`**.
-  Селектор **`[data-brand="the-spot"], [data-brand="losos"], [data-brand="kitch-pizza"]`** — **`background: var(--color-bg)`**, **`color: var(--color-text)`**. Кейфреймы **`storefront-cart-pulse`**, **`prefers-reduced-motion`**, **`the-spot-menu-*`**.
-- Для storefront использовать brand-aware primitives (`storefront-modal-*`, `storefront-checkout-*`, **`storefront-input`**) вместо локального дублирования цветов.
-- `globals.css` импортируется только в `src/app/layout.tsx`.
+### Админка
 
-## Environment variables
+- `get-orders.ts` — без принудительного фильтра по `getAdminBrandId()`. Брэнд по URL.
+- `update-order-status.ts`.
+- `get-brands.ts`, `set-admin-brand.ts`.
+- `admin/bonus-settings-action.ts` — `updateBonusSettings`.
+- `admin/cash-sessions.ts` — `listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`.
+- `inventory/ingredient-categories.ts` — CRUD категорий (service role).
+- `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive` (service role).
+- `(admin)/admin/toppings/actions.ts` — `save_topping_with_recipes` (RPC).
+- Inventory: `supplies/actions.ts` (`createSupplyOrder`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role).
+- `staff/staff-actions.ts`.
+
+### POS (`src/lib/actions/pos/`)
+
+- `auth.ts` — PIN-сессия.
+- `shifts.ts` — `ensureActiveShift`, `closeShift`.
+- `cash-session.ts` — `openCashSession`, `getCashSession` (`payment_breakdown`, `manual_breakdown`, `recent_manual_transactions`), `getExpectedInDrawerBani`, `getActiveOrdersCountForShift`, `createCashTransaction`, `closeCashSession`, **`payOrder`** (см. инварианты в разделе POS / Касса).
+- `create-draft-order.ts` — `createDraftOrderPos`.
+- `update-order-brand-pos`, `update-order-details-pos`, `update-order-items`, `updateOrderDeliveryModePos`.
+- `send-pos-draft-to-kitchen.ts` — `draft`/`new`/`confirmed` → `cooking`, `cooking_started_at`, пересчёт `total`/`bonuses_redeemed`, `redeemBonus`.
+- `accept-order-pos`, `reject-order-pos` — для `new` + `source='website'`.
+- `cancel-order-pos`, `delete-draft-order-pos`.
+- `assign-courier-pos.ts` — `assignCourierPos`, `changeCourierPos`. После — `sendCourierAssignmentTelegram`.
+- `courier-telegram-message.ts` — `sendCourierAssignmentTelegram`, `editPreviousCourierAssignmentTelegram`, `refreshCourierOrderTelegramMessage`.
+- `fetch-orders.ts` — `ORDERS_POS_SELECT`, `fetchPosOrders`, `fetchCompletedPosOrders`, `mergeOrdersPreserveBrandSlug`.
+- `fetch-kds-orders.ts` — `fetchKdsCookingOrdersPos`, `fetchKdsOrderByIdPos`.
+- `update-order-status-kds.ts` — `cooking → ready`.
+- `customers-pos-actions.ts` — `posLookupCustomer` (с `bonus_settings`), `posSaveCustomer`, `posSaveCustomerAddress`.
+- `check-delivery-zone-pos.ts`.
+- `create-order-pos.ts`.
+
+### Полезные lib (не actions)
+
+- `lib/bonus.ts` — лояльность.
+- `lib/customers.ts` — `getCustomerByPhone`, `saveCustomer`, `saveCustomerAddress`, `setDefaultAddress`, `getDefaultAddress`. Service role.
+- `lib/discount-engine.ts` — `evaluateDiscounts`, `isRuleScheduleActive` (pure, без Supabase).
+- `lib/order-recipe-stock-deduction.ts` — `computeIngredientTotalsForOrder`.
+- `lib/inventory-units.ts`.
+- `lib/recipe-editor-qty.ts`, `lib/recipe-composition-row-updates.ts`, `lib/recipe-composition-waste.ts`, `lib/product-recipe-ingredient-qty.ts`.
+- `lib/topping-max-selection.ts`.
+- `lib/order-item-size-display.ts`.
+- `lib/storefront-delivery-display.ts`, `lib/storefront-pickup-location.ts`, `lib/storefront-account-path.ts`.
+- `lib/brand-phone.ts` — `getBrandPhone(slug)`.
+- `lib/seo/brand-seo.ts`, `lib/seo/menu-item-image-alt.ts`.
+- `lib/pbx/diversion-brand-slug.ts`.
+- `lib/pos/alert-sound.ts`, `kds-wakeup.ts`, `scheduled-slots.ts`, `split-composite-delivery-address.ts`, `pos-brand-slug-cookie.ts`, `menu-item-modal-row.ts`, `use-incoming-call.ts`.
+- `lib/store/cart-store`, `auth-store`, `pos-order-from-call-bridge`, `pos-menu-cache`, `language-store`, `delivery-store`.
+- `lib/supabase/server.ts`, `client.ts`, `service-role.ts`.
+- `lib/leaflet-fix-default-icon.ts`.
+
+## Дизайн
+
+Источник правил: `DESIGN.md`.
+
+Палитра Food Service. Глобальные токены и переопределения `[data-brand="..."]` — в `src/app/globals.css` (импортируется только из `src/app/layout.tsx`). Селектор `[data-brand="the-spot"], [data-brand="losos"], [data-brand="kitch-pizza"]` — `background: var(--color-bg)`, `color: var(--color-text)`.
+
+Ключевые CSS-переменные:
+- `--color-bg`, `--color-text`, `--color-accent`
+- `--color-accent-text` — текст на сплошном акценте
+- `--color-accent-foreground` — текст на мягком акценте (shadcn `--accent-foreground`)
+- `--color-input-bg` + класс `.storefront-input`
+- `--color-selector-item-bg`
+- `--size-selector-*`
+
+Шрифты: Inter 400/700 и Roboto Mono 400/700.
+
+Storefront: использовать brand-aware primitives (`storefront-modal-*`, `storefront-checkout-*`, `storefront-input`); не дублировать цвета локально.
+
+## Environment
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 
+# POS PIN-сессия (≥32 символов)
 POS_SESSION_SECRET=
 
+# SMS-шлюз для OTP
 SMS_MD_API_KEY=
 SMS_MD_SENDER=
 
+# Уведомления о заказах с витрины (отдельный канал)
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+
+# Курьерский бот (отдельный, не путать)
 TELEGRAM_COURIER_BOT_TOKEN=
-TELEGRAM_COURIER_BOT_USERNAME=
+TELEGRAM_COURIER_BOT_USERNAME=    # без @
 TELEGRAM_COURIER_WEBHOOK_SECRET=
 
+# Базовый URL для setup:telegram
 NEXT_PUBLIC_APP_URL=
 
+# Webhook ОАТС (crm_token в теле запроса)
 PBX_WEBHOOK_TOKEN=
 ```
 
-`POS_SESSION_SECRET` должен быть не короче 32 символов. `PBX_WEBHOOK_TOKEN` — общий секрет с телефонией (поле `crm_token` в теле webhook). **`TELEGRAM_BOT_TOKEN`** / **`TELEGRAM_CHAT_ID`** — уведомления о новых заказах с витрины (**`create-order.ts`**), отдельно от курьерского бота. **`TELEGRAM_COURIER_BOT_TOKEN`**, **`TELEGRAM_COURIER_BOT_USERNAME`** (без `@`), **`TELEGRAM_COURIER_WEBHOOK_SECRET`** (секрет для заголовка вебхука) и **`NEXT_PUBLIC_APP_URL`** (базовый URL приложения для скрипта **`npm run setup:telegram`**) — интеграция курьеров через **`/api/telegram`** и ссылки в **`/admin/staff`**.
-
 ## npm scripts
 
-| Script | Command |
+| Script | Команда |
 |---|---|
-| `npm run dev` | `next dev --turbo` |
-| `npm run dev:webpack` | `next dev` |
-| `npm run dev:clean` | `rm -rf .next && next dev --turbo` |
-| `npm run build` | `next build` |
-| `npm run start` | `next start` |
-| `npm run lint` | `next lint` |
-| `npm run setup:telegram` | `npx tsx scripts/setup-telegram-webhook.ts` — регистрация вебхука (см. env курьерского бота) |
+| `dev` | `next dev --turbo` |
+| `dev:webpack` | `next dev` |
+| `dev:clean` | `rm -rf .next && next dev --turbo` |
+| `build` | `next build` |
+| `start` | `next start` |
+| `lint` | `next lint` |
+| `setup:telegram` | `npx tsx scripts/setup-telegram-webhook.ts` |
 
 ## Dev notes
 
-- **Витрина и cookie:** httpOnly **`storefront-session`** для **`GET /api/auth/me`**, **`/api/account/*`** и бонусных маршрутов на клиенте запрашивать с **`fetch(..., { credentials: "include" })`** (**`auth-store.fetchMe`**, **`CartContent`**, **`BonusRedeemBlock`**, страница **`/account`**).
-- **`tsconfig.json`:** задано **`"baseUrl": "."`** для согласованного резолва алиаса **`@/*`** в TypeScript / IDE.
-- Если **Turbopack** после HMR падает с ошибкой вроде **`Tooltip` must be used within `TooltipProvider`**, **`error-boundary`**, **`module factory is not available`** (в т.ч. после правок **`CourierMapModal`** / динамических импортов) — перезапустить dev (`npm run dev:clean`) или очистить `.next`.
-- Если `.next` ломается (`404` на chunks/CSS или `Cannot find module './NNN.js'`), использовать `npm run dev:clean`.
-- Не запускать два `next dev` на одном проекте одновременно: второй часто уходит на `3001`, а браузер остаётся на `3000`.
-- Для локальной проверки доменов добавить в `/etc/hosts`: `127.0.0.1 losos.md www.losos.md thespot.md www.thespot.md`.
-- Для проверки с телефона в одной Wi-Fi сети: `npm run dev -- -H 192.168.50.137` и открыть `http://192.168.50.137:3000/`.
-- При проблемах с Turbopack можно временно перейти на `npm run dev:webpack`.
+- `tsconfig.json`: `"baseUrl": "."` для алиаса `@/*`.
+- Turbopack после HMR падает с ошибками типа `Tooltip must be used within TooltipProvider`, `module factory is not available` (часто после правок `CourierMapModal` / динамических импортов) — `npm run dev:clean`.
+- 404 на chunks/CSS или `Cannot find module './NNN.js'` — `npm run dev:clean`.
+- Не запускать два `next dev` параллельно (второй уйдёт на :3001).
+- `/etc/hosts` для локальных доменов: `127.0.0.1 losos.md www.losos.md thespot.md www.thespot.md`.
+- Тест с телефона в одной Wi-Fi: `npm run dev -- -H 192.168.50.137`, открыть `http://192.168.50.137:3000/`.
+- При проблемах с Turbopack: `npm run dev:webpack`.
 
-## Ближайшие TODO
+## TODO
 
-- Свести к одному сценарию переход **`delivery` → `done`**: либо только **`payOrder`** из **`OrderDetail`**, либо убрать быстрый **«Выдан»** с **`OrderCard`**, если касса обязательна.
+- Свести один путь `delivery → done`: либо только `payOrder` из `OrderDetail`, либо убрать быстрый «Выдан» с `OrderCard`.
 - Выровнять localStorage keys корзины/доставки с `BrandConfig.cartKey` / `deliveryKey`.
-- При необходимости подтянуть подпись «Позвонить …» в `storefront.ts` под бренд или оставить динамику только в `aria-label` через `getBrandCallLabel`.
-- Включить guard checkout по сессии (если потребуется строгий редирект без профиля на всём **`/checkout`**).
+- Guard checkout по сессии (если потребуется).
 - Доработать gallery и lunch sets в админке.
+- Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types`.
+- Подключить списание ингредиентов в `payOrder` через `computeIngredientTotalsForOrder`.
+- UI для детали `/admin/finance/cash-sessions/[id]` (сейчас scaffold).
+- Voiding кассовых транзакций в админке.
+- Подпись «Позвонить …» в `storefront.ts` под бренд (или оставить динамику в `aria-label` через `getBrandCallLabel`).

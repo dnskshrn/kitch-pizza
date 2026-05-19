@@ -10,6 +10,7 @@ import { formatMoney, goodsPhrase, pickLocalizedName } from "@/lib/i18n/storefro
 import { getStorefrontDeliveryLineDisplay } from "@/lib/storefront-delivery-display"
 import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
+import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
 import type { CartItem } from "@/types/cart"
 import type { DeliveryZone } from "@/types/database"
 import { ChevronRight, Info, Loader2 } from "lucide-react"
@@ -104,7 +105,7 @@ export function OrderSummary({
                 {imageUrl ? (
                   <Image
                     src={imageUrl}
-                    alt=""
+                    alt={menuItemImageAlt(cartItem.menuItem.name_ro)}
                     fill
                     className="object-contain object-center"
                     sizes="56px"

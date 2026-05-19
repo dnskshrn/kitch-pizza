@@ -1,3 +1,7 @@
+// TODO: regenerate `src/lib/supabase/types.ts` via
+// `npx supabase gen types typescript --project-id xioizekcyfmyxxklbvsd > src/lib/supabase/types.ts`
+// (requires `supabase login` or SUPABASE_ACCESS_TOKEN; out of date for cash_sessions / cash_transactions / orders.cash_session_id)
+
 export type Category = {
   id: string
   name_ru: string
@@ -232,6 +236,8 @@ export interface Order {
   paid_at?: string | null
   delivery_lat: number | null
   delivery_lng: number | null
+  /** FK к `cash_sessions.id`; заполняется при `payOrder`. */
+  cash_session_id: string | null
 }
 
 export interface OrderItem {
@@ -254,6 +260,43 @@ export interface OrderWithItems extends Order {
     name: string
     slug?: string | null
   }> | null
+}
+
+/** Таблица `cash_sessions`. */
+export type CashSession = {
+  id: string
+  shift_log_id: string
+  opening_balance_bani: number
+  closing_balance_expected_bani: number | null
+  closing_balance_actual_bani: number | null
+  discrepancy_bani: number | null
+  status: "open" | "closed"
+  opened_at: string
+  closed_at: string | null
+  opened_by_staff_id: string | null
+  closed_by_staff_id: string | null
+  discrepancy_reason: string | null
+}
+
+/** Таблица `cash_transactions`. */
+export type CashTransaction = {
+  id: string
+  cash_session_id: string
+  type: string
+  direction: string
+  amount_bani: number
+  payment_method: string
+  category: string | null
+  description: string | null
+  order_id: string | null
+  created_by_staff_id: string | null
+  created_at: string
+  order_delivery_mode: DeliveryMode | null
+  order_brand_id: string | null
+  voided_at: string | null
+  voided_by_staff_id: string | null
+  void_reason: string | null
+  encashment_destination: string | null
 }
 
 export type CourierLocation = {
@@ -354,6 +397,7 @@ export type SupplyOrder = {
   total_cost_ex_vat: number | null
   total_cost_inc_vat: number | null
   created_at: string
+  annulled_at: string | null
 }
 
 export type SupplyOrderItem = {

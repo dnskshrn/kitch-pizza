@@ -4,6 +4,7 @@ import { getCartItemPrice, getCartItemSummary } from "@/lib/cart-helpers"
 import type { CartLang } from "@/lib/cart-helpers"
 import { formatMoney } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
+import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
 import type { CartItem } from "@/types/cart"
 import { Minus, Plus, X } from "lucide-react"
 import Image from "next/image"
@@ -37,7 +38,7 @@ export function CartItemCard({
           {cartItem.menuItem.image_url ? (
             <Image
               src={cartItem.menuItem.image_url}
-              alt=""
+              alt={menuItemImageAlt(cartItem.menuItem.name_ro)}
               fill
               className="object-cover"
               sizes="64px"

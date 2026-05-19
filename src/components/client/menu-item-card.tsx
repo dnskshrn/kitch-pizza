@@ -9,6 +9,7 @@ import {
 } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
+import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
 import type { MenuItem } from "@/types/database"
 import Image from "next/image"
 import { ItemBadge } from "./item-badge"
@@ -152,7 +153,7 @@ export function MenuItemCard({
             {item.image_url ? (
               <Image
                 src={item.image_url}
-                alt=""
+                alt={menuItemImageAlt(item.name_ro)}
                 fill
                 className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                 sizes="50vw"
@@ -210,7 +211,7 @@ export function MenuItemCard({
               <div className="absolute inset-0 transition-transform duration-300 ease-out will-change-transform group-hover:-translate-y-1.5">
                 <Image
                   src={item.image_url}
-                  alt=""
+                  alt={menuItemImageAlt(item.name_ro)}
                   fill
                   className="object-cover"
                   sizes="80px"
@@ -272,7 +273,7 @@ export function MenuItemCard({
             {item.image_url ? (
               <Image
                 src={item.image_url}
-                alt=""
+                alt={menuItemImageAlt(item.name_ro)}
                 fill
                 className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                 sizes="(max-width: 1023px) 31vw, (max-width: 1279px) 30vw, 286px"
@@ -338,7 +339,7 @@ export function MenuItemCard({
                 <div className="absolute inset-0 transition-transform duration-300 ease-out will-change-transform group-hover:-translate-y-2">
                   <Image
                     src={item.image_url}
-                    alt=""
+                    alt={menuItemImageAlt(item.name_ro)}
                     fill
                     className="object-contain"
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"

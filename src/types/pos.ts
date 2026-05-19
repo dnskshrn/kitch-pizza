@@ -81,4 +81,6 @@ export type PosOrder = {
   courier_name: string | null
   /** Профиль витрины (`orders.profile_id`); для заказов с сайта — до поиска по телефону. */
   profile_id: string | null
+  /** FK к `cash_sessions.id`; заполняется при `payOrder`. */
+  cash_session_id: string | null
 }

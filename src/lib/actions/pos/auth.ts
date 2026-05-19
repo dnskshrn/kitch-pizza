@@ -80,32 +80,6 @@ export async function verifyPin(
 
 export async function logout(): Promise<void> {
   const cookieStore = await cookies()
-  const token = cookieStore.get("pos-session")?.value
-
-  if (token) {
-    try {
-      const { payload } = await jwtVerify(token, getPosJwtSecretKey())
-      const staffId =
-        typeof payload.staffId === "string"
-          ? payload.staffId
-          : String(payload.staffId ?? "")
-      if (staffId) {
-        try {
-          const supabase = createServiceRoleClient()
-          await supabase
-            .from("shift_logs")
-            .update({ clock_out: new Date().toISOString() })
-            .eq("staff_id", staffId)
-            .is("clock_out", null)
-        } catch (e) {
-          console.error("[logout] shift close", e)
-        }
-      }
-    } catch {
-      /* invalid session */
-    }
-  }
-
   cookieStore.delete({ name: "pos-session", path: "/pos" })
 }
 
@@ -133,5 +107,53 @@ export async function getCurrentStaff(): Promise<{
     return { id: staffId, name, role }
   } catch {
     return null
+  }
+}
+
+export async function hasOpenShift(): Promise<boolean> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get("pos-session")?.value
+  if (!token) return false
+  try {
+    const { payload } = await jwtVerify(token, getPosJwtSecretKey())
+    const staffId =
+      typeof payload.staffId === "string"
+        ? payload.staffId
+        : String(payload.staffId ?? "")
+    if (!staffId) return false
+    const supabase = createServiceRoleClient()
+    const { data } = await supabase
+      .from("shift_logs")
+      .select("id")
+      .eq("staff_id", staffId)
+      .is("clock_out", null)
+      .maybeSingle()
+    return !!data
+  } catch {
+    return false
+  }
+}
+
+export async function verifyCurrentStaffPin(pin: string): Promise<boolean> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get("pos-session")?.value
+  if (!token) return false
+  try {
+    const { payload } = await jwtVerify(token, getPosJwtSecretKey())
+    const staffId =
+      typeof payload.staffId === "string"
+        ? payload.staffId
+        : String(payload.staffId ?? "")
+    if (!staffId) return false
+    const supabase = createServiceRoleClient()
+    const { data: staff } = await supabase
+      .from("staff")
+      .select("pin_hash")
+      .eq("id", staffId)
+      .single()
+    if (!staff?.pin_hash) return false
+    return bcrypt.compare(pin, staff.pin_hash)
+  } catch {
+    return false
   }
 }

@@ -2,6 +2,7 @@
 
 import { ClientContainer } from "@/components/client/client-container"
 import { STOREFRONT_TOP_BAR_HEIGHT_PX } from "@/components/client/storefront-top-bar"
+import { useStoreOpen } from "@/hooks/use-store-open"
 import { BRAND_ACCENT } from "@/lib/client-brand"
 import {
   selectCartItemCount,
@@ -201,6 +202,11 @@ export function MenuCategoryBar({
   const subtotal = useCartStore(selectCartSubtotal)
   const openCart = useCartStore((s) => s.openCart)
   const cartButtonPulseKey = useCartStore((s) => s.cartButtonPulseKey)
+  const { isOpen: storeOpen } = useStoreOpen()
+  const handleOpenCart = useCallback(() => {
+    if (!storeOpen) return
+    openCart()
+  }, [storeOpen, openCart])
   const isBoutiqueMenu = hasBoutiqueMenu(brandSlug)
 
   useEffect(() => {
@@ -296,7 +302,7 @@ export function MenuCategoryBar({
         t={t}
         subtotal={subtotal}
         pulseKey={cartButtonPulseKey}
-        onOpen={openCart}
+        onOpen={handleOpenCart}
       />
     }
 
@@ -318,7 +324,7 @@ export function MenuCategoryBar({
                   count={itemCount}
                   t={t}
                   pulseKey={cartButtonPulseKey}
-                  onOpen={openCart}
+                  onOpen={handleOpenCart}
                 />
               </div>
             </ClientContainer>
@@ -329,7 +335,7 @@ export function MenuCategoryBar({
           t={t}
           subtotal={subtotal}
           pulseKey={cartButtonPulseKey}
-          onOpen={openCart}
+          onOpen={handleOpenCart}
         />
       </>
     )
@@ -346,7 +352,7 @@ export function MenuCategoryBar({
           lang={lang}
           t={t}
           pulseKey={cartButtonPulseKey}
-          onOpenCart={openCart}
+          onOpenCart={handleOpenCart}
           onSelect={handleSelectCategory}
           setButtonRef={setCategoryButtonRef}
         />
@@ -355,7 +361,7 @@ export function MenuCategoryBar({
           t={t}
           subtotal={subtotal}
           pulseKey={cartButtonPulseKey}
-          onOpen={openCart}
+          onOpen={handleOpenCart}
         />
       </>
     )
@@ -370,7 +376,7 @@ export function MenuCategoryBar({
         lang={lang}
         t={t}
         pulseKey={cartButtonPulseKey}
-        onOpenCart={openCart}
+        onOpenCart={handleOpenCart}
         onSelect={handleSelectCategory}
         setButtonRef={setCategoryButtonRef}
       />
@@ -379,7 +385,7 @@ export function MenuCategoryBar({
         t={t}
         subtotal={subtotal}
         pulseKey={cartButtonPulseKey}
-        onOpen={openCart}
+        onOpen={handleOpenCart}
       />
     </>
   )

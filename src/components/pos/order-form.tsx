@@ -1101,10 +1101,10 @@ export function OrderForm({
       return { price_bani: 0, free_from_bani: 0 }
     }
     if (zoneResult?.status === "in_zone") {
-      const z = zoneResult.zone
+      const params = zoneResult.resolvedParams
       return {
-        price_bani: z.delivery_price_bani,
-        free_from_bani: z.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
+        price_bani: params.delivery_price_bani,
+        free_from_bani: params.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
       }
     }
     if (
@@ -4353,12 +4353,15 @@ function DeliveryZoneInfo({
 
   /* in_zone */
   const zone = result.zone
+  const params = result.resolvedParams
+  const effectivePriceBani = params.delivery_price_bani
   const isFree =
-    zone.free_delivery_from_bani != null &&
-    subtotalBani >= zone.free_delivery_from_bani
+    effectivePriceBani === 0 ||
+    (params.free_delivery_from_bani != null &&
+      subtotalBani >= params.free_delivery_from_bani)
   const deliveryFeeDisplay = isFree
     ? "Бесплатно"
-    : `${(zone.delivery_price_bani / 100).toFixed(0)} лей`
+    : `${(effectivePriceBani / 100).toFixed(0)} лей`
 
   return (
     <div className="mt-2 rounded-lg bg-[#ecffa1] px-3 py-2.5 text-xs text-[#3d5a00]">
@@ -4373,16 +4376,16 @@ function DeliveryZoneInfo({
         </div>
         <div className="flex items-center justify-between">
           <span className="text-[#5f7600]">Время</span>
-          <span className="font-mono font-bold tabular-nums">{zone.delivery_time_min} мин</span>
+          <span className="font-mono font-bold tabular-nums">{params.delivery_time_min} мин</span>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-[#5f7600]">Мин. заказ</span>
-          <span className="font-mono font-bold tabular-nums">{(zone.min_order_bani / 100).toFixed(0)} лей</span>
+          <span className="font-mono font-bold tabular-nums">{(params.min_order_bani / 100).toFixed(0)} лей</span>
         </div>
-        {zone.free_delivery_from_bani != null && (
+        {params.free_delivery_from_bani != null && (
           <div className="flex items-center justify-between">
             <span className="text-[#5f7600]">Бесплатно от</span>
-            <span className="font-mono font-bold tabular-nums">{(zone.free_delivery_from_bani / 100).toFixed(0)} лей</span>
+            <span className="font-mono font-bold tabular-nums">{(params.free_delivery_from_bani / 100).toFixed(0)} лей</span>
           </div>
         )}
       </div>

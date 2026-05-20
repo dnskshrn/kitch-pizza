@@ -161,12 +161,18 @@ export type DeliveryZone = {
   color: string
   polygon: [number, number][]
   delivery_price_bani: number
+  /** Ночная цена доставки (23:00–05:59, Europe/Chisinau); null — без переопределения */
+  night_delivery_price_bani: number | null
   min_order_bani: number
   free_delivery_from_bani: number | null
   delivery_time_min: number
   is_active: boolean
   sort_order: number
   created_at: string
+  /** "HH:MM" или null — начало окна доставки (Europe/Chisinau) */
+  active_from: string | null
+  /** "HH:MM" или null — конец окна доставки (Europe/Chisinau) */
+  active_to: string | null
 }
 
 export type DeliveryZoneCheckResult = {
@@ -174,6 +180,108 @@ export type DeliveryZoneCheckResult = {
   lat: number
   lng: number
 }
+
+// delivery_zone_schedules
+export interface DeliveryZoneSchedule {
+  id: string
+  zone_id: string
+  from_time: string // "HH:MM:SS" from DB
+  to_time: string // "HH:MM:SS" from DB
+  delivery_time_min: number
+  delivery_price_bani: number
+  min_order_bani: number
+  free_delivery_from_bani: number | null
+  sort_order: number
+  created_at: string | null
+}
+
+export type Database = {
+  public: {
+    Tables: {
+      delivery_zones: {
+        Row: DeliveryZone
+        Insert: {
+          id?: string
+          name: string
+          color: string
+          polygon: [number, number][]
+          delivery_price_bani: number
+          night_delivery_price_bani?: number | null
+          min_order_bani: number
+          free_delivery_from_bani?: number | null
+          delivery_time_min: number
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+          active_from?: string | null
+          active_to?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          color?: string
+          polygon?: [number, number][]
+          delivery_price_bani?: number
+          night_delivery_price_bani?: number | null
+          min_order_bani?: number
+          free_delivery_from_bani?: number | null
+          delivery_time_min?: number
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+          active_from?: string | null
+          active_to?: string | null
+        }
+        Relationships: []
+      }
+      delivery_zone_schedules: {
+        Row: DeliveryZoneSchedule
+        Insert: {
+          id?: string
+          zone_id: string
+          from_time: string
+          to_time: string
+          delivery_time_min: number
+          delivery_price_bani: number
+          min_order_bani: number
+          free_delivery_from_bani?: number | null
+          sort_order?: number
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          zone_id?: string
+          from_time?: string
+          to_time?: string
+          delivery_time_min?: number
+          delivery_price_bani?: number
+          min_order_bani?: number
+          free_delivery_from_bani?: number | null
+          sort_order?: number
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_zone_schedules_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "delivery_zones"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+    }
+    Views: Record<string, never>
+    Functions: Record<string, never>
+    Enums: Record<string, never>
+    CompositeTypes: Record<string, never>
+  }
+}
+
+export type DeliveryZoneWithSchedules =
+  Database["public"]["Tables"]["delivery_zones"]["Row"] & {
+    schedules: DeliveryZoneSchedule[]
+  }
 
 export type OrderStatus =
   | "draft"

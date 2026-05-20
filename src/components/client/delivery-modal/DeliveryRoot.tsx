@@ -3,7 +3,7 @@
 import { getActiveDeliveryZones } from "@/lib/actions/check-delivery-zone"
 import { useDeliveryModalStore } from "@/lib/store/delivery-modal-store"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
-import type { DeliveryZone } from "@/types/database"
+import type { DeliveryZoneWithResolvedParams } from "@/lib/delivery-zone-schedule"
 import { useEffect, useState } from "react"
 import { DeliveryModal } from "./DeliveryModal"
 import { DeliverySheet } from "./DeliverySheet"
@@ -28,7 +28,7 @@ export function DeliveryRoot() {
   const isOpen = useDeliveryModalStore((s) => s.isOpen)
   const close = useDeliveryModalStore((s) => s.close)
   const isMobile = useIsMobileViewport()
-  const [zones, setZones] = useState<DeliveryZone[]>([])
+  const [zones, setZones] = useState<DeliveryZoneWithResolvedParams[]>([])
 
   useEffect(() => {
     void getActiveDeliveryZones().then((z) => {

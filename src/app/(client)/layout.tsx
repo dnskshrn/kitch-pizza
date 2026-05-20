@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { AuthInitializer } from "@/components/client/auth/auth-initializer"
 import { MaintenanceScreen } from "@/components/client/maintenance-screen"
 import { ClientChrome } from "@/components/client/client-chrome"
+import StoreClosedModal from "@/components/store-closed-modal"
 import { StorefrontTopBar } from "@/components/client/storefront-top-bar"
 import { BrandJsonLd } from "@/components/seo/JsonLd"
 import { MetaPixel } from "@/components/MetaPixel"
@@ -65,6 +66,7 @@ export default async function ClientLayout({
         data-brand={brandSlug}
         className="flex min-h-screen flex-col bg-[var(--color-bg)] text-foreground"
       >
+        <StoreClosedModal />
         <BrandJsonLd brandSlug={brandSlug} />
         <MetaPixel pixelId={brand.metaPixelId} />
         <AuthInitializer />
@@ -80,6 +82,7 @@ export default async function ClientLayout({
       data-brand={brandSlug}
       className="flex min-h-screen flex-col bg-[var(--color-bg)] text-foreground"
     >
+      <StoreClosedModal />
       <BrandJsonLd brandSlug={brandSlug} />
       <MetaPixel pixelId={brand.metaPixelId} />
       <StorefrontTopBar brandSlug={brandSlug} />

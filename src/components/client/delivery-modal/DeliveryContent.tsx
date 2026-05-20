@@ -1,18 +1,18 @@
 "use client"
 
 import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
+import type { DeliveryZoneWithResolvedParams } from "@/lib/delivery-zone-schedule"
 import { findZoneForPoint } from "@/lib/geo"
 import { formatMoneyValue } from "@/lib/i18n/storefront"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useLanguage } from "@/lib/store/language-store"
-import type { DeliveryZone } from "@/types/database"
 import { cn } from "@/lib/utils"
 import { Clock, Gift, Loader2, MapPin, Navigation, ShoppingBag, Truck } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { DeliveryModeIsland } from "./delivery-mode-island"
 
 type DeliveryContentProps = {
-  zones: DeliveryZone[]
+  zones: DeliveryZoneWithResolvedParams[]
   onChoose: () => void
   /** Геолокация устройства → координаты (родитель делает reverse + setResolved). */
   onLocateMe: () => void
@@ -88,6 +88,9 @@ export function DeliveryContent({
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
   }, [address, resolvedAddress, mode, setGeocoding, setResolved, zones])
+
+  const resolvedParams = selectedZone?.resolvedParams
+  const effectiveDeliveryPriceBani = resolvedParams?.delivery_price_bani ?? 0
 
   const resolvedCoords = lat != null && lng != null
   const canSubmit =
@@ -248,7 +251,7 @@ export function DeliveryContent({
             <div
               className={cn(
                 "grid gap-2 sm:gap-3",
-                selectedZone.free_delivery_from_bani != null
+                resolvedParams?.free_delivery_from_bani != null
                   ? "grid-cols-4"
                   : "grid-cols-3",
               )}
@@ -263,7 +266,7 @@ export function DeliveryContent({
                   {t.delivery.deliveryTime}
                 </p>
                 <p className="text-[13px] font-semibold leading-tight text-[#242424] sm:text-sm">
-                  ~{selectedZone.delivery_time_min} {t.header.etaSuffix}
+                  ~{resolvedParams!.delivery_time_min} {t.header.etaSuffix}
                 </p>
               </div>
               <div className="flex min-w-0 flex-col items-center gap-1 text-center">
@@ -276,9 +279,9 @@ export function DeliveryContent({
                   {t.delivery.deliveryCost}
                 </p>
                 <p className="text-[13px] font-semibold leading-tight text-[#242424] sm:text-sm">
-                  {selectedZone.delivery_price_bani === 0
+                  {effectiveDeliveryPriceBani === 0
                     ? t.common.free
-                    : `${formatMoneyValue(selectedZone.delivery_price_bani)} ${
+                    : `${formatMoneyValue(effectiveDeliveryPriceBani)} ${
                         lang === "RO" ? "lei" : "лей"
                       }`}
                 </p>
@@ -293,11 +296,11 @@ export function DeliveryContent({
                   {t.delivery.minOrder}
                 </p>
                 <p className="text-[13px] font-semibold leading-tight text-[#242424] sm:text-sm">
-                  {t.menu.from} {formatMoneyValue(selectedZone.min_order_bani)}{" "}
+                  {t.menu.from} {formatMoneyValue(resolvedParams!.min_order_bani)}{" "}
                   {lang === "RO" ? "lei" : "лей"}
                 </p>
               </div>
-              {selectedZone.free_delivery_from_bani != null ? (
+              {resolvedParams?.free_delivery_from_bani != null ? (
                 <div className="flex min-w-0 flex-col items-center gap-1 text-center">
                   <Gift
                     className="storefront-modal-accent size-[22px] shrink-0"
@@ -308,7 +311,7 @@ export function DeliveryContent({
                     {t.delivery.freeFrom}
                   </p>
                   <p className="text-[13px] font-semibold leading-tight text-[#242424] sm:text-sm">
-                    {formatMoneyValue(selectedZone.free_delivery_from_bani)}{" "}
+                    {formatMoneyValue(resolvedParams!.free_delivery_from_bani!)}{" "}
                     {lang === "RO" ? "lei" : "лей"}
                   </p>
                 </div>

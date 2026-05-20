@@ -12,6 +12,7 @@ import {
   pickLocalizedName,
   type Lang,
 } from "@/lib/i18n/storefront"
+import { useStoreOpen } from "@/hooks/use-store-open"
 import { useCartStore } from "@/lib/store/cart-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
@@ -189,6 +190,7 @@ export function ProductModalRoot() {
   const [rendered, setRendered] = useState(false)
 
   const { lang, t } = useLanguage()
+  const { isOpen: storeOpen } = useStoreOpen()
   const [toppingSections, setToppingSections] = useState<
     StorefrontMenuItemToppingGroup[]
   >([])
@@ -304,6 +306,7 @@ export function ProductModalRoot() {
   const panelItem = modalItem ?? (isOpen ? storeItem : null)
 
   const handleAddToCart = useCallback(() => {
+    if (!storeOpen) return
     if (!panelItem) return
     if (panelItem.has_sizes) {
       const selectedVariant = selectedVariantId
@@ -344,7 +347,7 @@ export function ProductModalRoot() {
         : { variantId: null, variantNameSnapshot: null },
     )
     close()
-    if (reopenCartAfterSave) {
+    if (reopenCartAfterSave && storeOpen) {
       window.setTimeout(() => {
         useCartStore.getState().openCart()
       }, 50)
@@ -355,6 +358,7 @@ export function ProductModalRoot() {
     panelItem,
     selectedToppingIds,
     selectedVariantId,
+    storeOpen,
     toppings,
     variantsEffective,
   ])

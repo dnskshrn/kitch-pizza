@@ -5,7 +5,7 @@ import { findZoneForPoint } from "@/lib/geo"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
-import type { DeliveryZone } from "@/types/database"
+import type { DeliveryZoneWithResolvedParams } from "@/lib/delivery-zone-schedule"
 import dynamic from "next/dynamic"
 import { useCallback, useEffect, useState } from "react"
 import { X } from "lucide-react"
@@ -27,7 +27,7 @@ const SHEET_EXIT_MS = 300
 type DeliverySheetProps = {
   open: boolean
   onClose: () => void
-  zones: DeliveryZone[]
+  zones: DeliveryZoneWithResolvedParams[]
 }
 
 export function DeliverySheet({ open, onClose, zones }: DeliverySheetProps) {

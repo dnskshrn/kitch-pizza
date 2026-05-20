@@ -7,6 +7,7 @@ import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-pro
 import { OrderSummary } from "@/components/client/checkout/order-summary"
 import { CheckoutSkeleton } from "@/components/client/storefront-skeletons"
 import { promoErrorMessage, formatStorefrontExcludedCategoryList, type StorefrontMessages } from "@/lib/i18n/storefront"
+import { useStoreOpen } from "@/hooks/use-store-open"
 import {
   selectCartItemCount,
   selectCartSubtotal,
@@ -226,6 +227,7 @@ export function CheckoutView({
   const brandCallLabel = getBrandCallLabel(brandPhone, lang)
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const openCart = useCartStore((s) => s.openCart)
+  const { isOpen: storeOpen } = useStoreOpen()
   const profile = useAuthStore((s) => s.profile)
 
   const items = useCartStore((s) => s.items)
@@ -324,9 +326,10 @@ export function CheckoutView({
     }
     const z = selectedZone
     if (!z) return null
+    const params = z.resolvedParams
     return {
-      price_bani: z.delivery_price_bani,
-      free_from_bani: z.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
+      price_bani: params.delivery_price_bani,
+      free_from_bani: params.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
     }
   }, [mode, selectedZone])
 
@@ -523,6 +526,7 @@ export function CheckoutView({
 
   function handleBackNav() {
     router.push("/")
+    if (!storeOpen) return
     openCart()
   }
 

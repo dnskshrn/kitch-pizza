@@ -7,6 +7,7 @@ import {
   pickLocalizedName,
   type Lang,
 } from "@/lib/i18n/storefront"
+import { useStoreOpen } from "@/hooks/use-store-open"
 import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
 import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
@@ -128,6 +129,7 @@ export function MenuItemCard({
   lang,
 }: MenuItemCardProps) {
   const openProductModal = useProductModalStore((s) => s.open)
+  const { isOpen: storeOpen } = useStoreOpen()
   const { t } = useLanguage()
 
   const name = pickLocalizedName(item, lang)
@@ -136,7 +138,10 @@ export function MenuItemCard({
   const { priceMain, priceCompare } = getMenuItemPriceLabels(item, lang)
   const aria = cardAriaLabel(name, priceMain, t.menu.chooseProduct)
 
-  const openModal = () => openProductModal(item)
+  const openModal = () => {
+    if (!storeOpen) return
+    openProductModal(item)
+  }
   const hasLososStyleCard = hasBoutiqueStorefrontCard(brandSlug)
 
   return (

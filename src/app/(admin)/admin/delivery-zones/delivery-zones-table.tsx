@@ -1,9 +1,19 @@
 "use client"
 
 import { useState } from "react"
-import type { DeliveryZone } from "@/types/database"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import type { DeliveryZoneWithSchedules } from "./page"
+import {
+  formatScheduleSlotSummary,
+  sortSchedules,
+} from "./zone-schedule-utils"
 import {
   Table,
   TableBody,
@@ -12,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Pencil, Plus, Trash2 } from "lucide-react"
+import { Moon, Pencil, Plus, Trash2 } from "lucide-react"
 import { DeleteZoneDialog } from "./delete-zone-dialog"
 import { ZoneDialog } from "./zone-dialog"
 
@@ -25,10 +35,45 @@ function formatLei(bani: number): string {
   })
 }
 
-export function DeliveryZonesTable({ zones }: { zones: DeliveryZone[] }) {
+function ScheduleSlotsBadge({
+  schedules,
+}: {
+  schedules: DeliveryZoneWithSchedules["delivery_zone_schedules"]
+}) {
+  const sorted = sortSchedules(schedules ?? [])
+  if (sorted.length === 0) return null
+
+  const label =
+    sorted.length === 1
+      ? "1 слот"
+      : `${sorted.length} слотов`
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge
+          variant="secondary"
+          className="cursor-default font-normal"
+          tabIndex={0}
+        >
+          {label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-sm">
+        <ul className="grid gap-1">
+          {sorted.map((s) => (
+            <li key={s.id}>{formatScheduleSlotSummary(s)}</li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+export function DeliveryZonesTable({ zones }: { zones: DeliveryZoneWithSchedules[] }) {
   const [createOpen, setCreateOpen] = useState(false)
-  const [editZone, setEditZone] = useState<DeliveryZone | null>(null)
-  const [deleteZone, setDeleteZone] = useState<DeliveryZone | null>(null)
+  const [editZone, setEditZone] = useState<DeliveryZoneWithSchedules | null>(null)
+  const [deleteZone, setDeleteZone] = useState<DeliveryZoneWithSchedules | null>(null)
 
   return (
     <>
@@ -40,6 +85,7 @@ export function DeliveryZonesTable({ zones }: { zones: DeliveryZone[] }) {
         </Button>
       </div>
 
+      <TooltipProvider>
       <div className="grid gap-8 lg:grid-cols-[1fr_minmax(0,420px)]">
         <Table>
           <TableHeader>
@@ -57,7 +103,12 @@ export function DeliveryZonesTable({ zones }: { zones: DeliveryZone[] }) {
           <TableBody>
             {zones.map((z) => (
               <TableRow key={z.id}>
-                <TableCell className="font-medium">{z.name}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    {z.name}
+                    <ScheduleSlotsBadge schedules={z.delivery_zone_schedules} />
+                  </span>
+                </TableCell>
                 <TableCell>
                   <span className="inline-flex items-center gap-2">
                     <span
@@ -70,7 +121,21 @@ export function DeliveryZonesTable({ zones }: { zones: DeliveryZone[] }) {
                     </span>
                   </span>
                 </TableCell>
-                <TableCell>{formatLei(z.delivery_price_bani)} лей</TableCell>
+                <TableCell>
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    <span>{formatLei(z.delivery_price_bani)} MDL</span>
+                    {z.night_delivery_price_bani != null ? (
+                      <>
+                        <span className="text-muted-foreground">/</span>
+                        <Moon
+                          className="size-3.5 shrink-0 text-muted-foreground"
+                          aria-hidden
+                        />
+                        <span>{formatLei(z.night_delivery_price_bani)} MDL</span>
+                      </>
+                    ) : null}
+                  </span>
+                </TableCell>
                 <TableCell>{formatLei(z.min_order_bani)} лей</TableCell>
                 <TableCell>
                   {z.free_delivery_from_bani != null
@@ -108,6 +173,7 @@ export function DeliveryZonesTable({ zones }: { zones: DeliveryZone[] }) {
           </TableBody>
         </Table>
       </div>
+      </TooltipProvider>
 
       <ZoneDialog
         open={createOpen}

@@ -4,6 +4,7 @@ import {
   getMenuItemPriceLabels,
   type MenuItemPriceLabels,
 } from "@/components/client/menu-item-card"
+import { useStoreOpen } from "@/hooks/use-store-open"
 import { pickLocalizedName } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
@@ -56,6 +57,7 @@ function PriceBlock({ priceMain, priceCompare }: MenuItemPriceLabels) {
 
 function FeaturedMenuCard({ item }: { item: MenuItem }) {
   const openProductModal = useProductModalStore((state) => state.open)
+  const { isOpen: storeOpen } = useStoreOpen()
   const { lang, t } = useLanguage()
   const name = pickLocalizedName(item, lang)
   const priceLabels = getMenuItemPriceLabels(item, lang)
@@ -63,10 +65,15 @@ function FeaturedMenuCard({ item }: { item: MenuItem }) {
     ? `${name}. ${priceLabels.priceMain}. ${t.menu.chooseProduct}`
     : `${name}. ${t.menu.chooseProduct}`
 
+  const handleOpen = () => {
+    if (!storeOpen) return
+    openProductModal(item)
+  }
+
   return (
     <button
       type="button"
-      onClick={() => openProductModal(item)}
+      onClick={handleOpen}
       aria-label={ariaLabel}
       className="group flex h-full min-h-0 w-full items-stretch overflow-hidden rounded-[12px] bg-white text-left transition-transform duration-200 hover:-translate-y-0.5"
     >

@@ -1,11 +1,24 @@
 "use server"
 
+import {
+  attachResolvedZoneParams,
+  isZoneAvailableNow,
+  type DeliveryZoneWithResolvedParams,
+  type ResolvedZoneParams,
+} from "@/lib/delivery-zone-schedule"
 import { findZoneForPoint } from "@/lib/geo"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
-import type { DeliveryZone } from "@/types/database"
+import type { DeliveryZone, DeliveryZoneSchedule } from "@/types/database"
+
+type DeliveryZoneWithSchedulesRelation = DeliveryZone & {
+  delivery_zone_schedules?: DeliveryZoneSchedule[]
+}
 
 const NOMINATIM = "https://nominatim.openstreetmap.org"
 const USER_AGENT = "KitchPizza/1.0"
+
+const DELIVERY_ZONE_SELECT =
+  "id, name, color, polygon, delivery_price_bani, night_delivery_price_bani, min_order_bani, free_delivery_from_bani, delivery_time_min, is_active, sort_order, created_at, active_from, active_to, delivery_zone_schedules(id, from_time, to_time, delivery_time_min, delivery_price_bani, min_order_bani, free_delivery_from_bani, sort_order)"
 
 function zonesViewbox(zones: DeliveryZone[]): string | null {
   const points = zones
@@ -31,7 +44,9 @@ function zonesViewbox(zones: DeliveryZone[]): string | null {
   return `${minLng},${maxLat},${maxLng},${minLat}`
 }
 
-async function getZonesByBrandSlug(brandSlug: string): Promise<DeliveryZone[]> {
+async function getZonesByBrandSlug(
+  brandSlug: string,
+): Promise<DeliveryZoneWithResolvedParams[]> {
   const supabase = createServiceRoleClient()
 
   const { data: brand } = await supabase
@@ -44,19 +59,23 @@ async function getZonesByBrandSlug(brandSlug: string): Promise<DeliveryZone[]> {
 
   const { data, error } = await supabase
     .from("delivery_zones")
-    .select("*")
+    .select(DELIVERY_ZONE_SELECT)
     .eq("brand_id", (brand as { id: string }).id)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
 
   if (error) return []
-  return (data ?? []) as DeliveryZone[]
+  const zones = (data ?? []) as DeliveryZoneWithSchedulesRelation[]
+  return zones
+    .filter((z) => isZoneAvailableNow(z.delivery_zone_schedules ?? []))
+    .map(attachResolvedZoneParams)
 }
 
 export type DeliveryZoneCheckResultPos =
   | {
       status: "in_zone"
-      zone: DeliveryZone
+      zone: DeliveryZoneWithResolvedParams
+      resolvedParams: ResolvedZoneParams
       display_name: string
       lat: number
       lng: number
@@ -123,11 +142,13 @@ export async function checkDeliveryZoneByAddress(
   }
 
   for (const candidate of candidates) {
-    const zone = findZoneForPoint(candidate.lat, candidate.lng, zones)
-    if (zone) {
+    const hit = findZoneForPoint(candidate.lat, candidate.lng, zones)
+    if (hit) {
+      const zone = attachResolvedZoneParams(hit)
       return {
         status: "in_zone",
         zone,
+        resolvedParams: zone.resolvedParams,
         display_name: candidate.display_name,
         lat: candidate.lat,
         lng: candidate.lng,

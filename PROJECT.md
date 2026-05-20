@@ -51,6 +51,8 @@ src/
 │   ├── store/           # Zustand stores
 │   ├── i18n/, pos/, pbx/, seo/, telegram/, supabase/
 │   ├── bonus.ts, customers.ts, discount-engine.ts
+│   ├── delivery-zone-schedule.ts  # слоты расписания зоны (Europe/Chisinau)
+│   ├── actions/admin/delivery-zone-schedules.ts  # CRUD delivery_zone_schedules
 │   ├── inventory-units.ts, recipe-*.ts
 │   ├── order-recipe-stock-deduction.ts
 │   └── ...
@@ -107,13 +109,47 @@ src/
 
 **Брендовое** (фильтр по `brand_id`, для админки — через `getAdminBrandId()` из cookie `admin-brand-slug`): `menu_categories`, `menu_items`, `menu_item_variants`, `topping_groups`, `toppings`, `menu_item_topping_groups`, `promotions`, `featured_menu_items`, `promo_codes`, `discount_rules`, `delivery_zones`, `orders` (на витрине). На витрине бренд резолвится через `getBrand()` / `getBrandId()`; на админке через cookie.
 
-**Общее для всех брендов** (без фильтра по `getAdminBrandId()`): `staff`, `shift_logs`, `cash_sessions`, `cash_transactions`, склад целиком (`ingredients`, `ingredient_categories`, `ingredient_stock`, `semi_finished`, `semi_finished_items`, `product_recipes`, `suppliers`, `supply_orders`, `supply_order_items`, `stock_writeoffs`, `stock_audits`, `stock_ledger`), `profiles`, `customer_addresses`, `bonus_settings`, `bonus_transactions`.
+**Общее для всех брендов** (без фильтра по `getAdminBrandId()`): `staff`, `shift_logs`, `cash_sessions`, `cash_transactions`, склад целиком (`ingredients`, `ingredient_categories`, `ingredient_stock`, `semi_finished`, `semi_finished_items`, `product_recipes`, `suppliers`, `supply_orders` (+ `annulled_at`), `supply_order_items`, `stock_writeoffs`, `stock_audits`, `stock_ledger`), `profiles`, `customer_addresses`, `bonus_settings`, `bonus_transactions`.
 
 **Исключения:**
 - `/admin/orders` — фильтр по бренду только если в URL задан `brand_id` (не принудительно из cookie).
 - `stock_writeoffs.brand_id` всегда вставляется как **`null`** в коде.
 - `stock_audits.brand_id` при **создании** записывается из `getAdminBrandId()` (список и карточка — без фильтра).
 - POS/KDS: cookie `pos-brand-slug` хранит активный бренд **для дисплея**, список заказов в KDS не фильтруется по бренду.
+
+### Зоны доставки (`delivery_zones` + `delivery_zone_schedules`)
+
+Типы в `src/types/database.ts`: `DeliveryZone`, `DeliveryZoneSchedule`, `DeliveryZoneWithSchedules`. Часовой пояс всех проверок времени — **Europe/Chisinau**.
+
+**Базовые поля зоны** (`delivery_zones`): `polygon`, `color`, `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `is_active`, `sort_order`, `brand_id`. Используются как fallback, когда у зоны **нет слотов** расписания или ни один слот не попадает в текущее время.
+
+**Слоты расписания** (`delivery_zone_schedules`, FK `zone_id` ON DELETE CASCADE):
+
+| Поле | Назначение |
+|---|---|
+| `from_time`, `to_time` | Окно слота (`TIME`, `HH:MM:SS` в API); через полночь: `from >= to` |
+| `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min` | Параметры доставки в этом окне |
+| `sort_order` | Приоритет при пересечении (первый подходящий по `sort_order`) |
+
+Нет слотов → зона на витрине/POS доступна круглосуточно с базовыми колонками. Есть слоты → зона видна только если сейчас попадает хотя бы в один слот (`isZoneAvailableNow`).
+
+**`src/lib/delivery-zone-schedule.ts`:**
+
+- `getActiveSchedule(schedules)` — активный слот сейчас или `null`.
+- `isZoneAvailableNow(schedules)` — пустой массив слотов → `true`; иначе нужен активный слот.
+- `resolveZoneParams(zone, schedules)` — параметры из активного слота или базовые коля зоны.
+- `attachResolvedZoneParams(zone)` → `DeliveryZoneWithResolvedParams` с полем `resolvedParams` (чтобы клиент не пересчитывал время).
+
+**Витрина / POS:** после `is_active = true` — `.filter(isZoneAvailableNow(delivery_zone_schedules))`. Стоимость и `deliveryZoneForEngine` — из `zone.resolvedParams` / `result.resolvedParams`, не из сырых колонок зоны. Центрально: `delivery-store.getDeliveryFeeBani`, `CartContent`, `checkout-view`, `DeliveryContent`, `order-form` (`DeliveryZoneInfo`).
+
+**Загрузка зон:** `getActiveDeliveryZones` (`check-delivery-zone.ts`), `getZonesByBrandSlug` / `checkDeliveryZoneByAddress` (`check-delivery-zone-pos.ts`) — nested select `delivery_zone_schedules(...)`, на выходе зоны с `resolvedParams`.
+
+**Админка** (`/admin/delivery-zones`):
+
+- Список: все зоны бренда, **без** фильтра по времени; бейдж «N слотов» + tooltip с окнами (`11:00–23:00 · 40 MDL`).
+- Редактор зоны (`zone-dialog.tsx`): базовые поля + секция **«Расписание работы зоны»** (`zone-schedules-section.tsx`) — CRUD слотов.
+- Actions зоны: `createDeliveryZone`, `updateDeliveryZone`, `deleteDeliveryZone` (`actions.ts`).
+- Actions слотов: `createSchedule`, `updateSchedule`, `deleteSchedule` (`lib/actions/admin/delivery-zone-schedules.ts`, service role, `revalidatePath('/admin/delivery-zones')`).
 
 ### Middleware (резолв бренда)
 
@@ -137,7 +173,23 @@ Supabase Auth email/password. Layout делает `Promise.all` для `getBrand
 2. `/pos/login` → PIN (`bcryptjs`), выпускает cookie `pos-session` (JWT HS256, библиотека `jose`, секрет `POS_SESSION_SECRET` **≥32 символов**).
 3. Корневой `src/app/pos/layout.tsx`: `ensureActiveShift` (`shift_logs`) + проверка `cash_sessions(status=open)`. Без открытой кассы — блокирующий `CashSessionGate`.
 
-Кода: `src/lib/actions/pos/auth.ts`, `shifts.ts`. Внутри POS активный сотрудник — `getCurrentStaff()`.
+Код: `src/lib/actions/pos/auth.ts`, `shifts.ts`. Внутри POS активный сотрудник — `getCurrentStaff()`.
+
+**Смены (`shift_logs`) и выход:**
+
+| Действие | Закрывает `shift_logs`? | Удаляет `pos-session`? |
+|---|---|---|
+| `logout()` | **Нет** — только `cookieStore.delete('pos-session')` | Да |
+| `closeShift()` | Да (`clock_out` для открытых строк сотрудника) | Нет |
+| «Закрыть смену» (`CloseShiftModal`) | Да — `closeCashSession` → `closeShift()` → `logout()` → Supabase `signOut()` | Да |
+| «Выйти» (`PosLogoutButton`) | **Нет** | Да |
+
+- `hasOpenShift()` — есть ли у текущего сотрудника строка в `shift_logs` с `clock_out IS NULL`.
+- `verifyCurrentStaffPin(pin)` — сверка PIN текущего сотрудника по JWT, без повторного логина.
+- `ensureActiveShift()` — находит или создаёт открытую смену при входе в POS (самая свежая при дублях).
+- `closeShift()` — единственный server action для закрытия смены вне UI; вызывается из `CloseShiftModal` после закрытия кассы.
+
+**`PosLogoutButton`:** при открытой смене — диалог «Подтвердите выход» с PIN (`verifyCurrentStaffPin`); при успехе — `logout()` + `/pos/login`. Без открытой смены — выход сразу. Смену при выходе не закрывает.
 
 ## POS
 
@@ -232,8 +284,8 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 
 ### Шапка POS и входящие звонки
 
-- `PosAppShell` после открытия кассы: логотип, `PosClockWidget`, `PosShiftTimer`, `PosLogoutButton`, «Карта курьеров» (`CourierMapModal` — react-leaflet через `dynamic({ssr:false})`, маркеры из `courier_locations` + `staff`, патч иконки `lib/leaflet-fix-default-icon.ts`).
-- Меню `⋯` — `PosActionsMenu`: «Создать транзакцию» (`CreateTransactionModal` + `createCashTransaction`), «Данные смены» (`ShiftDataModal` + `getCashSession`: `payment_breakdown`, `manual_breakdown`, `recent_manual_transactions`), «Закрыть смену» (`CloseShiftModal` → `closeCashSession`, `closeShift`, `auth.signOut()`, редирект на `/pos`).
+- `PosAppShell` после открытия кассы: логотип, `PosClockWidget`, `PosShiftTimer`, `PosLogoutButton` (см. таблицу выхода в Auth), «Карта курьеров» (`CourierMapModal` — react-leaflet через `dynamic({ssr:false})`, маркеры из `courier_locations` + `staff`, патч иконки `lib/leaflet-fix-default-icon.ts`).
+- Меню `⋯` — `PosActionsMenu`: «Создать транзакцию» (`CreateTransactionModal` + `createCashTransaction`), «Данные смены» (`ShiftDataModal` + `getCashSession`: `payment_breakdown`, `manual_breakdown`, `recent_manual_transactions`), «Закрыть смену» (`CloseShiftModal` → `closeCashSession` → `closeShift()` → `logout()` → Supabase `signOut()`, редирект на `/pos`).
 
 **Входящие звонки:**
 - Webhook ОАТС: `POST /api/pbx/incoming` (`PBX_WEBHOOK_TOKEN` в поле `crm_token`). Принимает `cmd` ∈ `contact` / `event` / `history` → таблица `pbx_calls`. `brand_slug` определяется по линии через `lib/pbx/diversion-brand-slug.ts` (поля `diversion` / `called` / `to`):
@@ -326,7 +378,9 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 ### Поставки (supply_orders)
 
 - `supply_order_items.received_qty` — nullable. Если null, считается равным `quantity`.
+- `supply_orders.annulled_at` — timestamptz, NULL = активная поставка. Аннулирование не удаляет строки.
 - `createSupplyOrder` (`inventory/supplies/actions.ts`): вставка заказа и строк, затем пополнение `ingredient_stock` и `stock_ledger` по **`received_qty ?? quantity`**.
+- `annulSupplyOrder(orderId)` (service role): откат остатков и `avg_cost` (обратное средневзвешенное), `stock_ledger` (`movement_type='manual'`, `reference_type='supply_order'`, отрицательный `quantity_delta`, note «Аннулирование поставки»), затем `annulled_at`. Блокируется при недостатке остатка или если уже аннулирована. UI: кнопка в `supply-order-dialog` (режим view), бейдж в `supplies-table`.
 - `avg_cost` пересчитывается **средневзвешенно** по цене поставки (ex-VAT).
 - В UI: цены без НДС и с НДС синхронно (общая VAT % по строке); в БД — ex-VAT, в g/ml через `toStoragePrice`.
 
@@ -387,6 +441,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - Точка самовывоза bd. Dacia 27: `storefront-pickup-location.ts`.
 - Меню для апсейла LOSOS использует `menu_categories.show_in_upsell`.
 - Storefront-разработка: использовать `storefront-modal-*`, `storefront-checkout-*`, `storefront-input` вместо локальных цветов.
+- Доставка: `delivery-store` + `getStorefrontDeliveryLineDisplay` (`storefront-delivery-display.ts`); fee из `getDeliveryFeeBani` → `selectedZone.resolvedParams`. Модалка адреса — `DeliveryRoot` / `getActiveDeliveryZones`.
 
 ### /account
 
@@ -440,7 +495,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 | `/admin/promo-codes` | `promo_codes`. |
 | `/admin/staff` | `staff` + PIN (`bcryptjs`); deep-link Telegram для курьеров. Service role. |
 | `/admin/staff/shifts` | `shift_logs` + join `staff` + подсчёт доставленных (`orders.status=done`, `courier_id`, `delivered_at` в интервале). |
-| `/admin/delivery-zones` | `delivery_zones`: полигоны Leaflet Draw, color, цена, минималка, время. |
+| `/admin/delivery-zones` | `delivery_zones` + nested `delivery_zone_schedules`: полигоны Leaflet Draw, color, базовая цена/минималка/время, слоты расписания в редакторе. Actions: `createDeliveryZone`, `updateDeliveryZone`, `deleteDeliveryZone`; слоты — `createSchedule`, `updateSchedule`, `deleteSchedule`. |
 | `/admin/finance/cash-sessions` | Список смен (фильтры даты/staff/status, до 200; агрегаты по `cash_transactions` + Glovo card из `orders`). |
 | `/admin/finance/cash-sessions/[id]` | Деталь — scaffold (данные через `getCashSessionDetail`). |
 | `/admin/finance/ledger` | `stock_ledger`, до 200 последних; фильтр по `movement_type` на клиенте; service role. |
@@ -450,7 +505,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 | `/admin/inventory/ingredients` | `ingredients` + `ingredient_stock`. Фильтр категории: клиент при <500 строк (`INGREDIENT_SERVER_FILTER_THRESHOLD`), сервер при ≥500 (`?category=`). Поле `waste_percent`. |
 | `/admin/inventory/semi-finished` | Полуфабрикаты; диалог состава работает напрямую в г/мл/шт. |
 | `/admin/inventory/tech-cards` | Read-only обзор себестоимости. Ссылка «Открыть в меню» → `/admin/menu?edit={id}`. |
-| `/admin/inventory/supplies` | Поставки с `received_qty`. |
+| `/admin/inventory/supplies` | Поставки с `received_qty`; просмотр/аннулирование (`annulSupplyOrder`, `annulled_at`). |
 | `/admin/inventory/writeoffs` (+ `/new`) | Списания. |
 | `/admin/inventory/audits` (+ `/[id]`) | Инвентаризации (создание + карточка с подтверждением). |
 
@@ -470,14 +525,15 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 - `menu_item_variants` — `name_ru/ro`, `price` (bani), `sort_order`, `weight_grams`, `menu_item_id`.
 - `topping_groups` (`max_selections` NULL/число), `toppings`, `topping_recipes`, `menu_item_topping_groups`.
 - `promotions`, `featured_menu_items`, `promo_codes` (с `valid_channels`), `discount_rules`.
-- `delivery_zones` — `polygon` JSONB `[lat,lng][]`, `color` (TEXT, HEX), цена, минималка, время.
+- `delivery_zones` — `polygon` JSONB `[lat,lng][]`, `color` (TEXT, HEX), `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `is_active`, `sort_order`, `brand_id`.
+- `delivery_zone_schedules` — `zone_id`, `from_time`, `to_time`, `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `sort_order` (миграция `*_delivery_zone_schedules.sql`).
 - `orders`, `order_items` — см. раздел Контракты.
 - `profiles`, `otp_codes`, `customer_addresses` (`profile_id`, `label`, `address`, `entrance/floor/apartment/intercom`, `delivery_lat/lng`, `is_default`).
 - `bonus_settings`, `bonus_transactions`.
 - `staff`, `shift_logs`, `courier_locations`.
 - `cash_sessions`, `cash_transactions`.
 - `pbx_calls` (ОАТС), `incoming_calls` (legacy MoldCell).
-- Склад: `ingredient_categories`, `ingredients`, `ingredient_stock`, `stock_ledger`, `semi_finished`, `semi_finished_items`, `product_recipes`, `product_recipe_meta`, `suppliers`, `supply_orders`, `supply_order_items`, `stock_writeoffs`, `stock_writeoff_items`, `stock_audits`, `stock_audit_items`.
+- Склад: `ingredient_categories`, `ingredients`, `ingredient_stock`, `stock_ledger`, `semi_finished`, `semi_finished_items`, `product_recipes`, `product_recipe_meta`, `suppliers`, `supply_orders` (`annulled_at`), `supply_order_items`, `stock_writeoffs`, `stock_writeoff_items`, `stock_audits`, `stock_audit_items`.
 
 ### Типы
 
@@ -529,6 +585,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 
 ### Витрина и общие
 
+- `check-delivery-zone.ts` — `getActiveDeliveryZones` (фильтр `isZoneAvailableNow`, `attachResolvedZoneParams`), `geocodeAddress`, `reverseGeocode`.
 - `create-order.ts` — заказ с витрины. `order_items` только из корзины (`variant_id`, `size`). Поля `bonuses_redeemed`, `profile_id`, `delivery_lat/lng` (best-effort через `geocodeAddress`). После вставки — `redeemBonus` при `bonuses_redeemed > 0`. Telegram-уведомление через `sendTelegramNotification` (общий канал, не курьерский). Адрес — одной строкой в `delivery_address`.
 - `validate-promo-code.ts` — `validatePromoCode(code, subtotalBani, brandIdForOrder?)`. Витринная валидация.
 - `discounts.ts` — `getActiveDiscountRules`, `resolvePromoCode`, `getStorefrontCartPricingBootstrap`.
@@ -546,13 +603,13 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `inventory/ingredient-categories.ts` — CRUD категорий (service role).
 - `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive` (service role).
 - `(admin)/admin/toppings/actions.ts` — `save_topping_with_recipes` (RPC).
-- Inventory: `supplies/actions.ts` (`createSupplyOrder`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role).
+- Inventory: `supplies/actions.ts` (`createSupplyOrder`, `annulSupplyOrder`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role).
 - `staff/staff-actions.ts`.
 
 ### POS (`src/lib/actions/pos/`)
 
-- `auth.ts` — PIN-сессия.
-- `shifts.ts` — `ensureActiveShift`, `closeShift`.
+- `auth.ts` — `verifyPin`, `logout` (только cookie), `getCurrentStaff`, `hasOpenShift`, `verifyCurrentStaffPin`.
+- `shifts.ts` — `ensureActiveShift`, `closeShift` (закрытие `shift_logs`; не вызывается из `logout`).
 - `cash-session.ts` — `openCashSession`, `getCashSession` (`payment_breakdown`, `manual_breakdown`, `recent_manual_transactions`), `getExpectedInDrawerBani`, `getActiveOrdersCountForShift`, `createCashTransaction`, `closeCashSession`, **`payOrder`** (см. инварианты в разделе POS / Касса).
 - `create-draft-order.ts` — `createDraftOrderPos`.
 - `update-order-brand-pos`, `update-order-details-pos`, `update-order-items`, `updateOrderDeliveryModePos`.
@@ -565,13 +622,15 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `fetch-kds-orders.ts` — `fetchKdsCookingOrdersPos`, `fetchKdsOrderByIdPos`.
 - `update-order-status-kds.ts` — `cooking → ready`.
 - `customers-pos-actions.ts` — `posLookupCustomer` (с `bonus_settings`), `posSaveCustomer`, `posSaveCustomerAddress`.
-- `check-delivery-zone-pos.ts`.
+- `check-delivery-zone-pos.ts` — `checkDeliveryZoneByAddress` (возвращает `resolvedParams` при `in_zone`), `getZonesByBrandSlug` (+ `isZoneAvailableNow`, `attachResolvedZoneParams`).
 - `create-order-pos.ts`.
 
 ### Полезные lib (не actions)
 
 - `lib/bonus.ts` — лояльность.
 - `lib/customers.ts` — `getCustomerByPhone`, `saveCustomer`, `saveCustomerAddress`, `setDefaultAddress`, `getDefaultAddress`. Service role.
+- `lib/delivery-zone-schedule.ts` — `getActiveSchedule`, `isZoneAvailableNow`, `resolveZoneParams`, `attachResolvedZoneParams`.
+- `lib/actions/admin/delivery-zone-schedules.ts` — CRUD слотов расписания зоны.
 - `lib/discount-engine.ts` — `evaluateDiscounts`, `isRuleScheduleActive` (pure, без Supabase).
 - `lib/order-recipe-stock-deduction.ts` — `computeIngredientTotalsForOrder`.
 - `lib/inventory-units.ts`.
@@ -583,7 +642,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/seo/brand-seo.ts`, `lib/seo/menu-item-image-alt.ts`.
 - `lib/pbx/diversion-brand-slug.ts`.
 - `lib/pos/alert-sound.ts`, `kds-wakeup.ts`, `scheduled-slots.ts`, `split-composite-delivery-address.ts`, `pos-brand-slug-cookie.ts`, `menu-item-modal-row.ts`, `use-incoming-call.ts`.
-- `lib/store/cart-store`, `auth-store`, `pos-order-from-call-bridge`, `pos-menu-cache`, `language-store`, `delivery-store`.
+- `lib/store/cart-store`, `auth-store`, `pos-order-from-call-bridge`, `pos-menu-cache`, `language-store`, `delivery-store` (fee через `resolvedParams.delivery_price_bani`).
 - `lib/supabase/server.ts`, `client.ts`, `service-role.ts`.
 - `lib/leaflet-fix-default-icon.ts`.
 

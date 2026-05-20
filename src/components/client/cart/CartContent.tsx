@@ -110,9 +110,10 @@ export function CartContent({
     }
     const z = selectedZone
     if (!z) return null
+    const params = z.resolvedParams
     return {
-      price_bani: z.delivery_price_bani,
-      free_from_bani: z.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
+      price_bani: params.delivery_price_bani,
+      free_from_bani: params.free_delivery_from_bani ?? Number.MAX_SAFE_INTEGER,
     }
   }, [deliveryMode, selectedZone])
 

@@ -1,13 +1,25 @@
 "use server"
 
+import {
+  attachResolvedZoneParams,
+  isZoneAvailableNow,
+  type DeliveryZoneWithResolvedParams,
+} from "@/lib/delivery-zone-schedule"
 import { formatStreetLineFromNominatim } from "@/lib/nominatim-format-street"
 import { findZoneForPoint } from "@/lib/geo"
 import { getBrandId } from "@/lib/get-brand-id"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
-import type { DeliveryZone } from "@/types/database"
+import type { DeliveryZone, DeliveryZoneSchedule } from "@/types/database"
+
+type DeliveryZoneWithSchedulesRelation = DeliveryZone & {
+  delivery_zone_schedules?: DeliveryZoneSchedule[]
+}
 
 const NOMINATIM = "https://nominatim.openstreetmap.org"
 const USER_AGENT = "KitchPizza/1.0"
+
+const DELIVERY_ZONE_SELECT =
+  "id, name, color, polygon, delivery_price_bani, night_delivery_price_bani, min_order_bani, free_delivery_from_bani, delivery_time_min, is_active, sort_order, created_at, active_from, active_to, delivery_zone_schedules(id, from_time, to_time, delivery_time_min, delivery_price_bani, min_order_bani, free_delivery_from_bani, sort_order)"
 
 type NominatimSearchHit = {
   lat: string
@@ -40,12 +52,14 @@ function zonesViewbox(zones: DeliveryZone[] | undefined): string | null {
   return `${minLng},${maxLat},${maxLng},${minLat}`
 }
 
-export async function getActiveDeliveryZones(): Promise<DeliveryZone[]> {
+export async function getActiveDeliveryZones(): Promise<
+  DeliveryZoneWithResolvedParams[]
+> {
   const brandId = await getBrandId()
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from("delivery_zones")
-    .select("*")
+    .select(DELIVERY_ZONE_SELECT)
     .eq("brand_id", brandId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
@@ -55,16 +69,26 @@ export async function getActiveDeliveryZones(): Promise<DeliveryZone[]> {
     return []
   }
 
-  return (data ?? []) as DeliveryZone[]
+  const zones = (data ?? []) as DeliveryZoneWithSchedulesRelation[]
+  return zones
+    .filter((z) => isZoneAvailableNow(z.delivery_zone_schedules ?? []))
+    .map(attachResolvedZoneParams)
 }
 
 export async function geocodeAddress(
   query: string,
-  zones?: DeliveryZone[],
+  zones?: DeliveryZoneWithSchedulesRelation[],
 ): Promise<{ lat: number; lng: number; display_name: string } | null> {
   const q = query.trim()
   if (!q) return null
-  const activeZones = (zones ?? []).filter((zone) => zone.is_active)
+  const activeZones = (zones ?? [])
+    .filter((zone) => zone.is_active)
+    .filter((zone) =>
+      isZoneAvailableNow(
+        (zone as DeliveryZoneWithSchedulesRelation).delivery_zone_schedules ??
+          [],
+      ),
+    )
   const viewbox = zonesViewbox(activeZones)
 
   const url = new URL(`${NOMINATIM}/search`)

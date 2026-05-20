@@ -4,7 +4,7 @@ import { reverseGeocode } from "@/lib/actions/check-delivery-zone"
 import { findZoneForPoint } from "@/lib/geo"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useLanguage } from "@/lib/store/language-store"
-import type { DeliveryZone } from "@/types/database"
+import type { DeliveryZoneWithResolvedParams } from "@/lib/delivery-zone-schedule"
 import { cn } from "@/lib/utils"
 import { X } from "lucide-react"
 import dynamic from "next/dynamic"
@@ -26,7 +26,7 @@ const DESKTOP_EXIT_MS = 300
 type DeliveryModalProps = {
   open: boolean
   onClose: () => void
-  zones: DeliveryZone[]
+  zones: DeliveryZoneWithResolvedParams[]
 }
 
 export function DeliveryModal({ open, onClose, zones }: DeliveryModalProps) {

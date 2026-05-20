@@ -1,5 +1,9 @@
+import {
+  attachResolvedZoneParams,
+  type DeliveryZoneWithResolvedParams,
+  type ZoneWithSchedules,
+} from "@/lib/delivery-zone-schedule"
 import { findZoneForPoint } from "@/lib/geo"
-import type { DeliveryZone } from "@/types/database"
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
 
@@ -14,7 +18,7 @@ type DeliveryState = {
   resolvedAddress: string | null
   lat: number | null
   lng: number | null
-  selectedZone: DeliveryZone | null
+  selectedZone: DeliveryZoneWithResolvedParams | null
   /** true, если геокод успешен, но точка вне зон */
   outOfZone: boolean
   geocoding: boolean
@@ -34,11 +38,11 @@ type DeliveryState = {
     lat: number,
     lng: number,
     displayName: string | null,
-    zone: DeliveryZone | null,
+    zone: ZoneWithSchedules | null,
   ) => void
   clearAddress: () => void
   /** Пересчитать зону по текущим lat/lng и списку зон (после загрузки зон / смена полигонов). */
-  recheckZoneWithZones: (zones: DeliveryZone[]) => void
+  recheckZoneWithZones: (zones: ZoneWithSchedules[]) => void
   setSecondary: (patch: Partial<Pick<DeliveryState, "entrance" | "floor" | "apartment" | "intercom" | "comment">>) => void
 
   getDeliveryFeeBani: (orderSubtotalBani: number) => number
@@ -85,7 +89,7 @@ export const useDeliveryStore = create<DeliveryState>()(
             displayName != null && String(displayName).trim() !== ""
               ? displayName
               : s.address,
-          selectedZone: zone,
+          selectedZone: zone ? attachResolvedZoneParams(zone) : null,
           outOfZone:
             zone === null &&
             Number.isFinite(lat) &&
@@ -115,7 +119,8 @@ export const useDeliveryStore = create<DeliveryState>()(
           set({ selectedZone: null, outOfZone: false })
           return
         }
-        const zone = findZoneForPoint(lat, lng, zones)
+        const hit = findZoneForPoint(lat, lng, zones)
+        const zone = hit ? attachResolvedZoneParams(hit) : null
         set({
           selectedZone: zone,
           outOfZone: zone === null,
@@ -129,19 +134,22 @@ export const useDeliveryStore = create<DeliveryState>()(
         if (s.mode === "pickup") return 0
         const z = s.selectedZone
         if (!z) return 0
+        const params = z.resolvedParams
         if (
-          z.free_delivery_from_bani != null &&
-          orderSubtotalBani >= z.free_delivery_from_bani
+          params.free_delivery_from_bani != null &&
+          orderSubtotalBani >= params.free_delivery_from_bani
         ) {
           return 0
         }
-        return z.delivery_price_bani
+        return params.delivery_price_bani
       },
 
       isDeliveryFree: (orderSubtotalBani) => {
         const z = get().selectedZone
-        if (!z || z.free_delivery_from_bani == null) return false
-        return orderSubtotalBani >= z.free_delivery_from_bani
+        if (!z) return false
+        const params = z.resolvedParams
+        if (params.free_delivery_from_bani == null) return false
+        return orderSubtotalBani >= params.free_delivery_from_bani
       },
     }),
     {

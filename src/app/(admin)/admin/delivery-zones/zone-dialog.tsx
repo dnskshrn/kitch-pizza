@@ -1,7 +1,9 @@
 "use client"
 
 import { useEffect, useState, useTransition } from "react"
-import type { DeliveryZone } from "@/types/database"
+import type { DeliveryZoneSchedule } from "@/types/database"
+import type { DeliveryZoneWithSchedules } from "./page"
+import { ZoneSchedulesSection } from "./zone-schedules-section"
 import {
   createDeliveryZone,
   updateDeliveryZone,
@@ -34,8 +36,8 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   mode: "create" | "edit"
-  zone: DeliveryZone | null
-  allZones: DeliveryZone[]
+  zone: DeliveryZoneWithSchedules | null
+  allZones: DeliveryZoneWithSchedules[]
 }
 
 export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) {
@@ -283,6 +285,23 @@ export function ZoneDialog({ open, onOpenChange, mode, zone, allZones }: Props) 
               />
             </div>
           </div>
+
+          {mode === "edit" && zone ? (
+            <ZoneSchedulesSection
+              zoneId={zone.id}
+              schedules={
+                (zone.delivery_zone_schedules ?? []) as DeliveryZoneSchedule[]
+              }
+            />
+          ) : (
+            <div className="border-border border-t pt-4">
+              <h3 className="text-base font-semibold">Расписание работы зоны</h3>
+              <p className="text-muted-foreground mt-1 text-sm">
+                Сохраните зону, затем откройте редактирование чтобы добавить
+                слоты расписания.
+              </p>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">

@@ -6,6 +6,7 @@ import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
 import type { LucideIcon } from "lucide-react"
 import {
+  BarChart2,
   LayoutGrid,
   UtensilsCrossed,
   Layers,
@@ -91,6 +92,17 @@ function buildInitialOpenState(pathname: string, groups: NavGroup[]) {
   }
   return state
 }
+
+const topNavGroups: NavGroup[] = [
+  {
+    id: "analytics",
+    label: "Аналитика",
+    icon: BarChart2,
+    items: [
+      { href: "/admin/analytics", label: "Аналитика", icon: BarChart2 },
+    ],
+  },
+]
 
 const brandNavGroups: NavGroup[] = [
   {
@@ -207,6 +219,7 @@ const generalNavGroups: NavGroup[] = [
 ]
 
 const allNavGroups: NavGroup[] = [
+  ...topNavGroups,
   ...brandNavGroups,
   marketingNavGroup,
   ...generalNavGroups,
@@ -348,6 +361,19 @@ export default function AdminSidebar({
         <BrandSwitcher brands={adminBrands} currentSlug={currentSlug} />
       </SidebarHeader>
       <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {renderSidebarNavGroups(
+                topNavGroups,
+                pathname,
+                groupOpen,
+                setGroupOpen,
+              )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarSeparator className="my-1" />
         <SidebarGroup>
           <SidebarGroupLabel>Бренд</SidebarGroupLabel>
           <SidebarGroupContent>

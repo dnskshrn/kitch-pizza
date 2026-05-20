@@ -8,7 +8,7 @@ import { useDeliveryStore } from "@/lib/store/delivery-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
 import { Clock, Gift, Loader2, MapPin, Navigation, ShoppingBag, Truck } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { DeliveryModeIsland } from "./delivery-mode-island"
 
 type DeliveryContentProps = {

@@ -21,7 +21,7 @@ Multi-brand витрина доставки еды, админка и POS в о�
 | Forms | React Hook Form + Zod |
 | Maps | Leaflet, Leaflet Draw, react-leaflet, Nominatim |
 | POS Auth | Supabase Auth + `jose` JWT + `bcryptjs` PIN |
-| UI extras | Sonner, Vaul, Swiper, cmdk, DiceBear (`@dicebear/core`, `@dicebear/thumbs`) |
+| UI extras | Sonner, Vaul, Swiper, cmdk, recharts, DiceBear (`@dicebear/core`, `@dicebear/thumbs`) |
 
 ESLint: `next/core-web-vitals`, `next/typescript`; `@typescript-eslint/no-explicit-any: warn`.
 
@@ -40,23 +40,27 @@ src/
 ├── brands/              # BrandConfig + host→brand
 ├── components/
 │   ├── client/          # витрина, корзина, checkout, auth
-│   ├── admin/           # AdminShell, sidebar, inventory, cash-sessions
+│   ├── admin/           # AdminShell, sidebar, analytics, inventory, cash-sessions
 │   ├── pos/             # PosAppShell, OrderForm, KdsScreen и др.
+│   ├── store-closed-modal.tsx  # оверлей «магазин закрыт» (витрина)
 │   ├── seo/JsonLd.tsx
 │   ├── MetaPixel.tsx
 │   └── ui/              # shadcn
+├── hooks/
+│   └── use-store-open.ts       # часы работы витрины по BrandConfig (Europe/Chisinau)
 ├── lib/
 │   ├── actions/         # server actions (см. раздел Server Actions)
 │   ├── data/            # storefront fetchers
-│   ├── store/           # Zustand stores
+│   ├── store/           # Zustand stores (cart, delivery, store-closed, …)
 │   ├── i18n/, pos/, pbx/, seo/, telegram/, supabase/
 │   ├── bonus.ts, customers.ts, discount-engine.ts
+│   ├── store-hours.ts, cart-toppings.ts, cart-helpers.ts, topping-pricing.ts, topping-max-selection.ts
 │   ├── delivery-zone-schedule.ts  # слоты расписания зоны (Europe/Chisinau)
-│   ├── actions/admin/delivery-zone-schedules.ts  # CRUD delivery_zone_schedules
+│   ├── actions/admin/analytics.ts, delivery-zone-schedules.ts
 │   ├── inventory-units.ts, recipe-*.ts
 │   ├── order-recipe-stock-deduction.ts
 │   └── ...
-├── types/               # database, pos, promotions
+├── types/               # database, cart, pos, promotions
 ├── scripts/
 └── middleware.ts
 ```
@@ -103,7 +107,7 @@ src/
 | `bonus_multiplier` (numeric, default 1) | множитель начисления при `done` |
 | `promo_code`, `discount_rules_applied` (JSON) | скидки |
 
-`order_items`: `variant_id` (FK `menu_item_variants`, nullable), `size` (текстовый snapshot подписи варианта; старые строки могут иметь `s`/`l`), `is_gift`, `gift_rule_id`.
+`order_items`: `variant_id` (FK `menu_item_variants`, nullable), `size` (текстовый snapshot подписи варианта; старые строки могут иметь `s`/`l`), `toppings` (JSONB: `{ name, price, quantity }[]`, тип `OrderItemTopping`), `is_gift`, `gift_rule_id`.
 
 ### Multi-brand: что брендовое, что общее
 
@@ -122,6 +126,15 @@ src/
 Типы в `src/types/database.ts`: `DeliveryZone`, `DeliveryZoneSchedule`, `DeliveryZoneWithSchedules`. Часовой пояс всех проверок времени — **Europe/Chisinau**.
 
 **Базовые поля зоны** (`delivery_zones`): `polygon`, `color`, `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `is_active`, `sort_order`, `brand_id`. Используются как fallback, когда у зоны **нет слотов** расписания или ни один слот не попадает в текущее время.
+
+**Legacy-колонки зоны** (миграция `*_delivery_zones_night_and_window.sql`; в runtime **не** подменяют `delivery_zone_schedules` — только хранение/админка, пока не подключены в `resolveZoneParams`):
+
+| Поле | Назначение |
+|---|---|
+| `night_delivery_price_bani` | Ночная цена доставки (23:00–05:59, Chisinau); `NULL` → `delivery_price_bani` |
+| `active_from`, `active_to` | Окно доступности зоны (`HH:MM`); оба `NULL` → 24/7 на уровне legacy-полей |
+
+В списке зон админки ночная цена показывается бейджем, если задана.
 
 **Слоты расписания** (`delivery_zone_schedules`, FK `zone_id` ON DELETE CASCADE):
 
@@ -408,7 +421,31 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 
 ### Топпинги
 
-- `topping_groups.max_selections`: NULL = без лимита; число ≥1 — максимум выбранных позиций в одной строке заказа. Логика — `src/lib/topping-max-selection.ts`.
+- `topping_groups.max_selections`: NULL = без лимита; число ≥1 — **сумма `quantity` по группе** в одной строке корзины/заказа.
+- `menu_item_topping_groups.free_count` (integer, default 0): сколько **единиц** топпингов из группы бесплатны для конкретной позиции меню. Стратегия цены — **самые дёшевые единицы бесплатны первыми** (`calcToppingGroupCharge` в `src/lib/topping-pricing.ts`). `0` = все платные.
+
+**Витрина — модель корзины** (`src/types/cart.ts`):
+- `CartTopping`: `id`, `name_ru/ro`, `price` (bani/шт), `quantity`, `topping_group_id`.
+- `CartItem`: `cartToppings[]`, `toppingGroupFreeCounts` (Record groupId → free_count), `toppingGroupLabels` (имена групп для UI корзины), legacy `selectedToppingIds` (синхронизируется из `cartToppings` через `syncCartItemToppingFields`).
+- Store: `addTopping` / `removeTopping` (`cart-store.ts`); лимит группы — `getTotalQuantityInGroup` (`cart-toppings.ts`).
+- Цена строки: `getCartItemPrice` → `calcToppingGroupCharge` по группам (`cart-helpers.ts`); legacy persist без `cartToppings` — `migrateCartToppingsFromLegacy`.
+
+**Витрина — модалка товара** (`ProductModalRoot`, `ToppingCard`):
+- Степпер количества (+/−) вместо чекбоксов; заголовок группы — «выбрано N из M» + текст бесплатных единиц (`formatStorefrontToppingGroupHeader`, `getFreeUnitsRemaining`).
+- При `freeUnitsRemaining > 0` в строке топпинга — зелёная метка «Бесплатно»; итог кнопки «В корзину» — через `calcToppingGroupCharge` по `StorefrontMenuItemToppingGroup.free_count`.
+- При добавлении в корзину передаются `toppingGroupFreeCounts` и `toppingGroupLabels` из секций модалки.
+
+**Витрина — корзина / checkout** (`CartItemToppingDetails`, `CartItemCard`, `order-summary`):
+- Топпинги по группам: строки `«Название ×N — X лей»`; charge per topping — `calcToppingChargesById`.
+- Если вся группа бесплатна — зелёный бейдж «В комбо» у названия группы.
+
+**Админка — привязка групп к позиции** (`menu-item-dialog.tsx`):
+- Чекбокс группы + поле «Бесплатных единиц» (min 0); helper: «0 = все платные».
+- Бейдж «N бесплатно» у прикреплённой группы при `free_count > 0`.
+- Actions: `getMenuItemToppingGroups` / `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`: `topping_group_id`, `free_count`).
+
+**Прочее:**
+- POS: `nextSelectedByGroupWithCap` — отдельная модель по группам (плоский toggle, без quantity/free_count на витрине).
 - `topping_recipes` — состав топпинга. RPC `save_topping_with_recipes`.
 - В `/admin/toppings` действие «Существующий» — **копирует** топпинг в новую группу вместе со строками `topping_recipes`. Дубликаты по `name_ru`/`name_ro`/`price` в группе блокируются.
 
@@ -423,11 +460,42 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 
 ### Maintenance mode
 
-Флаг `MAINTENANCE_MODE` в `src/app/(client)/layout.tsx`. При `true` рендерится только `MaintenanceScreen` + `AuthInitializer` + `MetaPixel`. **`/admin` и `/pos` не используют этот гейт.**
+Флаг `MAINTENANCE_MODE` в `src/app/(client)/layout.tsx`. При `true` рендерится только `MaintenanceScreen` + `AuthInitializer` + `MetaPixel` (без `StoreClosedModal` и `ClientChrome`). **`/admin` и `/pos` не используют этот гейт.**
+
+### Модалка «магазин закрыт»
+
+Глобальный оверлей вне часов приёма заказов на витрине (не POS, не админка).
+
+| Файл | Роль |
+|---|---|
+| `src/lib/store-hours.ts` | `isStoreOpenAt`, `getMinutesUntilStoreOpen`, `getChisinauMinutes` (Europe/Chisinau) |
+| `src/hooks/use-store-open.ts` | `useStoreOpen(brandSlug?)` → `{ isOpen, hours, minutes, mounted, openTimeLabel }` из `BrandConfig.openHour` / `closeHour` |
+| `src/lib/store/store-closed-store.ts` | `dismissed`, `showStoreClosedModal()` — повторный показ после «Понятно» |
+| `src/components/store-closed-modal.tsx` | UI: RU/RO; текст открытия — `openTimeLabel` (11:00 / 15:00 и т.д.) |
+
+**Часы по бренду (`src/brands/index.ts`, ночная смена `closeHour ≤ openHour`):**
+
+| Бренд | Открыто (Chisinau) |
+|---|---|
+| `kitch-pizza`, `the-spot` | 11:00 – 03:00 |
+| `losos` | 15:00 – 03:00 |
+
+Пересчёт каждые **30 с**; до `mounted` — `isOpen: true` (без hydration mismatch). POS-слоты предзаказа — те же `openHour`/`closeHour` (`scheduled-slots.ts`).
+
+**Подключение:** `<StoreClosedModal brandSlug={…} />` в `(client)/layout.tsx`.
+
+**Поведение UI:** полноэкранный `fixed` оверлей `z-50`. Закрытие кнопкой «Понятно :(» / «Am înțeles :(»; backdrop не закрывает. При `isOpen === true` — `dismissed` сбрасывается.
+
+**Guards при `!isOpen`:** не открывают корзину/модалку товара, но вызывают `showStoreClosedModal()`:
+
+- `menu-category-bar.tsx` — корзина
+- `menu-item-card.tsx`, `featured-menu-section.tsx` — карточка товара
+- `ProductModalRoot.tsx` — «В корзину»
+- `checkout-view.tsx` — `handleBackNav` + корзина
 
 ### Layout и SEO
 
-- `(client)/layout.tsx`: `generateMetadata`, `BrandJsonLd`, `MetaPixel`, резолв бренда по `x-brand-slug`.
+- `(client)/layout.tsx`: `StoreClosedModal`, `generateMetadata`, `BrandJsonLd`, `MetaPixel`, `StorefrontTopBar`, `ClientChrome`; резолв бренда по `x-brand-slug`.
 - `(client)/page.tsx`: `generateMetadata`, `<h1 className="sr-only">` по бренду.
 - `BrandJsonLd` в `components/seo/JsonLd.tsx` — JSON-LD `Restaurant` + `FoodDelivery`.
 - SEO: `src/lib/seo/brand-seo.ts` (`BRAND_SEO`, `getBrandSeo`, canonical `kitch.md`/`losos.md`/`thespot.md`).
@@ -441,7 +509,9 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - Точка самовывоза bd. Dacia 27: `storefront-pickup-location.ts`.
 - Меню для апсейла LOSOS использует `menu_categories.show_in_upsell`.
 - Storefront-разработка: использовать `storefront-modal-*`, `storefront-checkout-*`, `storefront-input` вместо локальных цветов.
-- Доставка: `delivery-store` + `getStorefrontDeliveryLineDisplay` (`storefront-delivery-display.ts`); fee из `getDeliveryFeeBani` → `selectedZone.resolvedParams`. Модалка адреса — `DeliveryRoot` / `getActiveDeliveryZones`.
+- Доставка: `delivery-store` + `getStorefrontDeliveryLineDisplay` (`storefront-delivery-display.ts`); fee из `getDeliveryFeeBani` → `selectedZone.resolvedParams`. Модалка адреса — `DeliveryRoot` / `getActiveDeliveryZones` (зоны уже отфильтрованы по `isZoneAvailableNow`).
+- Корзина: `cart-store` (`CART_STORAGE_KEY` = `kitch-cart` в persist; брендовые ключи в `BrandConfig.cartKey` / `deliveryKey` — см. TODO). `cartToppings` + legacy `selectedToppingIds` синхронизируются при записи; `toppingGroupFreeCounts` / `toppingGroupLabels` — snapshot при добавлении из модалки. Детали топпингов в UI — `CartItemToppingDetails`.
+- Вне часов работы бренда — см. **«Модалка „магазин закрыт"»**.
 
 ### /account
 
@@ -474,6 +544,8 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 Корень `/admin` → `redirect('/admin/orders')`.
 
+`AdminSidebar`: первый пункт навигации — **Аналитика** (`/admin/analytics`).
+
 `/admin/*` без сессии → редирект на `/admin/login`. `/api/admin/*` без сессии → 401 JSON.
 
 Независимые запросы — `Promise.all`.
@@ -482,12 +554,13 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 | Маршрут | Описание |
 |---|---|
+| `/admin/analytics` | Дашборд KPI и графики: `getAnalyticsData` (`lib/actions/admin/analytics.ts`), `AnalyticsDashboard` (recharts). Фильтры: период 7/14/30 дней, бренд или все. Заказы `status=done`, выручка в MDL (bani/100). |
 | `/admin/orders` | Метрики за сутки UTC (`getAdminOrdersTodayMetrics`) + фильтры (`status_group`, `brand_id`, `order_src`, `search`, даты — дефолт сегодня UTC) + таблица. Клик по строке → `OrderDetailSheet` через `fetchAdminOrderDetail` (service role). |
 | `/admin/customers` | RPC `admin_customers_list(search_q)`; поиск `?q=`. |
 | `/admin/customers/[id]` | RSC: профиль, баланс (`SUM(amount)`), до 50 транзакций, до 20 заказов. `BonusAdjustForm` → `POST /api/admin/bonus/adjust`. |
 | `/admin/settings/bonus` | `bonus_settings` id=1; `updateBonusSettings` (`%` в UI → доли в БД). |
 | `/admin/categories` | `menu_categories`: RU/RO, slug, `image_url`, `show_in_upsell`, `exclude_from_discounts`, `workshop`. |
-| `/admin/menu` | `menu_items` + `menu_item_variants`. `RecipeEditorModal` (типы строк: ингредиент, п/ф, комбо). `?edit={id}` автооткрытие. Бейджи покрытия рецептом. |
+| `/admin/menu` | `menu_items` + `menu_item_variants`. Привязка групп топпингов с `free_count` (`menu-item-dialog.tsx`). `RecipeEditorModal` (типы строк: ингредиент, п/ф, комбо). `?edit={id}` автооткрытие. Бейджи покрытия рецептом. |
 | `/admin/featured-menu` | «Популярное». |
 | `/admin/toppings` | Группы + топпинги; копирование между группами; состав через `topping_recipes` (RPC). |
 | `/admin/promotions` | Промо-баннеры RU/RO. |
@@ -523,10 +596,10 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 - `menu_categories` — `name_ru/ro`, slug, `image_url`, `is_active`, `sort_order`, `is_condiment` (legacy), `show_in_upsell`, `exclude_from_discounts`, `workshop` (KDS-фильтр).
 - `menu_items` — `has_sizes` (true → цены из variants), `included_items` (JSON `{name_ru,name_ro}[]`), `category_id`, `brand_id`. Legacy: `is_default_condiment`, `condiment_default_qty` (не используются).
 - `menu_item_variants` — `name_ru/ro`, `price` (bani), `sort_order`, `weight_grams`, `menu_item_id`.
-- `topping_groups` (`max_selections` NULL/число), `toppings`, `topping_recipes`, `menu_item_topping_groups`.
+- `topping_groups` (`max_selections` NULL/число), `toppings`, `topping_recipes`, `menu_item_topping_groups` (`menu_item_id`, `topping_group_id`, `free_count`).
 - `promotions`, `featured_menu_items`, `promo_codes` (с `valid_channels`), `discount_rules`.
-- `delivery_zones` — `polygon` JSONB `[lat,lng][]`, `color` (TEXT, HEX), `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `is_active`, `sort_order`, `brand_id`.
-- `delivery_zone_schedules` — `zone_id`, `from_time`, `to_time`, `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `sort_order` (миграция `*_delivery_zone_schedules.sql`).
+- `delivery_zones` — `polygon` JSONB `[lat,lng][]`, `color` (TEXT, HEX), `delivery_price_bani`, `night_delivery_price_bani`, `active_from`, `active_to`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `is_active`, `sort_order`, `brand_id`.
+- `delivery_zone_schedules` — `zone_id`, `from_time`, `to_time`, `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `sort_order` (миграции `*_delivery_zone_schedules.sql`, `*_delivery_zones_night_and_window.sql` для legacy-колонок зоны).
 - `orders`, `order_items` — см. раздел Контракты.
 - `profiles`, `otp_codes`, `customer_addresses` (`profile_id`, `label`, `address`, `entrance/floor/apartment/intercom`, `delivery_lat/lng`, `is_default`).
 - `bonus_settings`, `bonus_transactions`.
@@ -537,7 +610,9 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 ### Типы
 
-`src/types/database.ts` задаёт контракт (`OrderStatus`, `Order`, `OrderWithItems`, `MenuItem`, `MenuItemVariant`, `CashSession`, `CashTransaction` и др.).
+`src/types/database.ts` — `OrderStatus`, `Order`, `OrderItem`, `OrderItemTopping` (`toppings` JSONB), `MenuItem`, `MenuItemVariant`, `MenuItemToppingGroup` (`free_count`), `CashSession`, …
+
+`src/types/cart.ts` — `CartItem`, `CartTopping` (`quantity`, `topping_group_id`), `toppingGroupFreeCounts`, `toppingGroupLabels`.
 
 `src/lib/supabase/types.ts` — частично генерированный Database (минимальные наброски). Перегенерировать через `supabase gen types` при появлении новых миграций.
 
@@ -585,11 +660,10 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 
 ### Витрина и общие
 
-- `check-delivery-zone.ts` — `getActiveDeliveryZones` (фильтр `isZoneAvailableNow`, `attachResolvedZoneParams`), `geocodeAddress`, `reverseGeocode`.
-- `create-order.ts` — заказ с витрины. `order_items` только из корзины (`variant_id`, `size`). Поля `bonuses_redeemed`, `profile_id`, `delivery_lat/lng` (best-effort через `geocodeAddress`). После вставки — `redeemBonus` при `bonuses_redeemed > 0`. Telegram-уведомление через `sendTelegramNotification` (общий канал, не курьерский). Адрес — одной строкой в `delivery_address`.
+- `check-delivery-zone.ts` — `getActiveDeliveryZones` (фильтр `isZoneAvailableNow`, `attachResolvedZoneParams`), `geocodeAddress(query, zones?)`, `reverseGeocode` (Nominatim; с зонами — viewbox + `bounded=1` + `findZoneForPoint`).
+- `create-order.ts` — заказ с витрины. `order_items` из корзины (`variant_id`, `size`, `toppings` с `quantity` из `cartToppings`). Поля `bonuses_redeemed`, `profile_id`, `delivery_lat/lng` (best-effort через `geocodeAddress`). После вставки — `redeemBonus` при `bonuses_redeemed > 0`. Telegram-уведомление через `sendTelegramNotification` (общий канал, не курьерский). Адрес — одной строкой в `delivery_address`.
 - `validate-promo-code.ts` — `validatePromoCode(code, subtotalBani, brandIdForOrder?)`. Витринная валидация.
 - `discounts.ts` — `getActiveDiscountRules`, `resolvePromoCode`, `getStorefrontCartPricingBootstrap`.
-- `check-delivery-zone.ts` — `geocodeAddress(query, zones?)` / `reverseGeocode`. Nominatim. Если переданы зоны — viewbox + `bounded=1` + `findZoneForPoint`.
 - `account/update-profile.ts` — обновление через FormData (страница `/account` использует REST `PATCH`).
 - `create-order-admin.ts` — заказ из админки.
 
@@ -598,10 +672,12 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `get-orders.ts` — без принудительного фильтра по `getAdminBrandId()`. Брэнд по URL.
 - `update-order-status.ts`.
 - `get-brands.ts`, `set-admin-brand.ts`.
+- `admin/analytics.ts` — `getAnalyticsData` (KPI, день/день, топ позиций; фильтр `brandId`, `days` 7|14|30).
 - `admin/bonus-settings-action.ts` — `updateBonusSettings`.
 - `admin/cash-sessions.ts` — `listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`.
 - `inventory/ingredient-categories.ts` — CRUD категорий (service role).
 - `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive` (service role).
+- `(admin)/admin/menu/actions.ts` — CRUD позиций; `getMenuItemToppingGroups`, `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`).
 - `(admin)/admin/toppings/actions.ts` — `save_topping_with_recipes` (RPC).
 - Inventory: `supplies/actions.ts` (`createSupplyOrder`, `annulSupplyOrder`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role).
 - `staff/staff-actions.ts`.
@@ -635,14 +711,17 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/order-recipe-stock-deduction.ts` — `computeIngredientTotalsForOrder`.
 - `lib/inventory-units.ts`.
 - `lib/recipe-editor-qty.ts`, `lib/recipe-composition-row-updates.ts`, `lib/recipe-composition-waste.ts`, `lib/product-recipe-ingredient-qty.ts`.
-- `lib/topping-max-selection.ts`.
+- `lib/topping-pricing.ts` — `calcToppingGroupCharge`, `calcToppingChargesById`, `getFreeUnitsRemaining`, `formatStorefrontToppingGroupHeader`.
+- `lib/topping-max-selection.ts`, `lib/cart-toppings.ts`, `lib/cart-helpers.ts` (`getCartItemToppingDisplayGroups`, `getCartItemSizeLabel`).
+- `lib/data/storefront-item-toppings.ts` — `fetchStorefrontMenuItemToppingGroups` (`free_count` с `menu_item_topping_groups`).
 - `lib/order-item-size-display.ts`.
 - `lib/storefront-delivery-display.ts`, `lib/storefront-pickup-location.ts`, `lib/storefront-account-path.ts`.
 - `lib/brand-phone.ts` — `getBrandPhone(slug)`.
 - `lib/seo/brand-seo.ts`, `lib/seo/menu-item-image-alt.ts`.
 - `lib/pbx/diversion-brand-slug.ts`.
 - `lib/pos/alert-sound.ts`, `kds-wakeup.ts`, `scheduled-slots.ts`, `split-composite-delivery-address.ts`, `pos-brand-slug-cookie.ts`, `menu-item-modal-row.ts`, `use-incoming-call.ts`.
-- `lib/store/cart-store`, `auth-store`, `pos-order-from-call-bridge`, `pos-menu-cache`, `language-store`, `delivery-store` (fee через `resolvedParams.delivery_price_bani`).
+- `hooks/use-store-open.ts`, `lib/store-hours.ts` — часы витрины по `BrandConfig` (Chisinau).
+- `lib/store/cart-store`, `store-closed-store`, `auth-store`, `pos-order-from-call-bridge`, `pos-menu-cache`, `language-store`, `delivery-store` (fee через `resolvedParams.delivery_price_bani`).
 - `lib/supabase/server.ts`, `client.ts`, `service-role.ts`.
 - `lib/leaflet-fix-default-icon.ts`.
 
@@ -721,6 +800,8 @@ PBX_WEBHOOK_TOKEN=
 - Свести один путь `delivery → done`: либо только `payOrder` из `OrderDetail`, либо убрать быстрый «Выдан» с `OrderCard`.
 - Выровнять localStorage keys корзины/доставки с `BrandConfig.cartKey` / `deliveryKey`.
 - Guard checkout по сессии (если потребуется).
+- POS: поддержка quantity / `free_count` топпингов (сейчас плоский toggle через `nextSelectedByGroupWithCap`).
+- Подключить `night_delivery_price_bani` / `active_from` / `active_to` зоны в `resolveZoneParams` (сейчас только слоты + базовые колонки; колонки в БД — миграция `*_delivery_zones_night_and_window.sql`, применить на remote Supabase).
 - Доработать gallery и lunch sets в админке.
 - Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types`.
 - Подключить списание ингредиентов в `payOrder` через `computeIngredientTotalsForOrder`.

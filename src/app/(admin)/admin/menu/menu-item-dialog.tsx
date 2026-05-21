@@ -7,10 +7,12 @@ import {
   getMenuItemToppingGroups,
   setMenuItemToppingGroups,
   updateMenuItem,
+  type MenuItemToppingGroupAttachment,
 } from "./actions"
 import { calcCompareAt } from "@/lib/discount"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
   DialogContent,
@@ -175,7 +177,9 @@ export function MenuItemDialog({
   const [sortOrder, setSortOrder] = useState(0)
   const [uploading, setUploading] = useState(false)
   const [pending, startTransition] = useTransition()
-  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
+  const [groupAttachments, setGroupAttachments] = useState<
+    Record<string, number>
+  >({})
   const [addDiscount, setAddDiscount] = useState(false)
   const [discountPercentStr, setDiscountPercentStr] = useState("")
   const [tagValue, setTagValue] = useState<string>(TAG_NONE)
@@ -222,7 +226,7 @@ export function MenuItemDialog({
       setPortionLabelStr("")
       setIsActive(true)
       setSortOrder(0)
-      setSelectedGroupIds([])
+      setGroupAttachments({})
       setAddDiscount(false)
       setDiscountPercentStr("")
       setTagValue(TAG_NONE)
@@ -241,11 +245,15 @@ export function MenuItemDialog({
         .eq("menu_item_id", itemId)
         .order("sort_order", { ascending: true }),
     ])
-      .then(([ids, variantsRes]) => {
+      .then(([attachments, variantsRes]) => {
         if (cancelled) return
         const { data, error } = variantsRes
         if (error) throw new Error(error.message)
-        setSelectedGroupIds(ids)
+        setGroupAttachments(
+          Object.fromEntries(
+            attachments.map((a) => [a.topping_group_id, a.free_count]),
+          ),
+        )
         setVariants(
           data?.map((v) => ({
             id: v.id as string,
@@ -273,10 +281,29 @@ export function MenuItemDialog({
   }, [open, mode, itemId])
 
   function toggleGroupId(groupId: string) {
-    setSelectedGroupIds((prev) =>
-      prev.includes(groupId)
-        ? prev.filter((id) => id !== groupId)
-        : [...prev, groupId],
+    setGroupAttachments((prev) => {
+      if (groupId in prev) {
+        const next = { ...prev }
+        delete next[groupId]
+        return next
+      }
+      return { ...prev, [groupId]: 0 }
+    })
+  }
+
+  function setGroupFreeCount(groupId: string, raw: string) {
+    const parsed = Number.parseInt(raw.trim(), 10)
+    const freeCount =
+      Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+    setGroupAttachments((prev) => ({ ...prev, [groupId]: freeCount }))
+  }
+
+  function toppingGroupAttachments(): MenuItemToppingGroupAttachment[] {
+    return Object.entries(groupAttachments).map(
+      ([topping_group_id, free_count]) => ({
+        topping_group_id,
+        free_count: Math.max(0, Math.floor(free_count)),
+      }),
     )
   }
 
@@ -479,11 +506,11 @@ export function MenuItemDialog({
         let resolvedId: string | undefined
         if (mode === "create") {
           resolvedId = await createMenuItem(payload)
-          await setMenuItemToppingGroups(resolvedId, selectedGroupIds)
+          await setMenuItemToppingGroups(resolvedId, toppingGroupAttachments())
         } else if (item) {
           await updateMenuItem(item.id, payload)
           resolvedId = item.id
-          await setMenuItemToppingGroups(item.id, selectedGroupIds)
+          await setMenuItemToppingGroups(item.id, toppingGroupAttachments())
         }
         if (resolvedId) {
           if (hasSizes) {
@@ -763,20 +790,51 @@ export function MenuItemDialog({
                 Нет активных групп топпингов (настройте в разделе «Топпинги»).
               </p>
             ) : (
-              <ul className="max-h-48 space-y-2 overflow-y-auto rounded-md border p-3">
-                {toppingGroups.map((g) => (
-                  <li key={g.id}>
-                    <label className="flex cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        className="border-input size-4 rounded"
-                        checked={selectedGroupIds.includes(g.id)}
-                        onChange={() => toggleGroupId(g.id)}
-                      />
-                      <span>{g.name_ru}</span>
-                    </label>
-                  </li>
-                ))}
+              <ul className="max-h-64 space-y-3 overflow-y-auto rounded-md border p-3">
+                {toppingGroups.map((g) => {
+                  const attached = g.id in groupAttachments
+                  const freeCount = groupAttachments[g.id] ?? 0
+
+                  return (
+                    <li key={g.id} className="space-y-2">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="border-input size-4 rounded"
+                          checked={attached}
+                          onChange={() => toggleGroupId(g.id)}
+                        />
+                        <span>{g.name_ru}</span>
+                        {attached && freeCount > 0 ? (
+                          <Badge className="border-transparent bg-[#4CAF50]/15 text-[#2E7D32] hover:bg-[#4CAF50]/15">
+                            {freeCount} бесплатно
+                          </Badge>
+                        ) : null}
+                      </label>
+                      {attached ? (
+                        <div className="ml-6 grid gap-1">
+                          <Label htmlFor={`mi-free-count-${g.id}`}>
+                            Бесплатных единиц
+                          </Label>
+                          <Input
+                            id={`mi-free-count-${g.id}`}
+                            type="number"
+                            min={0}
+                            placeholder="0"
+                            value={freeCount}
+                            onChange={(e) =>
+                              setGroupFreeCount(g.id, e.target.value)
+                            }
+                          />
+                          <p className="text-muted-foreground text-xs">
+                            Сколько топпингов из этой группы клиент получает
+                            бесплатно. 0 = все платные.
+                          </p>
+                        </div>
+                      ) : null}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>

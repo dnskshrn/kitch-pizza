@@ -215,7 +215,7 @@ export async function addOrderItemsPos({
     variantId?: string | null
     unitPriceBani: number
     qty: number
-    toppings: { name: string; price: number }[]
+    toppings: { name: string; price: number; quantity?: number }[]
   }>
 }): Promise<UpdateOrderItemsResult> {
   const staff = await getCurrentStaff()
@@ -299,7 +299,7 @@ export async function replaceOrderItemsPos({
     variantId?: string | null
     unitPriceBani: number
     qty: number
-    toppings: { name: string; price: number }[]
+    toppings: { name: string; price: number; quantity?: number }[]
   }>
 }): Promise<UpdateOrderItemsResult> {
   const staff = await getCurrentStaff()
@@ -395,7 +395,7 @@ export async function updateOrderItemCompositionPos({
   variantId?: string | null
   quantity: number
   unitPriceBani: number
-  toppings: { name: string; price: number }[]
+  toppings: { name: string; price: number; quantity?: number }[]
 }): Promise<UpdateOrderItemsResult> {
   const staff = await getCurrentStaff()
   if (!staff) return { success: false, error: "Сессия кассира недействительна" }

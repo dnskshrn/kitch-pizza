@@ -1,6 +1,6 @@
 "use client"
 
-import { getCartItemPrice, getCartItemSummary } from "@/lib/cart-helpers"
+import { getCartItemPrice, getCartItemSizeLabel } from "@/lib/cart-helpers"
 import type { CartLang } from "@/lib/cart-helpers"
 import { formatMoney } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
@@ -8,6 +8,7 @@ import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
 import type { CartItem } from "@/types/cart"
 import { Minus, Plus, X } from "lucide-react"
 import Image from "next/image"
+import { CartItemToppingDetails } from "./CartItemToppingDetails"
 
 type CartItemCardProps = {
   cartItem: CartItem
@@ -27,7 +28,7 @@ export function CartItemCard({
   onQuantityChange,
 }: CartItemCardProps) {
   const { t } = useLanguage()
-  const summary = getCartItemSummary(cartItem, lang)
+  const sizeLabel = getCartItemSizeLabel(cartItem, lang)
   const unitBani = getCartItemPrice(cartItem)
   const formattedLine = formatMoney(unitBani * cartItem.quantity, lang)
 
@@ -54,11 +55,10 @@ export function CartItemCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-bold leading-tight text-[#242424]">{name}</p>
-          {summary ? (
-            <p className="mt-0.5 line-clamp-2 text-sm text-[rgba(36,36,36,0.5)]">
-              {summary}
-            </p>
+          {sizeLabel ? (
+            <p className="mt-0.5 text-sm text-[rgba(36,36,36,0.5)]">{sizeLabel}</p>
           ) : null}
+          <CartItemToppingDetails cartItem={cartItem} lang={lang} />
         </div>
         <button
           type="button"

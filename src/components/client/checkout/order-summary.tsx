@@ -2,10 +2,11 @@
 
 import {
   getCartItemPrice,
-  getCartItemSummary,
+  getCartItemSizeLabel,
   type CartLang,
 } from "@/lib/cart-helpers"
 import { StorefrontDiscountExcludedNotice } from "@/components/client/cart/storefront-discount-excluded-notice"
+import { CartItemToppingDetails } from "@/components/client/cart/CartItemToppingDetails"
 import { formatMoney, goodsPhrase, pickLocalizedName } from "@/lib/i18n/storefront"
 import { getStorefrontDeliveryLineDisplay } from "@/lib/storefront-delivery-display"
 import { useLanguage } from "@/lib/store/language-store"
@@ -91,7 +92,7 @@ export function OrderSummary({
 
       <ul className="divide-y divide-[#f5f5f5]">
         {items.map((cartItem) => {
-          const line = getCartItemSummary(cartItem, lang)
+          const sizeLabel = getCartItemSizeLabel(cartItem, lang)
           const name = pickLocalizedName(cartItem.menuItem, lang)
           const unit =
             cartItem.quantity > 1 ? ` × ${cartItem.quantity}` : ""
@@ -124,9 +125,10 @@ export function OrderSummary({
                   {name}
                   {unit}
                 </p>
-                {line ? (
-                  <p className="mt-0.5 text-[12px] text-[#808080]">{line}</p>
+                {sizeLabel ? (
+                  <p className="mt-0.5 text-[12px] text-[#808080]">{sizeLabel}</p>
                 ) : null}
+                <CartItemToppingDetails cartItem={cartItem} lang={lang} />
               </div>
               <p className="shrink-0 self-start pt-0.5 text-right text-[14px] font-medium tabular-nums text-[#242424]">
                 {formatMoney(getCartItemPrice(cartItem) * cartItem.quantity, lang)}

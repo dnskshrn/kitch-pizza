@@ -1,4 +1,4 @@
-import type { OrderItem } from "@/types/database"
+import type { OrderItem, OrderItemTopping } from "@/types/database"
 
 /**
  * Одна строка для `.select()` заказов KDS (server action и клиент).
@@ -205,9 +205,9 @@ export function formatElapsedMmSs(totalSeconds: number): string {
 
 export function parseOrderItemToppings(
   raw: unknown,
-): { name: string; price: number }[] {
+): OrderItemTopping[] {
   if (!Array.isArray(raw)) return []
-  const out: { name: string; price: number }[] = []
+  const out: OrderItemTopping[] = []
   for (const x of raw) {
     if (
       x &&
@@ -217,9 +217,13 @@ export function parseOrderItemToppings(
       "price" in x &&
       typeof (x as { price: unknown }).price === "number"
     ) {
+      const q = (x as { quantity?: unknown }).quantity
+      const quantity =
+        typeof q === "number" && Number.isInteger(q) && q >= 1 ? q : 1
       out.push({
         name: (x as { name: string }).name,
         price: (x as { price: number }).price,
+        quantity,
       })
     }
   }

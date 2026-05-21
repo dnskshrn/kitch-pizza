@@ -80,6 +80,8 @@ export type MenuItemToppingGroup = {
   id: string
   menu_item_id: string
   topping_group_id: string
+  /** Сколько единиц топпингов из группы бесплатны для этой позиции меню. */
+  free_count: number
 }
 
 /** Строка таблицы `promotions`. */
@@ -348,6 +350,13 @@ export interface Order {
   cash_session_id: string | null
 }
 
+/** Элемент JSONB `order_items.toppings`. */
+export type OrderItemTopping = {
+  name: string
+  price: number
+  quantity: number
+}
+
 export interface OrderItem {
   id: string
   order_id: string
@@ -357,7 +366,7 @@ export interface OrderItem {
   item_name: string
   size: string | null
   quantity: number
-  toppings: { name: string; price: number }[]
+  toppings: OrderItemTopping[]
   price: number
 }
 

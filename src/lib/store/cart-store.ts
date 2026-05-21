@@ -1,11 +1,18 @@
 import { validatePromoCode } from "@/lib/actions/validate-promo-code"
 import {
+  buildCartToppingsFromSelection,
+  cartToppingFromTopping,
+  getTotalQuantityInGroup,
+  migrateCartToppingsFromLegacy,
+  syncCartItemToppingFields,
+} from "@/lib/cart-toppings"
+import {
   computeCartGoodsSubtotalBani,
   isSameCartConfiguration,
 } from "@/lib/cart-helpers"
 import { calcPromoDiscount } from "@/lib/discount"
 import { useDeliveryStore } from "@/lib/store/delivery-store"
-import type { CartItem, CartSelectedSize } from "@/types/cart"
+import type { CartItem, CartSelectedSize, CartTopping } from "@/types/cart"
 import type { MenuItem, PromoCode, Topping } from "@/types/database"
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
@@ -61,7 +68,63 @@ function isValidCartItem(raw: unknown): raw is CartItem {
     if (typeof tp.price !== "number" || !Number.isFinite(tp.price)) return false
   }
 
+  const rawCartToppings = o.cartToppings
+  if (rawCartToppings !== undefined) {
+    if (!Array.isArray(rawCartToppings)) return false
+    for (const t of rawCartToppings) {
+      if (!t || typeof t !== "object") return false
+      const ct = t as Record<string, unknown>
+      if (typeof ct.id !== "string") return false
+      if (typeof ct.name_ru !== "string" || typeof ct.name_ro !== "string") {
+        return false
+      }
+      if (typeof ct.price !== "number" || !Number.isFinite(ct.price)) return false
+      if (
+        typeof ct.quantity !== "number" ||
+        !Number.isInteger(ct.quantity) ||
+        ct.quantity < 1
+      ) {
+        return false
+      }
+      if (ct.topping_group_id != null && typeof ct.topping_group_id !== "string") {
+        return false
+      }
+    }
+  }
+
+  const rawFreeCounts = o.toppingGroupFreeCounts
+  if (rawFreeCounts !== undefined) {
+    if (!rawFreeCounts || typeof rawFreeCounts !== "object") return false
+    for (const v of Object.values(rawFreeCounts as Record<string, unknown>)) {
+      if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return false
+    }
+  }
+
+  const rawLabels = o.toppingGroupLabels
+  if (rawLabels !== undefined) {
+    if (!rawLabels || typeof rawLabels !== "object") return false
+    for (const v of Object.values(rawLabels as Record<string, unknown>)) {
+      if (!v || typeof v !== "object") return false
+      const l = v as Record<string, unknown>
+      if (typeof l.name_ru !== "string" || typeof l.name_ro !== "string") {
+        return false
+      }
+    }
+  }
+
   return true
+}
+
+function normalizeCartItem(raw: CartItem): CartItem {
+  const cartToppings = migrateCartToppingsFromLegacy(raw)
+  return syncCartItemToppingFields({
+    ...raw,
+    cartToppings,
+    toppingGroupFreeCounts: raw.toppingGroupFreeCounts ?? {},
+    toppingGroupLabels: raw.toppingGroupLabels ?? {},
+    variantId: raw.variantId ?? null,
+    variantNameSnapshot: raw.variantNameSnapshot ?? null,
+  })
 }
 
 type CartState = {
@@ -85,10 +148,19 @@ type CartState = {
     lineMeta?: {
       variantId?: string | null
       variantNameSnapshot?: string | null
+      toppingGroupFreeCounts?: Record<string, number>
+      toppingGroupLabels?: Record<string, { name_ru: string; name_ro: string }>
     },
   ) => void
   removeItem: (cartItemId: string) => void
   updateQuantity: (cartItemId: string, delta: 1 | -1) => void
+  addTopping: (
+    itemId: string,
+    topping: Omit<CartTopping, "quantity">,
+    groupToppingIds: readonly string[],
+    groupMaxSelections: number | null,
+  ) => void
+  removeTopping: (itemId: string, toppingId: string) => void
   applyPromo: (code: string) => Promise<void>
   removePromo: () => void
   openCart: () => void
@@ -188,6 +260,10 @@ export const useCartStore = create<CartState>()(
             lineMeta?.variantNameSnapshot === undefined
               ? null
               : lineMeta.variantNameSnapshot
+          const cartToppings = buildCartToppingsFromSelection(
+            toppingIds,
+            toppingsList,
+          )
           const existing = state.items.find((entry) =>
             isSameCartConfiguration(
               entry,
@@ -195,6 +271,7 @@ export const useCartStore = create<CartState>()(
               selectedSize,
               variantId,
               toppingIds,
+              cartToppings,
             ),
           )
           let newItems: CartItem[]
@@ -209,16 +286,18 @@ export const useCartStore = create<CartState>()(
               typeof crypto !== "undefined" && crypto.randomUUID
                 ? crypto.randomUUID()
                 : `cart-${Date.now()}-${Math.random().toString(36).slice(2)}`
-            const next: CartItem = {
+            const next = syncCartItemToppingFields({
               id,
               menuItem,
               selectedSize,
               variantId,
               variantNameSnapshot,
-              selectedToppingIds: [...toppingIds],
+              cartToppings,
               toppingsList: [...toppingsList],
+              toppingGroupFreeCounts: lineMeta?.toppingGroupFreeCounts ?? {},
+              toppingGroupLabels: lineMeta?.toppingGroupLabels ?? {},
               quantity: 1,
-            }
+            })
             newItems = [...state.items, next]
           }
           const patch = ensurePromoMinOrder(state.appliedPromo, newItems)
@@ -241,6 +320,85 @@ export const useCartStore = create<CartState>()(
             ...patch,
           }
         }),
+
+      addTopping: (itemId, topping, groupToppingIds, groupMaxSelections) => {
+        set((state) => {
+          const newItems = state.items.map((item) => {
+            if (item.id !== itemId) return item
+
+            const totalInGroup = getTotalQuantityInGroup(
+              item.cartToppings,
+              groupToppingIds,
+            )
+            if (
+              groupMaxSelections != null &&
+              totalInGroup >= groupMaxSelections
+            ) {
+              return item
+            }
+
+            const existing = item.cartToppings.find((t) => t.id === topping.id)
+            const cartToppings = existing
+              ? item.cartToppings.map((t) =>
+                  t.id === topping.id
+                    ? { ...t, quantity: t.quantity + 1 }
+                    : t,
+                )
+              : [
+                  ...item.cartToppings,
+                  { ...cartToppingFromTopping(topping), quantity: 1 },
+                ]
+
+            const toppingsList = item.toppingsList.some((t) => t.id === topping.id)
+              ? item.toppingsList
+              : [
+                  ...item.toppingsList,
+                  {
+                    id: topping.id,
+                    group_id: topping.topping_group_id,
+                    name_ru: topping.name_ru,
+                    name_ro: topping.name_ro,
+                    price: topping.price,
+                    image_url: null,
+                    is_active: true,
+                    sort_order: 0,
+                    created_at: "",
+                  },
+                ]
+
+            return syncCartItemToppingFields({
+              ...item,
+              cartToppings,
+              toppingsList,
+            })
+          })
+          const patch = ensurePromoMinOrder(state.appliedPromo, newItems)
+          return { ...touchSavedAt(), items: newItems, ...patch }
+        })
+      },
+
+      removeTopping: (itemId, toppingId) => {
+        set((state) => {
+          const newItems = state.items.map((item) => {
+            if (item.id !== itemId) return item
+            const existing = item.cartToppings.find((t) => t.id === toppingId)
+            if (!existing) return item
+
+            const cartToppings =
+              existing.quantity > 1
+                ? item.cartToppings.map((t) =>
+                    t.id === toppingId
+                      ? { ...t, quantity: t.quantity - 1 }
+                      : t,
+                  )
+                : item.cartToppings.filter((t) => t.id !== toppingId)
+
+            return syncCartItemToppingFields({ ...item, cartToppings })
+          })
+          const patch = ensurePromoMinOrder(state.appliedPromo, newItems)
+          return { ...touchSavedAt(), items: newItems, ...patch }
+        })
+      },
 
       updateQuantity: (cartItemId, delta) => {
         set((s) => {
@@ -299,25 +457,11 @@ export const useCartStore = create<CartState>()(
 
         const cleaned = items
           .filter(isValidCartItem)
-          .map((ci) => ({
-            ...ci,
-            variantId: ci.variantId ?? null,
-            variantNameSnapshot: ci.variantNameSnapshot ?? null,
-          }))
-        if (
-          cleaned.length !== items.length ||
-          items.some(
-            (raw, i) =>
-              (raw.variantId ?? null) !== (cleaned[i]?.variantId ?? null) ||
-              (raw.variantNameSnapshot ?? null) !==
-                (cleaned[i]?.variantNameSnapshot ?? null),
-          )
-        ) {
-          useCartStore.setState({
-            items: cleaned,
-            savedAt,
-          })
-        }
+          .map((ci) => normalizeCartItem(ci))
+        useCartStore.setState({
+          items: cleaned,
+          savedAt,
+        })
       },
     },
   ),

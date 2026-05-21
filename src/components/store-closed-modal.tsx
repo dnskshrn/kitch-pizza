@@ -3,18 +3,20 @@
 import { useStoreOpen } from "@/hooks/use-store-open"
 import { htmlLang } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
-import { useEffect, useState } from "react"
+import { useStoreClosedStore } from "@/lib/store/store-closed-store"
+import { useEffect } from "react"
 
 function StoreClosedModal({ brandSlug }: { brandSlug: string }) {
   const { isOpen, hours, minutes, mounted, openTimeLabel } =
     useStoreOpen(brandSlug)
   const { lang } = useLanguage()
   const locale = htmlLang(lang)
-  const [dismissed, setDismissed] = useState(false)
+  const dismissed = useStoreClosedStore((s) => s.dismissed)
+  const setDismissed = useStoreClosedStore((s) => s.setDismissed)
 
   useEffect(() => {
     if (isOpen) setDismissed(false)
-  }, [isOpen])
+  }, [isOpen, setDismissed])
 
   if (!mounted) return null
   if (isOpen || dismissed) return null

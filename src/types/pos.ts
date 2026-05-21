@@ -21,6 +21,16 @@ export type PosOrderSource = "website" | "pos"
 /** Тип нового заказа в POS (шаг выбора перед мастером). */
 export type OrderType = "pickup" | "delivery" | "aggregator"
 
+/** Топпинг в строке корзины POS (совместим с витриной). */
+export type PosCartTopping = {
+  id: string
+  name_ru: string
+  name_ro: string
+  price: number
+  quantity: number
+  topping_group_id: string
+}
+
 /** Позиция корзины POS (цена за единицу в бани, с учётом топпингов). */
 export type PosCartItem = {
   menuItemId: string
@@ -33,7 +43,9 @@ export type PosCartItem = {
   price: number
   qty: number
   imageUrl?: string
-  toppings: Array<{ id: string; name: string; price: number }>
+  toppings: PosCartTopping[]
+  /** free_count по topping_group_id (из menu_item_topping_groups). */
+  toppingGroupFreeCounts?: Record<string, number>
   /** Строка `order_items`, если позиция уже сохранена в БД. */
   orderItemId?: string
 }

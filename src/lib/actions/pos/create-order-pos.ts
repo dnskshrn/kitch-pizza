@@ -11,7 +11,7 @@ export type CreateOrderPosItem = {
   size: string | null
   price: number
   qty: number
-  toppings?: { name: string; price: number }[]
+  toppings?: { name: string; price: number; quantity?: number }[]
   variantId?: string | null
 }
 
@@ -177,7 +177,11 @@ export async function createOrderPos(
     item_name: it.name,
     size: it.size,
     quantity: it.qty,
-    toppings: (it.toppings ?? []) as { name: string; price: number }[],
+    toppings: (it.toppings ?? []) as {
+      name: string
+      price: number
+      quantity?: number
+    }[],
     price: Math.round(it.price) * it.qty,
   }))
 

@@ -8,6 +8,7 @@ import { OrderSummary } from "@/components/client/checkout/order-summary"
 import { CheckoutSkeleton } from "@/components/client/storefront-skeletons"
 import { promoErrorMessage, formatStorefrontExcludedCategoryList, type StorefrontMessages } from "@/lib/i18n/storefront"
 import { useStoreOpen } from "@/hooks/use-store-open"
+import { showStoreClosedModal } from "@/lib/store/store-closed-store"
 import {
   selectCartItemCount,
   selectCartSubtotal,
@@ -526,7 +527,10 @@ export function CheckoutView({
 
   function handleBackNav() {
     router.push("/")
-    if (!storeOpen) return
+    if (!storeOpen) {
+      showStoreClosedModal()
+      return
+    }
     openCart()
   }
 

@@ -13,10 +13,22 @@ import {
   type Lang,
 } from "@/lib/i18n/storefront"
 import { useStoreOpen } from "@/hooks/use-store-open"
+import { showStoreClosedModal } from "@/lib/store/store-closed-store"
 import { useCartStore } from "@/lib/store/cart-store"
 import { useLanguage } from "@/lib/store/language-store"
+import {
+  buildCartToppingsFromSelection,
+  cartToppingFromTopping,
+  expandSelectedToppingIds,
+  getTotalQuantityInGroup,
+} from "@/lib/cart-toppings"
+import {
+  calcToppingGroupCharge,
+  formatStorefrontToppingGroupHeader,
+  getFreeUnitsRemaining,
+} from "@/lib/topping-pricing"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
-import { nextSelectedToppingIdsWithGroupCap } from "@/lib/topping-max-selection"
+import type { CartTopping } from "@/types/cart"
 import type { MenuItem, MenuItemVariant, Topping } from "@/types/database"
 import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
 import { cn } from "@/lib/utils"
@@ -50,13 +62,27 @@ function totalBani(
   item: MenuItem,
   variantsEffective: MenuItemVariant[],
   selectedVariantId: string | null,
-  toppings: Topping[],
-  selectedIds: string[],
+  cartToppings: CartTopping[],
+  toppingSections: StorefrontMenuItemToppingGroup[],
 ): number {
   let sum = getBasePriceBani(item, variantsEffective, selectedVariantId)
-  for (const id of selectedIds) {
-    const t = toppings.find((x) => x.id === id)
-    if (t) sum += t.price
+  const assignedIds = new Set<string>()
+
+  for (const section of toppingSections) {
+    const ids = new Set(section.toppings.map((t) => t.id))
+    const selections = cartToppings
+      .filter((t) => ids.has(t.id))
+      .map((t) => {
+        assignedIds.add(t.id)
+        return { id: t.id, price: t.price, quantity: t.quantity }
+      })
+    sum += calcToppingGroupCharge(selections, section.free_count)
+  }
+
+  for (const t of cartToppings) {
+    if (!assignedIds.has(t.id)) {
+      sum += t.price * t.quantity
+    }
   }
   return sum
 }
@@ -202,7 +228,7 @@ export function ProductModalRoot() {
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
   /** После асинхронной подгрузки вариантов для позиции с размерами (защита от «0 lei» до гидратации). */
   const [sizesVariantsHydrated, setSizesVariantsHydrated] = useState(false)
-  const [selectedToppingIds, setSelectedToppingIds] = useState<string[]>([])
+  const [cartToppings, setCartToppings] = useState<CartTopping[]>([])
 
   const variantsEffective = useMemo(() => {
     const fromState = variants.length ? variants : (modalItem?.variants ?? [])
@@ -272,10 +298,13 @@ export function ProductModalRoot() {
         setSizesVariantsHydrated(true)
       }
 
+      const allToppings = groups.flatMap((s) => s.toppings)
       if (pm.editingCartItemId) {
-        setSelectedToppingIds(pm.initialToppingIds ?? [])
+        setCartToppings(
+          buildCartToppingsFromSelection(pm.initialToppingIds ?? [], allToppings),
+        )
       } else {
-        setSelectedToppingIds([])
+        setCartToppings([])
       }
     })()
 
@@ -284,29 +313,53 @@ export function ProductModalRoot() {
     }
   }, [isOpen, storeItem, editingCartItemId])
 
-  const toggleTopping = useCallback(
+  const addTopping = useCallback(
     (
-      toppingId: string,
-      groupId: string,
-      groupToppingIds: string[],
-      maxSelections: number | null,
+      topping: Topping,
+      groupToppingIds: readonly string[],
+      groupMaxSelections: number | null,
     ) => {
-      setSelectedToppingIds((prev) =>
-        nextSelectedToppingIdsWithGroupCap(
-          prev,
-          toppingId,
-          groupToppingIds,
-          maxSelections,
-        ),
-      )
+      setCartToppings((prev) => {
+        const totalInGroup = getTotalQuantityInGroup(prev, groupToppingIds)
+        if (
+          groupMaxSelections != null &&
+          totalInGroup >= groupMaxSelections
+        ) {
+          return prev
+        }
+
+        const existing = prev.find((t) => t.id === topping.id)
+        if (existing) {
+          return prev.map((t) =>
+            t.id === topping.id ? { ...t, quantity: t.quantity + 1 } : t,
+          )
+        }
+        return [...prev, { ...cartToppingFromTopping(topping), quantity: 1 }]
+      })
     },
     [],
   )
 
+  const removeTopping = useCallback((toppingId: string) => {
+    setCartToppings((prev) => {
+      const existing = prev.find((t) => t.id === toppingId)
+      if (!existing) return prev
+      if (existing.quantity > 1) {
+        return prev.map((t) =>
+          t.id === toppingId ? { ...t, quantity: t.quantity - 1 } : t,
+        )
+      }
+      return prev.filter((t) => t.id !== toppingId)
+    })
+  }, [])
+
   const panelItem = modalItem ?? (isOpen ? storeItem : null)
 
   const handleAddToCart = useCallback(() => {
-    if (!storeOpen) return
+    if (!storeOpen) {
+      showStoreClosedModal()
+      return
+    }
     if (!panelItem) return
     if (panelItem.has_sizes) {
       const selectedVariant = selectedVariantId
@@ -337,14 +390,34 @@ export function ProductModalRoot() {
         ? { ...panelItem, variants: variantsEffective }
         : panelItem
 
+    const toppingGroupFreeCounts = Object.fromEntries(
+      toppingSections.map((s) => [s.id, s.free_count]),
+    )
+    const toppingGroupLabels = Object.fromEntries(
+      toppingSections.map((s) => [
+        s.id,
+        { name_ru: s.name_ru, name_ro: s.name_ro },
+      ]),
+    )
+
     useCartStore.getState().addItem(
       itemForCart,
       null,
-      selectedToppingIds,
+      expandSelectedToppingIds(cartToppings),
       toppings,
       showVariants && selectedVariantId && chosenVariant
-        ? { variantId: selectedVariantId, variantNameSnapshot: snap }
-        : { variantId: null, variantNameSnapshot: null },
+        ? {
+            variantId: selectedVariantId,
+            variantNameSnapshot: snap,
+            toppingGroupFreeCounts,
+            toppingGroupLabels,
+          }
+        : {
+            variantId: null,
+            variantNameSnapshot: null,
+            toppingGroupFreeCounts,
+            toppingGroupLabels,
+          },
     )
     close()
     if (reopenCartAfterSave && storeOpen) {
@@ -356,10 +429,11 @@ export function ProductModalRoot() {
     close,
     lang,
     panelItem,
-    selectedToppingIds,
+    cartToppings,
     selectedVariantId,
     storeOpen,
     toppings,
+    toppingSections,
     variantsEffective,
   ])
 
@@ -373,8 +447,8 @@ export function ProductModalRoot() {
         panelItem,
         variantsEffective,
         selectedVariantId,
-        toppings,
-        selectedToppingIds,
+        cartToppings,
+        toppingSections,
       ),
       lang,
     )
@@ -382,7 +456,8 @@ export function ProductModalRoot() {
     panelItem,
     selectedVariantId,
     toppings,
-    selectedToppingIds,
+    cartToppings,
+    toppingSections,
     lang,
     variantsEffective,
   ])
@@ -512,32 +587,99 @@ export function ProductModalRoot() {
         ) : null}
         {toppingSections.length > 0 ? (
           <div className="flex flex-col gap-4">
-            {toppingSections.map((section) => (
-              <div key={section.id} className="flex flex-col gap-2">
-                <h3 className="text-[15px] font-semibold leading-snug text-[#242424]">
-                  {pickLocalizedName(section, lang)}
-                </h3>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {section.toppings.map((t) => (
-                    <ToppingCard
-                      key={t.id}
-                      topping={t}
-                      selected={selectedToppingIds.includes(t.id)}
-                      onToggle={() =>
-                        toggleTopping(
-                          t.id,
-                          section.id,
-                          section.toppings.map((x) => x.id),
-                          section.max_selections,
-                        )
-                      }
-                      name={pickLocalizedName(t, lang)}
-                      priceLabel={formatMoney(t.price, lang)}
-                    />
-                  ))}
+            {toppingSections.map((section) => {
+              const groupToppingIds = section.toppings.map((x) => x.id)
+              const selectedInGroup = getTotalQuantityInGroup(
+                cartToppings,
+                groupToppingIds,
+              )
+              const groupSelections = cartToppings
+                .filter((t) => groupToppingIds.includes(t.id))
+                .map((t) => ({
+                  id: t.id,
+                  price: t.price,
+                  quantity: t.quantity,
+                }))
+              const freeUnitsRemaining = getFreeUnitsRemaining(
+                groupSelections,
+                section.free_count,
+              )
+              const groupLimitReached =
+                section.max_selections != null &&
+                selectedInGroup >= section.max_selections
+              const groupName = pickLocalizedName(section, lang)
+              const headerText =
+                section.free_count > 0
+                  ? formatStorefrontToppingGroupHeader({
+                      lang,
+                      groupName,
+                      selectedCount: selectedInGroup,
+                      maxSelections: section.max_selections,
+                      freeCount: section.free_count,
+                      selections: groupSelections,
+                    })
+                  : section.max_selections != null
+                    ? lang === "RO"
+                      ? `${groupName} — selectat ${selectedInGroup} din ${section.max_selections}`
+                      : `${groupName} — выбрано ${selectedInGroup} из ${section.max_selections}`
+                    : groupName
+              const freePriceLabel = lang === "RO" ? "Gratuit" : "Бесплатно"
+
+              return (
+                <div key={section.id} className="flex flex-col gap-2">
+                  <h3
+                    className={cn(
+                      "text-[15px] font-semibold leading-snug",
+                      groupLimitReached
+                        ? "storefront-modal-accent"
+                        : "text-[#242424]",
+                    )}
+                  >
+                    {headerText}
+                  </h3>
+                  <div
+                    className={cn(
+                      "grid grid-cols-3 gap-2",
+                      section.toppings.length > 6 &&
+                        "max-h-[320px] overflow-y-auto pr-1",
+                    )}
+                  >
+                    {section.toppings.map((topping) => {
+                      const quantity =
+                        cartToppings.find((x) => x.id === topping.id)?.quantity ??
+                        0
+                      const addDisabled =
+                        section.max_selections != null &&
+                        selectedInGroup >= section.max_selections
+
+                      return (
+                        <ToppingCard
+                          key={topping.id}
+                          topping={topping}
+                          quantity={quantity}
+                          onAdd={() =>
+                            addTopping(topping, groupToppingIds, section.max_selections)
+                          }
+                          onRemove={() => removeTopping(topping.id)}
+                          addDisabled={addDisabled}
+                          name={pickLocalizedName(topping, lang)}
+                          priceLabel={
+                            section.free_count > 0 && freeUnitsRemaining > 0
+                              ? freePriceLabel
+                              : formatMoney(topping.price, lang)
+                          }
+                          priceIsFree={
+                            section.free_count > 0 && freeUnitsRemaining > 0
+                          }
+                          decreaseLabel={t.cart.decrease}
+                          increaseLabel={t.cart.increase}
+                        />
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         ) : null}
       </div>

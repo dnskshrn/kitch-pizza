@@ -11,6 +11,8 @@ export type StorefrontMenuItemToppingGroup = {
   name_ro: string
   /** null — без лимита (множественный выбор). */
   max_selections: number | null
+  /** Сколько единиц топпингов из группы бесплатны для этой позиции меню. */
+  free_count: number
   toppings: Topping[]
 }
 
@@ -41,6 +43,7 @@ export async function fetchStorefrontMenuItemToppingGroups(
     .select(
       `
       id,
+      free_count,
       topping_groups (
         id,
         brand_id,
@@ -70,10 +73,12 @@ export async function fetchStorefrontMenuItemToppingGroups(
 
   const byGroupId = new Map<
     string,
-    { meta: NestedGroup; toppings: Topping[] }
+    { meta: NestedGroup; toppings: Topping[]; free_count: number }
   >()
 
   for (const row of links as {
+    id: string
+    free_count?: number | null
     topping_groups: NestedGroup | NestedGroup[] | null
   }[]) {
     const g = normalizeOne(row.topping_groups)
@@ -98,6 +103,10 @@ export async function fetchStorefrontMenuItemToppingGroups(
     byGroupId.set(g.id, {
       meta: g,
       toppings,
+      free_count:
+        typeof row.free_count === "number" && Number.isFinite(row.free_count)
+          ? Math.max(0, Math.floor(row.free_count))
+          : 0,
     })
   }
 
@@ -107,11 +116,12 @@ export async function fetchStorefrontMenuItemToppingGroups(
       a.meta.id.localeCompare(b.meta.id),
   )
 
-  return sections.map(({ meta, toppings }) => ({
+  return sections.map(({ meta, toppings, free_count }) => ({
     id: meta.id,
     name_ru: meta.name_ru,
     name_ro: meta.name_ro,
     max_selections: meta.max_selections ?? null,
+    free_count,
     toppings,
   }))
 }

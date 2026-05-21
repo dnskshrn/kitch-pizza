@@ -1,6 +1,7 @@
 "use client"
 
 import { PosHeaderIconButton } from "@/components/pos/pos-header-icon-button"
+import { ToppingStepperCard } from "@/components/topping-stepper-card"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -10,14 +11,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { calcPosToppingsCharge } from "@/lib/pos-cart-helpers"
+import {
+  cartToppingFromTopping,
+  getTotalQuantityInGroup,
+  posAddTopping,
+  posRemoveTopping,
+  migratePosCartToppingsFromLegacy,
+} from "@/lib/pos-cart-toppings"
+import {
+  formatStorefrontToppingGroupHeader,
+  getFreeUnitsRemaining,
+} from "@/lib/topping-pricing"
 import type { MenuItem, MenuItemVariant } from "@/types/database"
-import type { PosCartItem } from "@/types/pos"
+import type { PosCartItem, PosCartTopping } from "@/types/pos"
 import { createBrowserClient } from "@supabase/ssr"
 import { Loader2, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { nextSelectedByGroupWithCap } from "@/lib/topping-max-selection"
 import Image from "next/image"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 /** Поля меню, нужные для модалки POS (совместимо с выборкой из `menu_items`). */
 export type PosProductModalMenuItem = Pick<
@@ -36,8 +48,10 @@ export type PosProductModalMenuItem = Pick<
 type UiTopping = {
   id: string
   name_ru: string
+  name_ro: string
   price: number
   image_url: string | null
+  group_id: string
 }
 
 type UiGroup = {
@@ -45,6 +59,7 @@ type UiGroup = {
   name_ru: string
   sort_order: number
   max_selections: number | null
+  free_count: number
   toppings: UiTopping[]
 }
 
@@ -96,7 +111,7 @@ export type PosProductModalEditDraft = {
   qty: number
   size: string | null
   variantId: string | null
-  toppings: { name: string; price: number }[]
+  toppings: PosCartTopping[]
 }
 
 /** Предзаполнение при правке позиции в корзине (создание заказа POS). */
@@ -105,7 +120,7 @@ export type PosProductModalCartEditDraft = {
   qty: number
   size: string | null
   variantId: string | null
-  toppings: { name: string; price: number }[]
+  toppings: PosCartTopping[]
 }
 
 type PosProductModalProps = {
@@ -138,9 +153,7 @@ export function PosProductModal({
     null,
   )
   const [variantRows, setVariantRows] = useState<MenuItemVariant[]>([])
-  const [selectedByGroup, setSelectedByGroup] = useState<Record<string, string[]>>(
-    {},
-  )
+  const [cartToppings, setCartToppings] = useState<PosCartTopping[]>([])
   const [groups, setGroups] = useState<UiGroup[]>([])
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupsError, setGroupsError] = useState<string | null>(null)
@@ -173,7 +186,7 @@ export function PosProductModal({
           ),
         )
       }
-      setSelectedByGroup({})
+      setCartToppings(migratePosCartToppingsFromLegacy(editDraft.toppings))
     } else if (cartEditDraft && isCartEdit) {
       setQty(cartEditDraft.qty)
       if (fromItem.length > 0) {
@@ -185,13 +198,13 @@ export function PosProductModal({
           ),
         )
       }
-      setSelectedByGroup({})
+      setCartToppings(migratePosCartToppingsFromLegacy(cartEditDraft.toppings))
     } else {
       setQty(1)
       if (fromItem.length > 0) {
         setSelectedVariantId(fromItem[0]!.id)
       } else setSelectedVariantId(null)
-      setSelectedByGroup({})
+      setCartToppings([])
       setGroups([])
       setGroupsError(null)
     }
@@ -241,15 +254,36 @@ export function PosProductModal({
     if (!draft || (!isOrderLineEdit && !isCartEdit) || groupsLoading || groups.length === 0) {
       return
     }
-    const next: Record<string, string[]> = {}
-    const snapNames = draft.toppings.map((t) => t.name)
+
+    const metaById = new Map<string, UiTopping>()
     for (const g of groups) {
-      const ids = g.toppings
-        .filter((t) => snapNames.includes(t.name_ru))
-        .map((t) => t.id)
-      if (ids.length > 0) next[g.id] = ids
+      for (const t of g.toppings) metaById.set(t.id, t)
     }
-    setSelectedByGroup(next)
+
+    const rebuilt: PosCartTopping[] = []
+    for (const d of migratePosCartToppingsFromLegacy(draft.toppings)) {
+      const meta =
+        d.id && !d.id.startsWith("legacy-")
+          ? metaById.get(d.id)
+          : [...metaById.values()].find((m) => m.name_ru === d.name_ru)
+      if (!meta) continue
+      const existing = rebuilt.find((x) => x.id === meta.id)
+      if (existing) {
+        existing.quantity += d.quantity
+      } else {
+        rebuilt.push({
+          ...cartToppingFromTopping({
+            id: meta.id,
+            name_ru: meta.name_ru,
+            name_ro: meta.name_ro,
+            price: meta.price,
+            topping_group_id: meta.group_id,
+          }),
+          quantity: d.quantity,
+        })
+      }
+    }
+    setCartToppings(rebuilt)
   }, [
     item,
     editDraft,
@@ -291,7 +325,7 @@ export function PosProductModal({
         supabase
           .from("menu_item_topping_groups")
           .select(
-            "topping_groups(id, name_ru, sort_order, max_selections, toppings(id, name_ru, price, image_url, is_active, sort_order))",
+            "free_count, topping_groups(id, name_ru, sort_order, max_selections, toppings(id, name_ru, name_ro, price, image_url, is_active, sort_order))",
           )
           .eq("menu_item_id", item.id),
       ])
@@ -312,6 +346,7 @@ export function PosProductModal({
       }
 
       const rows = (toppingsRes.data ?? []) as Array<{
+        free_count?: number | null
         topping_groups:
           | {
               id: string
@@ -321,6 +356,7 @@ export function PosProductModal({
               toppings: Array<{
                 id: string
                 name_ru: string
+                name_ro: string | null
                 price: number
                 image_url: string | null
                 is_active: boolean | null
@@ -335,6 +371,7 @@ export function PosProductModal({
               toppings: Array<{
                 id: string
                 name_ru: string
+                name_ro: string | null
                 price: number
                 image_url: string | null
                 is_active: boolean | null
@@ -348,6 +385,10 @@ export function PosProductModal({
       for (const row of rows) {
         const g = normalizeOne(row.topping_groups)
         if (!g?.id) continue
+        const freeCount =
+          typeof row.free_count === "number" && Number.isFinite(row.free_count)
+            ? Math.max(0, Math.floor(row.free_count))
+            : 0
         const rawTops = g.toppings ?? []
         const toppings: UiTopping[] = rawTops
           .filter((t) => t.is_active !== false)
@@ -359,8 +400,10 @@ export function PosProductModal({
           .map((t) => ({
             id: t.id,
             name_ru: t.name_ru,
+            name_ro: t.name_ro?.trim() || t.name_ru,
             price: Math.round(t.price ?? 0),
             image_url: t.image_url ?? null,
+            group_id: g.id,
           }))
         if (toppings.length) {
           nextGroups.push({
@@ -368,6 +411,7 @@ export function PosProductModal({
             name_ru: g.name_ru,
             sort_order: g.sort_order ?? 0,
             max_selections: g.max_selections ?? null,
+            free_count: freeCount,
             toppings,
           })
         }
@@ -394,45 +438,39 @@ export function PosProductModal({
     return v?.price ?? item.price ?? 0
   }, [item, sortedVariants, selectedVariantId])
 
-  const toppingMetaById = useMemo(() => {
-    const m = new Map<string, UiTopping>()
-    for (const g of groups) {
-      for (const t of g.toppings) m.set(t.id, t)
-    }
-    return m
-  }, [groups])
+  const toppingGroupFreeCounts = useMemo(
+    () => Object.fromEntries(groups.map((g) => [g.id, g.free_count])),
+    [groups],
+  )
 
-  const toppingsUnitBani = useMemo(() => {
-    let s = 0
-    for (const ids of Object.values(selectedByGroup)) {
-      for (const id of ids) {
-        s += toppingMetaById.get(id)?.price ?? 0
-      }
-    }
-    return s
-  }, [selectedByGroup, toppingMetaById])
+  const toppingsUnitBani = useMemo(
+    () => calcPosToppingsCharge(cartToppings, toppingGroupFreeCounts),
+    [cartToppings, toppingGroupFreeCounts],
+  )
 
   const unitTotalBani = sizeUnitBani + toppingsUnitBani
   const lineTotalBani = unitTotalBani * qty
 
-  const selectedToppingsPayload = useMemo(() => {
-    const out: PosCartItem["toppings"] = []
-    for (const ids of Object.values(selectedByGroup)) {
-      for (const id of ids) {
-        const t = toppingMetaById.get(id)
-        if (t) out.push({ id: t.id, name: t.name_ru, price: t.price })
-      }
-    }
-    return out
-  }, [selectedByGroup, toppingMetaById])
-
-  const toggleTopping = (groupId: string, toppingId: string) => {
-    const g = groups.find((x) => x.id === groupId)
-    if (!g) return
-    setSelectedByGroup((prev) =>
-      nextSelectedByGroupWithCap(prev, groupId, toppingId, g.max_selections),
+  const handleToppingAdd = useCallback((group: UiGroup, topping: UiTopping) => {
+    setCartToppings((prev) =>
+      posAddTopping(
+        prev,
+        {
+          id: topping.id,
+          name_ru: topping.name_ru,
+          name_ro: topping.name_ro,
+          price: topping.price,
+          topping_group_id: group.id,
+        },
+        group.toppings.map((x) => x.id),
+        group.max_selections,
+      ),
     )
-  }
+  }, [])
+
+  const handleToppingRemove = useCallback((toppingId: string) => {
+    setCartToppings((prev) => posRemoveTopping(prev, toppingId))
+  }, [])
 
   const canAdd =
     item &&
@@ -459,7 +497,8 @@ export function PosProductModal({
       price: unitTotalBani,
       qty,
       imageUrl: item.image_url ?? undefined,
-      toppings: selectedToppingsPayload,
+      toppings: cartToppings,
+      toppingGroupFreeCounts,
     }
     if (isOrderLineEdit && editDraft && onEditSave) {
       setEditSaving(true)
@@ -570,70 +609,104 @@ export function PosProductModal({
               ) : null}
 
               {!groupsLoading && groups.length > 0
-                ? groups.map((g) => (
-                    <div key={g.id} className="mt-4 space-y-2">
-                      <p className="text-sm font-medium">{g.name_ru}</p>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {g.toppings.map((t) => {
-                          const sel = (selectedByGroup[g.id] ?? []).includes(t.id)
-                          const priceLabel =
-                            t.price > 0
-                              ? `+ ${formatLei(t.price)} MDL`
-                              : "бесплатно"
-                          return (
-                            <button
-                              key={t.id}
-                              type="button"
-                              aria-pressed={sel}
-                              onClick={() => toggleTopping(g.id, t.id)}
-                              className={cn(
-                                "flex flex-col overflow-hidden rounded-lg border-2 bg-card text-left transition-all outline-none select-none",
-                                "focus-visible:ring-2 focus-visible:ring-ring/50",
-                                "active:translate-y-px",
-                                sel
-                                  ? "border-primary shadow-sm"
-                                  : "border-border hover:border-muted-foreground/35",
-                              )}
-                            >
-                              <div className="bg-muted relative aspect-square w-full shrink-0">
-                                {t.image_url ? (
-                                  <Image
-                                    src={t.image_url}
-                                    alt=""
-                                    fill
-                                    className="object-cover"
-                                    sizes="(max-width: 640px) 45vw, 120px"
-                                  />
-                                ) : (
-                                  <div
-                                    className="text-muted-foreground flex h-full items-center justify-center text-xs"
-                                    aria-hidden
-                                  >
-                                    —
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex min-h-0 flex-1 flex-col gap-0.5 p-2">
-                                <span className="line-clamp-2 text-xs leading-tight font-medium">
-                                  {t.name_ru}
-                                </span>
-                                <span
-                                  className={cn(
-                                    "text-[11px] leading-tight tabular-nums",
-                                    sel
-                                      ? "text-primary font-medium"
-                                      : "text-muted-foreground",
-                                  )}
-                                >
-                                  {priceLabel}
-                                </span>
-                              </div>
-                            </button>
-                          )
-                        })}
+                ? groups.map((g) => {
+                    const groupToppingIds = g.toppings.map((x) => x.id)
+                    const selectedInGroup = getTotalQuantityInGroup(
+                      cartToppings,
+                      groupToppingIds,
+                    )
+                    const groupSelections = cartToppings
+                      .filter((t) => groupToppingIds.includes(t.id))
+                      .map((t) => ({
+                        id: t.id,
+                        price: t.price,
+                        quantity: t.quantity,
+                      }))
+                    const freeUnitsRemaining = getFreeUnitsRemaining(
+                      groupSelections,
+                      g.free_count,
+                    )
+                    const groupLimitReached =
+                      g.max_selections != null &&
+                      selectedInGroup >= g.max_selections
+                    const headerText =
+                      g.free_count > 0
+                        ? formatStorefrontToppingGroupHeader({
+                            lang: "RU",
+                            groupName: g.name_ru,
+                            selectedCount: selectedInGroup,
+                            maxSelections: g.max_selections,
+                            freeCount: g.free_count,
+                            selections: groupSelections,
+                          })
+                        : g.max_selections != null
+                          ? `${g.name_ru} — выбрано ${selectedInGroup} из ${g.max_selections}`
+                          : g.name_ru
+                    const headerParts = headerText.split(" · ")
+                    const headerTitle = headerParts[0] ?? headerText
+                    const headerFreePart =
+                      headerParts.length > 1 ? headerParts.slice(1).join(" · ") : null
+
+                    return (
+                      <div key={g.id} className="mt-4 space-y-1">
+                        <p className="text-[13px] font-semibold leading-snug">
+                          <span
+                            className={cn(
+                              groupLimitReached
+                                ? "text-[#ccff00]"
+                                : "text-[#242424]",
+                            )}
+                          >
+                            {headerTitle}
+                          </span>
+                          {headerFreePart ? (
+                            <>
+                              {" · "}
+                              <span className="text-[#4CAF50]">
+                                {headerFreePart}
+                              </span>
+                            </>
+                          ) : null}
+                        </p>
+                        <div
+                          className={cn(
+                            "grid grid-cols-4 gap-2",
+                            g.toppings.length > 8 &&
+                              "max-h-[320px] overflow-y-auto pr-1",
+                          )}
+                        >
+                          {g.toppings.map((t) => {
+                            const quantity =
+                              cartToppings.find((x) => x.id === t.id)?.quantity ??
+                              0
+                            const addDisabled = groupLimitReached
+                            const priceIsFree =
+                              g.free_count > 0 && freeUnitsRemaining > 0
+                            const priceLabel = priceIsFree
+                              ? "Бесплатно"
+                              : t.price > 0
+                                ? `${formatLei(t.price)} MDL`
+                                : "Бесплатно"
+
+                            return (
+                              <ToppingStepperCard
+                                key={t.id}
+                                variant="pos"
+                                imageUrl={t.image_url}
+                                name={t.name_ru}
+                                quantity={quantity}
+                                priceLabel={priceLabel}
+                                priceIsFree={priceIsFree}
+                                addDisabled={addDisabled}
+                                onAdd={() => handleToppingAdd(g, t)}
+                                onRemove={() => handleToppingRemove(t.id)}
+                              />
+                            )
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 : null}
 
               <div className="mt-5 flex items-center justify-center gap-3">

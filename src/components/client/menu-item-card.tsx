@@ -8,6 +8,7 @@ import {
   type Lang,
 } from "@/lib/i18n/storefront"
 import { useStoreOpen } from "@/hooks/use-store-open"
+import { showStoreClosedModal } from "@/lib/store/store-closed-store"
 import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
 import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
@@ -139,7 +140,10 @@ export function MenuItemCard({
   const aria = cardAriaLabel(name, priceMain, t.menu.chooseProduct)
 
   const openModal = () => {
-    if (!storeOpen) return
+    if (!storeOpen) {
+      showStoreClosedModal()
+      return
+    }
     openProductModal(item)
   }
   const hasLososStyleCard = hasBoutiqueStorefrontCard(brandSlug)

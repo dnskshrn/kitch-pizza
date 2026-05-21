@@ -2,6 +2,7 @@
 
 import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import { getCartItemPrice, type CartLang } from "@/lib/cart-helpers"
+import { migrateCartToppingsFromLegacy } from "@/lib/cart-toppings"
 import { redeemBonus } from "@/lib/bonus"
 import { getBrandId } from "@/lib/get-brand-id"
 import { getMessages } from "@/lib/i18n/storefront"
@@ -41,16 +42,11 @@ export type CreateOrderResult =
   | { success: false; error: string }
 
 function toppingsPayload(cartItem: CartItem, lang: CartLang) {
-  return cartItem.selectedToppingIds
-    .map((id) => {
-      const t = cartItem.toppingsList.find((x) => x.id === id)
-      if (!t) return null
-      return {
-        name: lang === "RO" ? t.name_ro : t.name_ru,
-        price: t.price,
-      }
-    })
-    .filter((x): x is { name: string; price: number } => x != null)
+  return migrateCartToppingsFromLegacy(cartItem).map((t) => ({
+    name: lang === "RO" ? t.name_ro : t.name_ru,
+    price: t.price,
+    quantity: t.quantity,
+  }))
 }
 
 function orderItemSizeAndVariantForInsert(ci: CartItem): {

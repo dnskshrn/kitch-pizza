@@ -21,6 +21,11 @@ import { acceptOrderPos } from "@/lib/actions/pos/accept-order-pos"
 import { rejectOrderPos } from "@/lib/actions/pos/reject-order-pos"
 import { orderItemSizeDisplayLabel } from "@/lib/order-item-size-display"
 import {
+  posLineItemName,
+  posToppingsPayloadForDb,
+} from "@/lib/pos-cart-helpers"
+import { migratePosCartToppingsFromLegacy } from "@/lib/pos-cart-toppings"
+import {
   POS_MENU_ITEM_FOR_MODAL_SELECT,
   posMenuRowForModal,
 } from "@/lib/pos/menu-item-modal-row"
@@ -596,14 +601,8 @@ export function OrderDetail({
     cartPayload: PosCartItem,
   ) => {
     if (!order || !cartPayload.menuItemId) return
-    const toppingsDb = cartPayload.toppings.map((t) => ({
-      name: t.name,
-      price: Math.round(t.price),
-    }))
-    const displayName =
-      toppingsDb.length > 0
-        ? `${cartPayload.name} + ${toppingsDb.map((x) => x.name).join(", ")}`
-        : cartPayload.name
+    const toppingsDb = posToppingsPayloadForDb(cartPayload.toppings)
+    const displayName = posLineItemName(cartPayload.name, cartPayload.toppings)
 
     const result = await updateOrderItemCompositionPos({
       orderId: order.id,
@@ -984,12 +983,9 @@ export function OrderDetail({
                 qty: productEditModal.line.quantity,
                 size: productEditModal.line.size,
                 variantId: productEditModal.line.variant_id,
-                toppings: (productEditModal.line.toppings ?? []).flatMap((t) => {
-                  const name = typeof t?.name === "string" ? t.name : ""
-                  const priceRaw = typeof t?.price === "number" ? t.price : NaN
-                  if (!name || !Number.isFinite(priceRaw)) return []
-                  return [{ name, price: Math.round(priceRaw) }]
-                }),
+                toppings: migratePosCartToppingsFromLegacy(
+                  productEditModal.line.toppings ?? [],
+                ),
               }
             : null
         }

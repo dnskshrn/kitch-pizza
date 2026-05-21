@@ -5,6 +5,7 @@ import {
   type MenuItemPriceLabels,
 } from "@/components/client/menu-item-card"
 import { useStoreOpen } from "@/hooks/use-store-open"
+import { showStoreClosedModal } from "@/lib/store/store-closed-store"
 import { pickLocalizedName } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
@@ -72,7 +73,10 @@ function FeaturedMenuCard({
     : `${name}. ${t.menu.chooseProduct}`
 
   const handleOpen = () => {
-    if (!storeOpen) return
+    if (!storeOpen) {
+      showStoreClosedModal()
+      return
+    }
     openProductModal(item)
   }
 

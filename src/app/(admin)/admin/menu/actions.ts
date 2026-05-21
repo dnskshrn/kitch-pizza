@@ -5,6 +5,11 @@ import { createClient } from "@/lib/supabase/server"
 import type { ToppingGroup } from "@/types/database"
 import { revalidatePath } from "next/cache"
 
+export type MenuItemToppingGroupAttachment = {
+  topping_group_id: string
+  free_count: number
+}
+
 export async function getToppingGroups(): Promise<ToppingGroup[]> {
   const brandId = await getAdminBrandId()
   const supabase = await createClient()
@@ -19,20 +24,26 @@ export async function getToppingGroups(): Promise<ToppingGroup[]> {
 }
 
 export async function getMenuItemToppingGroups(
-  menuItemId: string
-): Promise<string[]> {
+  menuItemId: string,
+): Promise<MenuItemToppingGroupAttachment[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("menu_item_topping_groups")
-    .select("topping_group_id")
+    .select("topping_group_id, free_count")
     .eq("menu_item_id", menuItemId)
   if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => row.topping_group_id as string)
+  return (data ?? []).map((row) => ({
+    topping_group_id: row.topping_group_id as string,
+    free_count:
+      typeof row.free_count === "number" && Number.isFinite(row.free_count)
+        ? Math.max(0, Math.floor(row.free_count))
+        : 0,
+  }))
 }
 
 export async function setMenuItemToppingGroups(
   menuItemId: string,
-  groupIds: string[]
+  attachments: MenuItemToppingGroupAttachment[],
 ): Promise<void> {
   const supabase = await createClient()
   const { error: delErr } = await supabase
@@ -40,10 +51,11 @@ export async function setMenuItemToppingGroups(
     .delete()
     .eq("menu_item_id", menuItemId)
   if (delErr) throw new Error(delErr.message)
-  if (groupIds.length > 0) {
-    const rows = groupIds.map((topping_group_id) => ({
+  if (attachments.length > 0) {
+    const rows = attachments.map(({ topping_group_id, free_count }) => ({
       menu_item_id: menuItemId,
       topping_group_id,
+      free_count: Math.max(0, Math.floor(free_count)),
     }))
     const { error: insErr } = await supabase
       .from("menu_item_topping_groups")

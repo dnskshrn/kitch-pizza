@@ -80,6 +80,14 @@ import {
   posVariantsFromMenuEmbed,
 } from "@/lib/pos/menu-item-modal-row"
 import { writePosBrandSlugCookie } from "@/lib/pos/pos-brand-slug-cookie"
+import {
+  getPosCartItemToppingDisplayLines,
+  posLinePayloadFromCartItem,
+} from "@/lib/pos-cart-helpers"
+import {
+  migratePosCartToppingsFromLegacy,
+  posCartToppingsConfigKey,
+} from "@/lib/pos-cart-toppings"
 import { posCheckoutAddressFieldsFromOrder } from "@/lib/pos/split-composite-delivery-address"
 import type { MenuItem, MenuItemVariant } from "@/types/database"
 import type {
@@ -320,7 +328,7 @@ function cartFingerprint(lines: PosCartItem[]): string {
   return lines
     .map(
       (c, i) =>
-        `${i}:${c.orderItemId ?? ""}:${c.menuItemId}:${c.variantId ?? ""}:${c.size ?? ""}:${c.qty}:${c.price}:${c.toppings.map((t) => `${t.name}:${t.price}`).join(";")}`,
+        `${i}:${c.orderItemId ?? ""}:${c.menuItemId}:${c.variantId ?? ""}:${c.size ?? ""}:${c.qty}:${c.price}:${c.toppings.map((t) => `${t.id}:${t.quantity}:${t.price}`).join(";")}`,
     )
     .join("|")
 }
@@ -463,9 +471,22 @@ function CartItemRow({
                 : ""}
             </p>
             {line.toppings.length > 0 ? (
-              <p className="mt-0.5 line-clamp-1 text-[11px] leading-tight text-[#808080]">
-                {line.toppings.map((t) => t.name).join(", ")}
-              </p>
+              <ul className="mt-0.5 space-y-0.5">
+                {getPosCartItemToppingDisplayLines(line).map((toppingLine) => (
+                  <li
+                    key={toppingLine.toppingId}
+                    className={cn(
+                      "text-[11px] leading-tight",
+                      toppingLine.isFree ? "text-[#4CAF50]" : "text-[#808080]",
+                    )}
+                  >
+                    + {toppingLine.name}
+                    {toppingLine.quantity > 1
+                      ? ` ×${toppingLine.quantity}`
+                      : ""}
+                  </li>
+                ))}
+              </ul>
             ) : null}
           </div>
         </div>
@@ -788,16 +809,9 @@ function posCartFromOrderLine(line: {
   const qty = Math.max(1, line.quantity)
   const unit = qty > 0 ? Math.round(line.price / qty) : 0
   const rawTops = Array.isArray(line.toppings) ? line.toppings : []
-  const toppings = rawTops
-    .map((t: unknown, i: number) => {
-      const o = t as { name?: string; price?: number }
-      return {
-        id: `${line.id}-t-${i}`,
-        name: typeof o.name === "string" ? o.name : "",
-        price: Math.round(typeof o.price === "number" ? o.price : 0),
-      }
-    })
-    .filter((t) => t.name)
+  const toppings = migratePosCartToppingsFromLegacy(
+    rawTops as Parameters<typeof migratePosCartToppingsFromLegacy>[0],
+  )
   const embed = Array.isArray(line.menu_items)
     ? line.menu_items[0]
     : line.menu_items
@@ -828,24 +842,6 @@ type OrderFormProps = {
   listOrder: PosOrder | null
   onClose: () => void
   ordersPanelRef?: RefObject<OrdersPanelHandle | null>
-}
-
-function posLinePayloadFromCartItem(c: PosCartItem) {
-  return {
-    menuItemId: c.menuItemId,
-    name:
-      c.toppings.length > 0
-        ? `${c.name} + ${c.toppings.map((t) => t.name).join(", ")}`
-        : c.name,
-    size: c.size,
-    variantId: c.variantId ?? null,
-    unitPriceBani: c.price,
-    qty: c.qty,
-    toppings: c.toppings.map((t) => ({
-      name: t.name,
-      price: Math.round(t.price),
-    })),
-  }
 }
 
 export function OrderForm({
@@ -1942,10 +1938,7 @@ export function OrderForm({
   )
 
   const toppingsSignature = useCallback((t: PosCartItem["toppings"]) => {
-    return [...t]
-      .map((x) => x.id)
-      .sort()
-      .join(",")
+    return posCartToppingsConfigKey(t)
   }, [])
 
   const addCartItem = useCallback(
@@ -2194,10 +2187,7 @@ export function OrderForm({
           variantId: linePayload.variantId ?? null,
           quantity: c.qty,
           unitPriceBani: c.price,
-          toppings: c.toppings.map((t) => ({
-            name: t.name,
-            price: Math.round(t.price),
-          })),
+          toppings: linePayload.toppings,
         })
         if (!res.success) {
           rollbackOptimisticCart(
@@ -2257,21 +2247,7 @@ export function OrderForm({
     setExtendError(null)
     setExtendSubmitting(true)
     try {
-      const linesPayload = cart.map((c) => ({
-        menuItemId: c.menuItemId,
-        name:
-          c.toppings.length > 0
-            ? `${c.name} + ${c.toppings.map((t) => t.name).join(", ")}`
-            : c.name,
-        size: c.size,
-        variantId: c.variantId ?? null,
-        unitPriceBani: c.price,
-        qty: c.qty,
-        toppings: c.toppings.map((t) => ({
-          name: t.name,
-          price: Math.round(t.price),
-        })),
-      }))
+      const linesPayload = cart.map((c) => posLinePayloadFromCartItem(c))
       const res = await replaceOrderItemsPos({
         orderId: posOrderId,
         lines: linesPayload,
@@ -3371,10 +3347,7 @@ export function OrderForm({
                   qty: cart[cartEditIndex]!.qty,
                   size: cart[cartEditIndex]!.size,
                   variantId: cart[cartEditIndex]!.variantId ?? null,
-                  toppings: cart[cartEditIndex]!.toppings.map((t) => ({
-                    name: t.name,
-                    price: t.price,
-                  })),
+                  toppings: cart[cartEditIndex]!.toppings,
                 }
               : null
           }
@@ -4273,10 +4246,7 @@ export function OrderForm({
                 qty: cart[cartEditIndex]!.qty,
                 size: cart[cartEditIndex]!.size,
                 variantId: cart[cartEditIndex]!.variantId ?? null,
-                toppings: cart[cartEditIndex]!.toppings.map((t) => ({
-                  name: t.name,
-                  price: t.price,
-                })),
+                toppings: cart[cartEditIndex]!.toppings,
               }
             : null
         }

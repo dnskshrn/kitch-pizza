@@ -3,6 +3,7 @@
 import { ClientContainer } from "@/components/client/client-container"
 import { STOREFRONT_TOP_BAR_HEIGHT_PX } from "@/components/client/storefront-top-bar"
 import { useStoreOpen } from "@/hooks/use-store-open"
+import { showStoreClosedModal } from "@/lib/store/store-closed-store"
 import { BRAND_ACCENT } from "@/lib/client-brand"
 import {
   selectCartItemCount,
@@ -204,7 +205,10 @@ export function MenuCategoryBar({
   const cartButtonPulseKey = useCartStore((s) => s.cartButtonPulseKey)
   const { isOpen: storeOpen } = useStoreOpen(brandSlug)
   const handleOpenCart = useCallback(() => {
-    if (!storeOpen) return
+    if (!storeOpen) {
+      showStoreClosedModal()
+      return
+    }
     openCart()
   }, [storeOpen, openCart])
   const isBoutiqueMenu = hasBoutiqueMenu(brandSlug)

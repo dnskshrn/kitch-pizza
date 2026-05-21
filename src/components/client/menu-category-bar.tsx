@@ -202,7 +202,7 @@ export function MenuCategoryBar({
   const subtotal = useCartStore(selectCartSubtotal)
   const openCart = useCartStore((s) => s.openCart)
   const cartButtonPulseKey = useCartStore((s) => s.cartButtonPulseKey)
-  const { isOpen: storeOpen } = useStoreOpen()
+  const { isOpen: storeOpen } = useStoreOpen(brandSlug)
   const handleOpenCart = useCallback(() => {
     if (!storeOpen) return
     openCart()

@@ -129,7 +129,7 @@ export function MenuItemCard({
   lang,
 }: MenuItemCardProps) {
   const openProductModal = useProductModalStore((s) => s.open)
-  const { isOpen: storeOpen } = useStoreOpen()
+  const { isOpen: storeOpen } = useStoreOpen(brandSlug)
   const { t } = useLanguage()
 
   const name = pickLocalizedName(item, lang)

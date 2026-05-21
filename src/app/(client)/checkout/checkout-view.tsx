@@ -227,7 +227,7 @@ export function CheckoutView({
   const brandCallLabel = getBrandCallLabel(brandPhone, lang)
   const openDeliveryModal = useDeliveryModalStore((s) => s.open)
   const openCart = useCartStore((s) => s.openCart)
-  const { isOpen: storeOpen } = useStoreOpen()
+  const { isOpen: storeOpen } = useStoreOpen(brandSlug)
   const profile = useAuthStore((s) => s.profile)
 
   const items = useCartStore((s) => s.items)

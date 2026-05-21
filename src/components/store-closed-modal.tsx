@@ -5,8 +5,9 @@ import { htmlLang } from "@/lib/i18n/storefront"
 import { useLanguage } from "@/lib/store/language-store"
 import { useEffect, useState } from "react"
 
-function StoreClosedModal() {
-  const { isOpen, hours, minutes, mounted } = useStoreOpen()
+function StoreClosedModal({ brandSlug }: { brandSlug: string }) {
+  const { isOpen, hours, minutes, mounted, openTimeLabel } =
+    useStoreOpen(brandSlug)
   const { lang } = useLanguage()
   const locale = htmlLang(lang)
   const [dismissed, setDismissed] = useState(false)
@@ -35,8 +36,8 @@ function StoreClosedModal() {
 
   const body =
     locale === "ro"
-      ? `Deschidem la 11:00 — peste ${timeSuffix}`
-      : `Открываемся в 11:00 — через ${timeSuffix}`
+      ? `Deschidem la ${openTimeLabel} — peste ${timeSuffix}`
+      : `Открываемся в ${openTimeLabel} — через ${timeSuffix}`
 
   const buttonLabel = locale === "ro" ? "Am înțeles :(" : "Понятно :("
 

@@ -1,52 +1,50 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect } from "react"
+import { getBrandBySlug } from "@/brands"
+import {
+  formatStoreOpenTime,
+  getChisinauMinutes,
+  getMinutesUntilStoreOpen,
+  isStoreOpenAt,
+} from "@/lib/store-hours"
 
-function getChisinauMinutes(): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Europe/Chisinau',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-  }).formatToParts(new Date())
-  const h = parseInt(parts.find(p => p.type === 'hour')!.value, 10)
-  const m = parseInt(parts.find(p => p.type === 'minute')!.value, 10)
-  return h * 60 + m
+function resolveBrandSlug(explicit?: string): string {
+  if (explicit) return explicit
+  if (typeof document !== "undefined") {
+    return (
+      document.body.dataset.brand ??
+      document.querySelector("[data-brand]")?.getAttribute("data-brand") ??
+      "kitch-pizza"
+    )
+  }
+  return "kitch-pizza"
 }
 
-// Open 11:00–03:00, closed 03:00–11:00
-function checkIsOpen(): boolean {
-  const now = getChisinauMinutes()
-  const open  = 11 * 60   // 660
-  const close = 3  * 60   // 180  (next day)
-  // crosses midnight: open if now >= 660 OR now < 180
-  return now >= open || now < close
-}
+export function useStoreOpen(brandSlug?: string) {
+  const slug = resolveBrandSlug(brandSlug)
+  const { openHour, closeHour } = getBrandBySlug(slug)
+  const openTimeLabel = formatStoreOpenTime(openHour)
 
-function getMinutesUntilOpen(): number {
-  const now  = getChisinauMinutes()
-  const open = 11 * 60 // 660
-  if (now >= open) return 0
-  return open - now
-}
-
-export function useStoreOpen() {
-  const [isOpen, setIsOpen]             = useState(true)   // optimistic SSR
-  const [minutesLeft, setMinutesLeft]   = useState(0)
-  const [mounted, setMounted]           = useState(false)
+  const [isOpen, setIsOpen] = useState(true)
+  const [minutesLeft, setMinutesLeft] = useState(0)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
     const update = () => {
-      const open = checkIsOpen()
+      const now = getChisinauMinutes()
+      const open = isStoreOpenAt(openHour, closeHour, now)
       setIsOpen(open)
-      setMinutesLeft(open ? 0 : getMinutesUntilOpen())
+      setMinutesLeft(
+        open ? 0 : getMinutesUntilStoreOpen(openHour, closeHour, now)
+      )
     }
     update()
-    const interval = setInterval(update, 30_000) // re-check every 30s
+    const interval = setInterval(update, 30_000)
     return () => clearInterval(interval)
-  }, [])
+  }, [openHour, closeHour])
 
-  const hours   = Math.floor(minutesLeft / 60)
+  const hours = Math.floor(minutesLeft / 60)
   const minutes = minutesLeft % 60
 
-  return { isOpen, hours, minutes, mounted }
+  return { isOpen, hours, minutes, mounted, openTimeLabel }
 }

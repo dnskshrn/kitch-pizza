@@ -55,9 +55,15 @@ function PriceBlock({ priceMain, priceCompare }: MenuItemPriceLabels) {
   )
 }
 
-function FeaturedMenuCard({ item }: { item: MenuItem }) {
+function FeaturedMenuCard({
+  item,
+  brandSlug,
+}: {
+  item: MenuItem
+  brandSlug: string
+}) {
   const openProductModal = useProductModalStore((state) => state.open)
-  const { isOpen: storeOpen } = useStoreOpen()
+  const { isOpen: storeOpen } = useStoreOpen(brandSlug)
   const { lang, t } = useLanguage()
   const name = pickLocalizedName(item, lang)
   const priceLabels = getMenuItemPriceLabels(item, lang)
@@ -182,7 +188,7 @@ export function FeaturedMenuSection({
       >
         {items.map((item) => (
           <SwiperSlide key={item.id} className="h-auto">
-            <FeaturedMenuCard item={item} />
+            <FeaturedMenuCard item={item} brandSlug={brandSlug} />
           </SwiperSlide>
         ))}
       </Swiper>

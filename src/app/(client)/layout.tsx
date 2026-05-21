@@ -66,7 +66,7 @@ export default async function ClientLayout({
         data-brand={brandSlug}
         className="flex min-h-screen flex-col bg-[var(--color-bg)] text-foreground"
       >
-        <StoreClosedModal />
+        <StoreClosedModal brandSlug={brandSlug} />
         <BrandJsonLd brandSlug={brandSlug} />
         <MetaPixel pixelId={brand.metaPixelId} />
         <AuthInitializer />
@@ -82,7 +82,7 @@ export default async function ClientLayout({
       data-brand={brandSlug}
       className="flex min-h-screen flex-col bg-[var(--color-bg)] text-foreground"
     >
-      <StoreClosedModal />
+      <StoreClosedModal brandSlug={brandSlug} />
       <BrandJsonLd brandSlug={brandSlug} />
       <MetaPixel pixelId={brand.metaPixelId} />
       <StorefrontTopBar brandSlug={brandSlug} />

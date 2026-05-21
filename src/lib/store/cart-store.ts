@@ -439,29 +439,43 @@ export const useCartStore = create<CartState>()(
         if (error) return
         if (state === undefined) return
 
-        const savedAt = state.savedAt
-        const items = state.items ?? []
+        try {
+          const savedAt = state.savedAt
+          const items = state.items ?? []
 
-        const expired =
-          typeof savedAt !== "number" ||
-          !Number.isFinite(savedAt) ||
-          Date.now() - savedAt > SEVEN_DAYS_MS
+          const expired =
+            typeof savedAt !== "number" ||
+            !Number.isFinite(savedAt) ||
+            Date.now() - savedAt > SEVEN_DAYS_MS
 
-        if (expired) {
-          useCartStore.setState({
-            items: [],
-            savedAt: Date.now(),
+          if (expired) {
+            queueMicrotask(() => {
+              useCartStore.setState({
+                items: [],
+                savedAt: Date.now(),
+              })
+            })
+            return
+          }
+
+          const cleaned = items
+            .filter(isValidCartItem)
+            .map((ci) => normalizeCartItem(ci))
+
+          queueMicrotask(() => {
+            useCartStore.setState({
+              items: cleaned,
+              savedAt,
+            })
           })
-          return
+        } catch {
+          queueMicrotask(() => {
+            useCartStore.setState({
+              items: [],
+              savedAt: Date.now(),
+            })
+          })
         }
-
-        const cleaned = items
-          .filter(isValidCartItem)
-          .map((ci) => normalizeCartItem(ci))
-        useCartStore.setState({
-          items: cleaned,
-          savedAt,
-        })
       },
     },
   ),

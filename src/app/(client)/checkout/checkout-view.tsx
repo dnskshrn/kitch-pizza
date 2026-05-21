@@ -7,6 +7,7 @@ import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-pro
 import { OrderSummary } from "@/components/client/checkout/order-summary"
 import { CheckoutSkeleton } from "@/components/client/storefront-skeletons"
 import { promoErrorMessage, formatStorefrontExcludedCategoryList, type StorefrontMessages } from "@/lib/i18n/storefront"
+import { usePersistStoreHydration } from "@/hooks/use-persist-store-hydration"
 import { useStoreOpen } from "@/hooks/use-store-open"
 import { showStoreClosedModal } from "@/lib/store/store-closed-store"
 import {
@@ -253,7 +254,7 @@ export function CheckoutView({
   const deliveryLat = useDeliveryStore((s) => s.lat)
   const deliveryLng = useDeliveryStore((s) => s.lng)
 
-  const [hydrated, setHydrated] = useState(false)
+  const hydrated = usePersistStoreHydration(useCartStore.persist)
 
   const [name, setName] = useState("")
   const [phone, setPhone] = useState("")
@@ -281,17 +282,6 @@ export function CheckoutView({
 
   const quickTimeSlots = useMemo(() => buildQuickDeliveryTimeSlots(), [])
   const timeSlots = useMemo(() => buildDeliveryTimeSlots(), [])
-
-  useEffect(() => {
-    if (useCartStore.persist.hasHydrated()) {
-      setHydrated(true)
-      return
-    }
-    const unsub = useCartStore.persist.onFinishHydration(() =>
-      setHydrated(true),
-    )
-    return unsub
-  }, [])
 
   useEffect(() => {
     if (!hydrated) return
@@ -551,7 +541,10 @@ export function CheckoutView({
 
   if (items.length === 0) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center text-[#808080]">
+      <div
+        className="flex min-h-[40vh] items-center justify-center text-[#808080]"
+        suppressHydrationWarning
+      >
         {t.checkout.loading}
       </div>
     )

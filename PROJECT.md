@@ -43,6 +43,7 @@ src/
 │   ├── admin/           # AdminShell, sidebar, analytics, inventory, cash-sessions
 │   ├── pos/             # PosAppShell, OrderForm, KdsScreen и др.
 │   ├── store-closed-modal.tsx  # оверлей «магазин закрыт» (витрина)
+│   ├── topping-stepper-card.tsx  # карточка топпинга со stepper (витрина + POS)
 │   ├── seo/JsonLd.tsx
 │   ├── MetaPixel.tsx
 │   └── ui/              # shadcn
@@ -55,6 +56,7 @@ src/
 │   ├── i18n/, pos/, pbx/, seo/, telegram/, supabase/
 │   ├── bonus.ts, customers.ts, discount-engine.ts
 │   ├── store-hours.ts, cart-toppings.ts, cart-helpers.ts, topping-pricing.ts, topping-max-selection.ts
+│   ├── pos-cart-toppings.ts, pos-cart-helpers.ts
 │   ├── delivery-zone-schedule.ts  # слоты расписания зоны (Europe/Chisinau)
 │   ├── actions/admin/analytics.ts, delivery-zone-schedules.ts
 │   ├── inventory-units.ts, recipe-*.ts
@@ -255,6 +257,9 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 **Меню в мастере:** `usePosMenuCache` (на время браузерной POS-сессии: категории, items с вариантами и группами топпингов, индексы). Fallback — Supabase запрос с `POS_MENU_ITEM_FOR_MODAL_SELECT`. Cookie `pos-brand-slug` обновляется при выборе бренда (синхронизация с KDS).
 
 **Корзина — optimistic:**
+- `PosCartItem` / `PosCartTopping` (`src/types/pos.ts`): quantity-aware топпинги + `toppingGroupFreeCounts` (snapshot `free_count` из `menu_item_topping_groups`).
+- Цена строки и payload в БД — `pos-cart-helpers.ts` (`calcPosToppingsCharge`, `getPosCartItemUnitPriceBani`, `posLinePayloadFromCartItem`, `getPosCartItemToppingDisplayLines`).
+- add/remove топпингов в модалке — `posAddTopping` / `posRemoveTopping` (`pos-cart-toppings.ts`); лимит группы — сумма `quantity` (`getTotalQuantityInGroup`).
 - `addCartItem`, `updateQty`, `removeLine`, `saveCartLineFromModal`, `handleClearCart` сначала меняют локальный `cart` (`applyOptimisticCart`) → синхронно обновляют карточку слева через `updateOrderLocalState` (item_count, total, discount, delivery_fee, bonuses_redeemed) → в фоне зовут server actions (`addOrderItemsPos`, `updateOrderItemQuantityPos`, `removeOrderItemPos`, `updateOrderItemCompositionPos`, `replaceOrderItemsPos`).
 - На ошибке — `rollbackOptimisticCart(snapshot, message)` + Sonner.
 - Realtime подписки — финальная сверка.
@@ -315,7 +320,7 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 - Загрузка через `fetchPosOrderById` + Realtime по заказу и строкам.
 - Кнопки внизу: `WebsiteNewActions` (принять/отклонить) для `new` + `source='website'`; «Передать курьеру» (`ready` + delivery, обычная); «Принять оплату» (`delivery` или (`ready` + aggregator/pickup)).
 - При `interactionMode='readonly'` (статус `done`, список «Выданные» в Sheet) — только просмотр.
-- Редактирование позиций: `POS_MENU_ITEM_FOR_MODAL_SELECT`, `posMenuRowForModal`, `PosProductModal`. Минус при qty=1 снимает строку.
+- Редактирование позиций: `POS_MENU_ITEM_FOR_MODAL_SELECT`, `posMenuRowForModal`, `PosProductModal` (quantity-aware топпинги, `ToppingStepperCard`). Минус при qty=1 снимает строку.
 
 ### POS — прочее
 
@@ -430,22 +435,36 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - Store: `addTopping` / `removeTopping` (`cart-store.ts`); лимит группы — `getTotalQuantityInGroup` (`cart-toppings.ts`).
 - Цена строки: `getCartItemPrice` → `calcToppingGroupCharge` по группам (`cart-helpers.ts`); legacy persist без `cartToppings` — `migrateCartToppingsFromLegacy`.
 
-**Витрина — модалка товара** (`ProductModalRoot`, `ToppingCard`):
-- Степпер количества (+/−) вместо чекбоксов; заголовок группы — «выбрано N из M» + текст бесплатных единиц (`formatStorefrontToppingGroupHeader`, `getFreeUnitsRemaining`).
-- При `freeUnitsRemaining > 0` в строке топпинга — зелёная метка «Бесплатно»; итог кнопки «В корзину» — через `calcToppingGroupCharge` по `StorefrontMenuItemToppingGroup.free_count`.
+**Витрина — модалка товара** (`ProductModalRoot`, `ToppingCard` → `ToppingStepperCard`):
+- Сетка карточек топпингов `grid-cols-3`; заголовок группы — «выбрано N из M» + текст бесплатных единиц (`formatStorefrontToppingGroupHeader`, `getFreeUnitsRemaining`).
+- Карточка: белый фон, border `#f2f2f2`; при `quantity > 0` — accent-рамка. **Клик по всей карточке** добавляет единицу; убрать — только кнопкой «−».
+- При `freeUnitsRemaining > 0` — зелёная метка «Бесплатно»; итог кнопки «В корзину» — через `calcToppingGroupCharge` по `StorefrontMenuItemToppingGroup.free_count`.
 - При добавлении в корзину передаются `toppingGroupFreeCounts` и `toppingGroupLabels` из секций модалки.
 
-**Витрина — корзина / checkout** (`CartItemToppingDetails`, `CartItemCard`, `order-summary`):
-- Топпинги по группам: строки `«Название ×N — X лей»`; charge per topping — `calcToppingChargesById`.
-- Если вся группа бесплатна — зелёный бейдж «В комбо» у названия группы.
+**POS — модалка позиции** (`pos-product-modal.tsx`, тот же `ToppingStepperCard`, `variant="pos"`):
+- Сетка `grid-cols-4`; загрузка групп с `free_count` из `menu_item_topping_groups`.
+- Та же UX-модель: tap по карточке = add, «−» = remove one; лимит группы по сумме `quantity`.
+- В payload корзины: `toppings: PosCartTopping[]`, `toppingGroupFreeCounts`, unit price через `calcPosToppingsCharge`.
+
+**POS — корзина в мастере** (`order-form.tsx`, `CartItemRow`):
+- Строки топпингов: `+ Название ×N`; бесплатные — зелёным, платные — серым (`getPosCartItemToppingDisplayLines` + `calcToppingChargesById`).
+- Merge одинаковых конфигураций — `posCartToppingsConfigKey`; fingerprint корзины учитывает `id:quantity`.
+
+**Общий UI топпингов** (`src/components/topping-stepper-card.tsx`):
+- Карточка 64px image, name, price label, stepper (или только «+» при `quantity=0`).
+- Варианты `storefront` / `pos` — различаются accent-рамкой при выборе и фоном stepper.
 
 **Админка — привязка групп к позиции** (`menu-item-dialog.tsx`):
 - Чекбокс группы + поле «Бесплатных единиц» (min 0); helper: «0 = все платные».
 - Бейдж «N бесплатно» у прикреплённой группы при `free_count > 0`.
 - Actions: `getMenuItemToppingGroups` / `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`: `topping_group_id`, `free_count`).
 
+**Витрина — корзина / checkout** (`CartItemToppingDetails`, `CartItemCard`, `order-summary`):
+- Топпинги по группам: строки `«Название ×N — X лей»`; charge per topping — `calcToppingChargesById`.
+- Если вся группа бесплатна — зелёный бейдж «В комбо» у названия группы.
+
 **Прочее:**
-- POS: `nextSelectedByGroupWithCap` — отдельная модель по группам (плоский toggle, без quantity/free_count на витрине).
+- `topping-max-selection.ts` — legacy-хелпер `nextSelectedToppingIdsWithGroupCap` (витрина, flat ids); POS больше не использует `nextSelectedByGroupWithCap`.
 - `topping_recipes` — состав топпинга. RPC `save_topping_with_recipes`.
 - В `/admin/toppings` действие «Существующий» — **копирует** топпинг в новую группу вместе со строками `topping_recipes`. Дубликаты по `name_ru`/`name_ro`/`price` в группе блокируются.
 
@@ -614,6 +633,8 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 `src/types/cart.ts` — `CartItem`, `CartTopping` (`quantity`, `topping_group_id`), `toppingGroupFreeCounts`, `toppingGroupLabels`.
 
+`src/types/pos.ts` — `PosCartItem`, `PosCartTopping` (та же форма, что `CartTopping` + `toppingGroupFreeCounts` на строке корзины POS).
+
 `src/lib/supabase/types.ts` — частично генерированный Database (минимальные наброски). Перегенерировать через `supabase gen types` при появлении новых миграций.
 
 ### Realtime
@@ -699,7 +720,8 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `update-order-status-kds.ts` — `cooking → ready`.
 - `customers-pos-actions.ts` — `posLookupCustomer` (с `bonus_settings`), `posSaveCustomer`, `posSaveCustomerAddress`.
 - `check-delivery-zone-pos.ts` — `checkDeliveryZoneByAddress` (возвращает `resolvedParams` при `in_zone`), `getZonesByBrandSlug` (+ `isZoneAvailableNow`, `attachResolvedZoneParams`).
-- `create-order-pos.ts`.
+- `create-order-pos.ts` — `order_items.toppings` с `quantity`.
+- `update-order-items.ts` — add/replace/composition; toppings JSON `{ name, price, quantity }`.
 
 ### Полезные lib (не actions)
 
@@ -713,6 +735,9 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/recipe-editor-qty.ts`, `lib/recipe-composition-row-updates.ts`, `lib/recipe-composition-waste.ts`, `lib/product-recipe-ingredient-qty.ts`.
 - `lib/topping-pricing.ts` — `calcToppingGroupCharge`, `calcToppingChargesById`, `getFreeUnitsRemaining`, `formatStorefrontToppingGroupHeader`.
 - `lib/topping-max-selection.ts`, `lib/cart-toppings.ts`, `lib/cart-helpers.ts` (`getCartItemToppingDisplayGroups`, `getCartItemSizeLabel`).
+- `lib/pos-cart-toppings.ts` — `posAddTopping`, `posRemoveTopping`, `migratePosCartToppingsFromLegacy`, `posCartToppingsConfigKey`.
+- `lib/pos-cart-helpers.ts` — `calcPosToppingsCharge`, `getPosCartItemUnitPriceBani`, `posLinePayloadFromCartItem`, `getPosCartItemToppingDisplayLines`.
+- `components/topping-stepper-card.tsx` — общая карточка топпинга (витрина + POS).
 - `lib/data/storefront-item-toppings.ts` — `fetchStorefrontMenuItemToppingGroups` (`free_count` с `menu_item_topping_groups`).
 - `lib/order-item-size-display.ts`.
 - `lib/storefront-delivery-display.ts`, `lib/storefront-pickup-location.ts`, `lib/storefront-account-path.ts`.
@@ -800,7 +825,6 @@ PBX_WEBHOOK_TOKEN=
 - Свести один путь `delivery → done`: либо только `payOrder` из `OrderDetail`, либо убрать быстрый «Выдан» с `OrderCard`.
 - Выровнять localStorage keys корзины/доставки с `BrandConfig.cartKey` / `deliveryKey`.
 - Guard checkout по сессии (если потребуется).
-- POS: поддержка quantity / `free_count` топпингов (сейчас плоский toggle через `nextSelectedByGroupWithCap`).
 - Подключить `night_delivery_price_bani` / `active_from` / `active_to` зоны в `resolveZoneParams` (сейчас только слоты + базовые колонки; колонки в БД — миграция `*_delivery_zones_night_and_window.sql`, применить на remote Supabase).
 - Доработать gallery и lunch sets в админке.
 - Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types`.

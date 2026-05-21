@@ -4,7 +4,7 @@ import {
   calcToppingGroupCharge,
 } from "@/lib/topping-pricing"
 import type { CartItem, CartSelectedSize, CartTopping } from "@/types/cart"
-import type { MenuItem, Topping } from "@/types/database"
+import type { MenuItem } from "@/types/database"
 import { DEFAULT_LANG } from "@/lib/i18n/storefront"
 
 export type CartLang = "RU" | "RO"
@@ -55,7 +55,6 @@ export function getCartItemSummary(cartItem: CartItem, lang: CartLang = DEFAULT_
     variantNameSnapshot,
     selectedToppingIds,
     toppingsList,
-    cartToppings,
   } = cartItem
 
   let sizeLabel = ""

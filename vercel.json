@@ -1,0 +1,24 @@
+{
+  "redirects": [
+    {
+      "source": "/ru",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/ru/:path*",
+      "destination": "/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/ro",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/ro/:path*",
+      "destination": "/:path*",
+      "permanent": true
+    }
+  ]
+}

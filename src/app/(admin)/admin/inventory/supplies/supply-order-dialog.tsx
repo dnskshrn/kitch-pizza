@@ -72,18 +72,95 @@ function formatDecimalInput(value: number): string {
   return Number.isFinite(value) ? String(round4(value)) : ""
 }
 
-function priceWithVatFromBase(price: string, vat: string): string {
-  const parsedPrice = parseDecimal(price)
-  if (parsedPrice == null) return ""
-  const parsedVat = parseDecimal(vat) ?? 0
-  return formatDecimalInput(parsedPrice * (1 + parsedVat / 100))
-}
-
 function priceBaseFromWithVat(priceWithVat: string, vat: string): string {
   const parsedPriceWithVat = parseDecimal(priceWithVat)
   if (parsedPriceWithVat == null) return ""
   const parsedVat = parseDecimal(vat) ?? 0
   return formatDecimalInput(parsedPriceWithVat / (1 + parsedVat / 100))
+}
+
+function effectiveDisplayQty(row: EditableRow): number | null {
+  return parseDecimal(row.quantityStr)
+}
+
+function recalcRow(row: EditableRow): EditableRow {
+  const qty = effectiveDisplayQty(row)
+  const vat = parseDecimal(row.vatStr) ?? 0
+  const vatFactor = 1 + vat / 100
+
+  if (qty == null || qty <= 0) {
+    const price = parseDecimal(row.priceStr)
+    const priceWithVat =
+      parseDecimal(row.priceWithVatStr) ??
+      (price != null ? round4(price * vatFactor) : null)
+    return {
+      ...row,
+      priceWithVatStr:
+        row.priceAnchor === "unit_ex" && price != null
+          ? formatDecimalInput(priceWithVat ?? 0)
+          : row.priceWithVatStr,
+      priceStr:
+        row.priceAnchor === "unit_inc" && priceWithVat != null
+          ? priceBaseFromWithVat(row.priceWithVatStr, row.vatStr)
+          : row.priceStr,
+    }
+  }
+
+  switch (row.priceAnchor) {
+    case "unit_inc": {
+      const priceWithVat = parseDecimal(row.priceWithVatStr)
+      if (priceWithVat == null) return row
+      const price = round4(priceWithVat / vatFactor)
+      const lineEx = round4(qty * price)
+      const lineInc = round4(qty * priceWithVat)
+      return {
+        ...row,
+        priceStr: formatDecimalInput(price),
+        lineTotalExStr: formatDecimalInput(lineEx),
+        lineTotalIncStr: formatDecimalInput(lineInc),
+      }
+    }
+    case "line_ex": {
+      const lineEx = parseDecimal(row.lineTotalExStr)
+      if (lineEx == null) return row
+      const price = round4(lineEx / qty)
+      const priceWithVat = round4(price * vatFactor)
+      const lineInc = round4(qty * priceWithVat)
+      return {
+        ...row,
+        priceStr: formatDecimalInput(price),
+        priceWithVatStr: formatDecimalInput(priceWithVat),
+        lineTotalIncStr: formatDecimalInput(lineInc),
+      }
+    }
+    case "line_inc": {
+      const lineInc = parseDecimal(row.lineTotalIncStr)
+      if (lineInc == null) return row
+      const priceWithVat = round4(lineInc / qty)
+      const price = round4(priceWithVat / vatFactor)
+      const lineEx = round4(qty * price)
+      return {
+        ...row,
+        priceStr: formatDecimalInput(price),
+        priceWithVatStr: formatDecimalInput(priceWithVat),
+        lineTotalExStr: formatDecimalInput(lineEx),
+      }
+    }
+    case "unit_ex":
+    default: {
+      const price = parseDecimal(row.priceStr)
+      if (price == null) return row
+      const priceWithVat = round4(price * vatFactor)
+      const lineEx = round4(qty * price)
+      const lineInc = round4(qty * priceWithVat)
+      return {
+        ...row,
+        priceWithVatStr: formatDecimalInput(priceWithVat),
+        lineTotalExStr: formatDecimalInput(lineEx),
+        lineTotalIncStr: formatDecimalInput(lineInc),
+      }
+    }
+  }
 }
 
 export type SupplyOrderViewModel = {
@@ -116,14 +193,18 @@ export type SupplyOrderDialogProps = {
   supplierNameById?: Record<string, string>
 }
 
+type PriceAnchor = "unit_ex" | "unit_inc" | "line_ex" | "line_inc"
+
 type EditableRow = {
   localKey: string
   ingredient_id: string
   quantityStr: string
-  receivedQtyStr: string
   priceStr: string
   priceWithVatStr: string
   vatStr: string
+  lineTotalExStr: string
+  lineTotalIncStr: string
+  priceAnchor: PriceAnchor
 }
 
 function newLocalKey(): string {
@@ -133,15 +214,19 @@ function newLocalKey(): string {
   return `${Date.now()}-${Math.random()}`
 }
 
+const SUPPLY_ROW_INPUT_CLASS = "w-[132px]"
+
 function emptyRow(): EditableRow {
   return {
     localKey: newLocalKey(),
     ingredient_id: "",
     quantityStr: "",
-    receivedQtyStr: "",
     priceStr: "",
     priceWithVatStr: "",
     vatStr: "20",
+    lineTotalExStr: "",
+    lineTotalIncStr: "",
+    priceAnchor: "unit_ex",
   }
 }
 
@@ -186,20 +271,27 @@ export function SupplyOrderDialog({
       setDeliveryDate(order.delivery_date.slice(0, 10))
       setNote(order.note ?? "")
       setRows(
-        order.items.map((it) => ({
-          localKey: it.id,
-          ingredient_id: it.ingredient_id,
-          quantityStr: String(toDisplayQty(it.quantity, it.ingredient.unit)),
-          receivedQtyStr:
-            it.received_qty != null
-              ? String(toDisplayQty(it.received_qty, it.ingredient.unit))
-              : "",
-          priceStr: String(toDisplayPrice(it.price_per_unit, it.ingredient.unit)),
-          priceWithVatStr: String(
-            toDisplayPrice(it.price_per_unit_with_vat, it.ingredient.unit),
-          ),
-          vatStr: String(it.vat_rate),
-        }))
+        order.items.map((it) => {
+          const billingQtyDisplay = toDisplayQty(it.quantity, it.ingredient.unit)
+          const priceExDisplay = toDisplayPrice(it.price_per_unit, it.ingredient.unit)
+          const priceIncDisplay = toDisplayPrice(
+            it.price_per_unit_with_vat,
+            it.ingredient.unit,
+          )
+          const lineEx = round4(billingQtyDisplay * priceExDisplay)
+          const lineInc = round4(billingQtyDisplay * priceIncDisplay)
+          return {
+            localKey: it.id,
+            ingredient_id: it.ingredient_id,
+            quantityStr: String(billingQtyDisplay),
+            priceStr: String(priceExDisplay),
+            priceWithVatStr: String(priceIncDisplay),
+            vatStr: String(it.vat_rate),
+            lineTotalExStr: formatDecimalInput(lineEx),
+            lineTotalIncStr: formatDecimalInput(lineInc),
+            priceAnchor: "unit_ex" as const,
+          }
+        }),
       )
       return
     }
@@ -211,14 +303,15 @@ export function SupplyOrderDialog({
 
   const computedRows = useMemo(() => {
     return rows.map((r) => {
-      const qty = parseDecimal(r.quantityStr) ?? 0
+      const billingQty = effectiveDisplayQty(r) ?? 0
       const price = parseDecimal(r.priceStr) ?? 0
       const vat = parseDecimal(r.vatStr) ?? 0
       const priceWithVat =
         parseDecimal(r.priceWithVatStr) ?? round4(price * (1 + vat / 100))
-      const lineEx = qty * price
-      const lineInc = qty * priceWithVat
-      return { ...r, qty, price, vat, priceWithVat, lineEx, lineInc }
+      const lineEx = parseDecimal(r.lineTotalExStr) ?? round4(billingQty * price)
+      const lineInc =
+        parseDecimal(r.lineTotalIncStr) ?? round4(billingQty * priceWithVat)
+      return { ...r, billingQty, price, vat, priceWithVat, lineEx, lineInc }
     })
   }, [rows])
 
@@ -245,9 +338,9 @@ export function SupplyOrderDialog({
     })
   }
 
-  function updateRow(key: string, patch: Partial<EditableRow>) {
+  function patchRow(key: string, patch: Partial<EditableRow>) {
     setRows((prev) =>
-      prev.map((r) => (r.localKey === key ? { ...r, ...patch } : r))
+      prev.map((r) => (r.localKey === key ? recalcRow({ ...r, ...patch }) : r)),
     )
   }
 
@@ -255,11 +348,7 @@ export function SupplyOrderDialog({
     setRows((prev) =>
       prev.map((r) =>
         r.localKey === key
-          ? {
-              ...r,
-              priceStr,
-              priceWithVatStr: priceWithVatFromBase(priceStr, r.vatStr),
-            }
+          ? recalcRow({ ...r, priceStr, priceAnchor: "unit_ex" })
           : r,
       ),
     )
@@ -269,11 +358,27 @@ export function SupplyOrderDialog({
     setRows((prev) =>
       prev.map((r) =>
         r.localKey === key
-          ? {
-              ...r,
-              priceStr: priceBaseFromWithVat(priceWithVatStr, r.vatStr),
-              priceWithVatStr,
-            }
+          ? recalcRow({ ...r, priceWithVatStr, priceAnchor: "unit_inc" })
+          : r,
+      ),
+    )
+  }
+
+  function updateLineTotalEx(key: string, lineTotalExStr: string) {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.localKey === key
+          ? recalcRow({ ...r, lineTotalExStr, priceAnchor: "line_ex" })
+          : r,
+      ),
+    )
+  }
+
+  function updateLineTotalInc(key: string, lineTotalIncStr: string) {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.localKey === key
+          ? recalcRow({ ...r, lineTotalIncStr, priceAnchor: "line_inc" })
           : r,
       ),
     )
@@ -283,19 +388,23 @@ export function SupplyOrderDialog({
     setRows((prev) =>
       prev.map((r) => {
         if (r.localKey !== key) return r
-        if (r.priceWithVatStr.trim()) {
-          return {
-            ...r,
-            vatStr,
-            priceStr: priceBaseFromWithVat(r.priceWithVatStr, vatStr),
-          }
+        const next = { ...r, vatStr }
+        if (next.priceAnchor === "unit_inc" || next.priceAnchor === "line_inc") {
+          return recalcRow(next)
         }
-        return {
-          ...r,
-          vatStr,
-          priceWithVatStr: priceWithVatFromBase(r.priceStr, vatStr),
+        if (next.priceAnchor === "line_ex" && next.lineTotalExStr.trim()) {
+          return recalcRow(next)
         }
+        return recalcRow({ ...next, priceAnchor: "unit_ex" })
       }),
+    )
+  }
+
+  function updateQuantity(key: string, quantityStr: string) {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.localKey === key ? recalcRow({ ...r, quantityStr }) : r,
+      ),
     )
   }
 
@@ -310,14 +419,13 @@ export function SupplyOrderDialog({
     const payloadItems: {
       ingredient_id: string
       quantity: number
-      received_qty: number | null
       price_per_unit: number
       vat_rate: number
     }[] = []
 
     for (const r of computedRows) {
       if (!r.ingredient_id.trim()) continue
-      if (r.qty <= 0) {
+      if (r.billingQty <= 0) {
         alert("Укажите количество больше нуля во всех заполненных строках")
         return
       }
@@ -330,20 +438,9 @@ export function SupplyOrderDialog({
         alert("Не найден ингредиент")
         return
       }
-      const receivedTrim = (r.receivedQtyStr ?? "").trim()
-      let receivedStorage: number | null = null
-      if (receivedTrim !== "") {
-        const rq = parseDecimal(receivedTrim)
-        if (rq == null || !Number.isFinite(rq) || rq < 0) {
-          alert("Некорректное количество в поле «Получено»")
-          return
-        }
-        receivedStorage = toStorageQty(rq, ing.unit)
-      }
       payloadItems.push({
         ingredient_id: r.ingredient_id.trim(),
-        quantity: toStorageQty(r.qty, ing.unit),
-        received_qty: receivedStorage,
+        quantity: toStorageQty(r.billingQty, ing.unit),
         price_per_unit: toStoragePrice(r.price, ing.unit),
         vat_rate: r.vat,
       })
@@ -489,17 +586,18 @@ export function SupplyOrderDialog({
           </div>
 
           <div className="overflow-x-auto rounded-md border">
-            <Table className="min-w-[1160px]">
+            <Table className="min-w-[1220px] table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[260px]">Ингредиент</TableHead>
-                  <TableHead className="w-[190px]">Заказано</TableHead>
-                  <TableHead className="w-[190px]">Получено</TableHead>
-                  <TableHead className="w-[210px]">
+                  <TableHead className="w-[240px]">Ингредиент</TableHead>
+                  <TableHead className="w-[148px]">Количество</TableHead>
+                  <TableHead className="w-[148px]">
                     Цена за кг / л / шт (без НДС)
                   </TableHead>
-                  <TableHead className="w-[110px]">НДС %</TableHead>
-                  <TableHead className="w-[190px]">С НДС / ед.</TableHead>
+                  <TableHead className="w-[148px]">НДС %</TableHead>
+                  <TableHead className="w-[148px]">С НДС / ед.</TableHead>
+                  <TableHead className="w-[148px]">Итого без НДС</TableHead>
+                  <TableHead className="w-[148px]">Итого с НДС</TableHead>
                   {!readOnly && <TableHead className="w-12" />}
                 </TableRow>
               </TableHeader>
@@ -514,8 +612,6 @@ export function SupplyOrderDialog({
                       ? viewItem.ingredient.unit
                       : ing?.unit
                   const displayUnitSfx = ingUnit ? displayUnit(ingUnit) : ""
-                  const viewReceived =
-                    viewItem != null ? viewItem.received_qty : null
 
                   return (
                     <TableRow key={r.localKey}>
@@ -530,7 +626,7 @@ export function SupplyOrderDialog({
                           <IngredientCombobox
                             value={r.ingredient_id}
                             onChange={(v) =>
-                              updateRow(r.localKey, { ingredient_id: v })
+                              patchRow(r.localKey, { ingredient_id: v })
                             }
                             ingredients={ingredientComboboxItems}
                           />
@@ -543,51 +639,16 @@ export function SupplyOrderDialog({
                             {displayUnitSfx ? ` ${displayUnitSfx}` : ""}
                           </span>
                         ) : (
-                          <div className="flex items-center gap-1">
+                          <div className={cn("relative", SUPPLY_ROW_INPUT_CLASS)}>
                             <Input
-                              className="min-w-[132px] flex-1"
+                              className="w-full pr-8"
                               inputMode="decimal"
                               value={r.quantityStr}
                               onChange={(e) =>
-                                updateRow(r.localKey, {
-                                  quantityStr: e.target.value,
-                                })
+                                updateQuantity(r.localKey, e.target.value)
                               }
                             />
-                            <span className="text-muted-foreground w-8 shrink-0 text-xs">
-                              {ing ? displayUnit(ing.unit) : ""}
-                            </span>
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {readOnly ? (
-                          <span className="text-sm">
-                            {viewReceived != null && ingUnit ? (
-                              <>
-                                {toDisplayQty(viewReceived, ingUnit)}
-                                {displayUnitSfx ? ` ${displayUnitSfx}` : ""}
-                              </>
-                            ) : (
-                              <span className="text-muted-foreground">
-                                = заказано
-                              </span>
-                            )}
-                          </span>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <Input
-                              className="min-w-[132px] flex-1"
-                              inputMode="decimal"
-                              placeholder="= заказано"
-                              value={r.receivedQtyStr}
-                              onChange={(e) =>
-                                updateRow(r.localKey, {
-                                  receivedQtyStr: e.target.value,
-                                })
-                              }
-                            />
-                            <span className="text-muted-foreground w-8 shrink-0 text-xs">
+                            <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs">
                               {ing ? displayUnit(ing.unit) : ""}
                             </span>
                           </div>
@@ -598,7 +659,7 @@ export function SupplyOrderDialog({
                           <span className="text-sm">{r.priceStr}</span>
                         ) : (
                           <Input
-                            className="min-w-[170px]"
+                            className={SUPPLY_ROW_INPUT_CLASS}
                             inputMode="decimal"
                             value={r.priceStr}
                             onChange={(e) => updateBasePrice(r.localKey, e.target.value)}
@@ -610,7 +671,7 @@ export function SupplyOrderDialog({
                           <span className="text-sm">{r.vatStr}</span>
                         ) : (
                           <Input
-                            className="min-w-[80px]"
+                            className={SUPPLY_ROW_INPUT_CLASS}
                             inputMode="decimal"
                             value={r.vatStr}
                             onChange={(e) => updateVat(r.localKey, e.target.value)}
@@ -631,11 +692,43 @@ export function SupplyOrderDialog({
                           </span>
                         ) : (
                           <Input
-                            className="min-w-[150px]"
+                            className={SUPPLY_ROW_INPUT_CLASS}
                             inputMode="decimal"
                             value={r.priceWithVatStr}
                             onChange={(e) =>
                               updatePriceWithVat(r.localKey, e.target.value)
+                            }
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {readOnly ? (
+                          <span className="text-sm tabular-nums">
+                            {formatMdl(r.lineEx)} лей
+                          </span>
+                        ) : (
+                          <Input
+                            className={SUPPLY_ROW_INPUT_CLASS}
+                            inputMode="decimal"
+                            value={r.lineTotalExStr}
+                            onChange={(e) =>
+                              updateLineTotalEx(r.localKey, e.target.value)
+                            }
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {readOnly ? (
+                          <span className="text-sm tabular-nums">
+                            {formatMdl(r.lineInc)} лей
+                          </span>
+                        ) : (
+                          <Input
+                            className={SUPPLY_ROW_INPUT_CLASS}
+                            inputMode="decimal"
+                            value={r.lineTotalIncStr}
+                            onChange={(e) =>
+                              updateLineTotalInc(r.localKey, e.target.value)
                             }
                           />
                         )}

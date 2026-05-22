@@ -653,7 +653,7 @@ export function RecipeEditorModal({
           let q = supabase
             .from("product_recipes")
             .select(
-              "ingredient_id, semi_finished_id, menu_item_ref_id, quantity, quantity_gross, ingredients ( unit, ingredient_stock ( avg_cost ) ), semi_finished ( yield_qty, yield_unit, semi_finished_items ( quantity, ingredient_id, ingredients ( ingredient_stock ( avg_cost ) ) ) )",
+              "ingredient_id, semi_finished_id, menu_item_ref_id, quantity, quantity_gross, ingredients ( unit, ingredient_stock ( avg_cost ) ), semi_finished ( yield_qty, yield_unit, semi_finished_items!semi_finished_items_semi_finished_id_fkey ( quantity, ingredient_id, ingredients ( ingredient_stock ( avg_cost ) ) ) )",
             )
             .eq("menu_item_id", t.menuItemId)
           if (t.variantFilter === null) {

@@ -74,6 +74,7 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
       throw new Error("Некорректная ставка НДС")
     }
     const priceWithVat = round4(price * (1 + vat / 100))
+    const billingQty = stockQty
     return {
       ingredient_id: ingredientId,
       quantity: qty,
@@ -82,8 +83,8 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
       price_per_unit: price,
       vat_rate: vat,
       price_per_unit_with_vat: priceWithVat,
-      line_ex: qty * price,
-      line_inc: qty * priceWithVat,
+      line_ex: billingQty * price,
+      line_inc: billingQty * priceWithVat,
     }
   })
 

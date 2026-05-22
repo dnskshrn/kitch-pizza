@@ -35,7 +35,7 @@ export default async function AdminSemiFinishedPage() {
   const [semiRes, ingRes] = await Promise.all([
     supabase
       .from("semi_finished")
-      .select("*, semi_finished_items(*, ingredients(name, unit))")
+      .select("*, semi_finished_items!semi_finished_items_semi_finished_id_fkey(*, ingredients(name, unit))")
       .order("name"),
     supabase.from("ingredients").select("id, name, unit").order("name"),
   ])

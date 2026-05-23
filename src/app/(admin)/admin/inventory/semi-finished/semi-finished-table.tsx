@@ -11,7 +11,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Pencil, Plus } from "lucide-react"
-import type { IngredientSelectOption, SemiFinishedListRow } from "./types"
+import type {
+  IngredientSelectOption,
+  SemiFinishedListRow,
+  SemiFinishedWithItems,
+} from "./types"
 import { InventorySearch } from "@/components/admin/inventory-search"
 import { SemiFinishedDialog } from "./semi-finished-dialog"
 import { displayUnit, toDisplayQty } from "@/lib/inventory-units"

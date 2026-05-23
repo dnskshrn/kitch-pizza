@@ -359,6 +359,7 @@ export const useCartStore = create<CartState>()(
                     name_ru: topping.name_ru,
                     name_ro: topping.name_ro,
                     price: topping.price,
+                    aggregator_price_bani: null,
                     image_url: null,
                     is_active: true,
                     sort_order: 0,

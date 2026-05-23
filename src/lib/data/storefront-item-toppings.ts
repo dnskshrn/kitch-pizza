@@ -57,6 +57,7 @@ export async function fetchStorefrontMenuItemToppingGroups(
           name_ru,
           name_ro,
           price,
+          aggregator_price_bani,
           image_url,
           is_active,
           sort_order,

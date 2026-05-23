@@ -1,6 +1,11 @@
 import { createClient } from "@/lib/supabase/server"
-import type { SemiFinishedItem } from "@/types/database"
-import type { IngredientSelectOption, SemiFinishedWithItems } from "./types"
+import { parseIngredientAvgCostStorage } from "@/lib/ingredient-avg-cost"
+import {
+  buildSemiFinishedCatalogMap,
+  computeSemiInputCostMdl,
+} from "@/lib/semi-finished-cost"
+import type { SemiFinishedItemRow } from "./types"
+import type { IngredientSelectOption, SemiFinishedListRow, SemiFinishedWithItems } from "./types"
 import { SemiFinishedTable } from "./semi-finished-table"
 
 function normalizeSemiFinished(row: Record<string, unknown>): SemiFinishedWithItems {
@@ -13,11 +18,19 @@ function normalizeSemiFinished(row: Record<string, unknown>): SemiFinishedWithIt
       ? (ing[0] as { name: string; unit: "g" | "ml" | "pcs" } | null) ??
         null
       : (ing as { name: string; unit: "g" | "ml" | "pcs" } | null) ?? null
+    const semiRef = i.semi_finished_ref
+    const semi_finished_ref = Array.isArray(semiRef)
+      ? (semiRef[0] as { name: string; yield_unit: "g" | "ml" | "pcs" } | null) ??
+        null
+      : (semiRef as { name: string; yield_unit: "g" | "ml" | "pcs" } | null) ??
+        null
     const copy = { ...i }
     delete copy.ingredients
+    delete copy.semi_finished_ref
     return {
-      ...(copy as SemiFinishedItem),
+      ...(copy as SemiFinishedItemRow),
       ingredients,
+      semi_finished_ref,
     }
   })
 
@@ -35,9 +48,14 @@ export default async function AdminSemiFinishedPage() {
   const [semiRes, ingRes] = await Promise.all([
     supabase
       .from("semi_finished")
-      .select("*, semi_finished_items!semi_finished_items_semi_finished_id_fkey(*, ingredients(name, unit))")
+      .select(
+        "*, semi_finished_items!semi_finished_items_semi_finished_id_fkey(*, ingredients(name, unit, ingredient_stock(avg_cost)), semi_finished_ref:semi_finished!semi_finished_items_semi_finished_ref_id_fkey(name, yield_unit))"
+      )
       .order("name"),
-    supabase.from("ingredients").select("id, name, unit").order("name"),
+    supabase
+      .from("ingredients")
+      .select("id, name, unit, ingredient_stock(avg_cost)")
+      .order("name"),
   ])
 
   if (semiRes.error) {
@@ -56,16 +74,42 @@ export default async function AdminSemiFinishedPage() {
     )
   }
 
-  const rows = (semiRes.data ?? []).map((r) =>
+  const rowsBase = (semiRes.data ?? []).map((r) =>
     normalizeSemiFinished(r as Record<string, unknown>)
   )
 
-  const ingredientOptions = (ingRes.data ?? []) as IngredientSelectOption[]
+  const ingredientCostById: Record<string, number> = {}
+  const ingredientOptions: IngredientSelectOption[] = []
+  for (const raw of ingRes.data ?? []) {
+    const ing = raw as {
+      id: string
+      name: string
+      unit: "g" | "ml" | "pcs"
+      ingredient_stock: unknown
+    }
+    ingredientOptions.push({ id: ing.id, name: ing.name, unit: ing.unit })
+    const avg = parseIngredientAvgCostStorage(ing.ingredient_stock)
+    if (avg != null) {
+      ingredientCostById[ing.id] = avg
+    }
+  }
+
+  const catalog = buildSemiFinishedCatalogMap(rowsBase)
+  const ingredientCostMap = new Map(Object.entries(ingredientCostById))
+  const rows: SemiFinishedListRow[] = rowsBase.map((row) => {
+    const inputCost = computeSemiInputCostMdl(
+      row.id,
+      catalog,
+      ingredientCostMap
+    )
+    return { ...row, costMdl: inputCost > 0 ? inputCost : null }
+  })
 
   return (
     <SemiFinishedTable
       rows={rows}
       ingredientOptions={ingredientOptions}
+      ingredientCostById={ingredientCostById}
     />
   )
 }

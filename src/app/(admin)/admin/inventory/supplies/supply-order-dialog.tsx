@@ -10,7 +10,11 @@ import {
   toStorageQty,
 } from "@/lib/inventory-units"
 import { useRouter } from "next/navigation"
-import { createSupplyOrder, annulSupplyOrder } from "./actions"
+import {
+  annulSupplyOrder,
+  createSupplyOrder,
+  updateSupplyOrder,
+} from "./actions"
 import { IngredientCombobox } from "./ingredient-combobox"
 import { Button } from "@/components/ui/button"
 import {
@@ -186,7 +190,7 @@ export type SupplyOrderViewModel = {
 export type SupplyOrderDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  mode: "create" | "view"
+  mode: "create" | "edit" | "view"
   order: SupplyOrderViewModel | null
   suppliers: Supplier[]
   ingredients: Ingredient[]
@@ -247,7 +251,8 @@ export function SupplyOrderDialog({
   const [pending, startTransition] = useTransition()
   const [annulPending, startAnnulTransition] = useTransition()
 
-  const isAnnulled = mode === "view" && order?.annulled_at != null
+  const isAnnulled = order?.annulled_at != null
+  const readOnly = mode === "view"
 
   const activeSuppliers = useMemo(
     () => suppliers.filter((s) => s.is_active),
@@ -266,13 +271,14 @@ export function SupplyOrderDialog({
 
   useEffect(() => {
     if (!open) return
-    if (mode === "view" && order) {
+    if ((mode === "view" || mode === "edit") && order) {
       setSupplierId(order.supplier_id)
       setDeliveryDate(order.delivery_date.slice(0, 10))
       setNote(order.note ?? "")
       setRows(
         order.items.map((it) => {
-          const billingQtyDisplay = toDisplayQty(it.quantity, it.ingredient.unit)
+          const stockQty = it.received_qty ?? it.quantity
+          const billingQtyDisplay = toDisplayQty(stockQty, it.ingredient.unit)
           const priceExDisplay = toDisplayPrice(it.price_per_unit, it.ingredient.unit)
           const priceIncDisplay = toDisplayPrice(
             it.price_per_unit_with_vat,
@@ -325,7 +331,7 @@ export function SupplyOrderDialog({
     )
   }, [computedRows])
 
-  const showFooterLive = mode === "create"
+  const showFooterLive = mode === "create" || mode === "edit"
 
   function addRow() {
     setRows((prev) => [...prev, emptyRow()])
@@ -409,7 +415,13 @@ export function SupplyOrderDialog({
   }
 
   function handleSave() {
-    if (mode !== "create") return
+    if (mode !== "create" && mode !== "edit") return
+    if (mode === "edit") {
+      const ok = window.confirm(
+        "Изменение поставки пересчитает остатки склада. Продолжить?",
+      )
+      if (!ok) return
+    }
     const sid = (supplierId ?? "").trim()
     if (!sid) {
       alert("Выберите поставщика")
@@ -453,15 +465,24 @@ export function SupplyOrderDialog({
 
     startTransition(async () => {
       try {
-        await createSupplyOrder({
+        const payload = {
           supplier_id: sid,
           delivery_date: deliveryDate,
           note: (note ?? "").trim() || null,
           items: payloadItems,
-        })
+        }
+        if (mode === "create") {
+          await createSupplyOrder(payload)
+        } else {
+          if (!order) {
+            alert("Поставка не найдена")
+            return
+          }
+          await updateSupplyOrder(order.id, payload)
+        }
         onOpenChange(false)
+        router.refresh()
       } catch (e) {
-        console.error(e)
         alert(e instanceof Error ? e.message : "Ошибка сохранения")
       }
     })
@@ -485,17 +506,12 @@ export function SupplyOrderDialog({
     })
   }
 
-  const viewSupplierLabel =
-    mode === "view" && order
-      ? supplierNameById[order.supplier_id] ?? "—"
-      : null
-
   const title =
     mode === "create"
       ? "Новая поставка"
-      : `Поставка от ${order ? order.delivery_date.slice(0, 10) : ""}`
-
-  const readOnly = mode === "view"
+      : mode === "edit"
+        ? `Редактирование поставки от ${order ? order.delivery_date.slice(0, 10) : ""}`
+        : `Поставка от ${order ? order.delivery_date.slice(0, 10) : ""}`
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -524,7 +540,9 @@ export function SupplyOrderDialog({
             <div className="grid gap-2">
               <Label>Поставщик</Label>
               {readOnly ? (
-                <p className="text-sm">{viewSupplierLabel}</p>
+                <p className="text-sm">
+                  {order ? supplierNameById[order.supplier_id] ?? "—" : "—"}
+                </p>
               ) : (
                 <Select value={supplierId} onValueChange={setSupplierId}>
                   <SelectTrigger className="w-full">
@@ -782,31 +800,49 @@ export function SupplyOrderDialog({
         <DialogFooter
           className={cn(
             "border-t px-6 py-4",
-            readOnly ? "sm:justify-between" : "sm:justify-end",
+            mode === "view" || mode === "edit"
+              ? "sm:justify-between"
+              : "sm:justify-end",
           )}
         >
-          {readOnly ? (
+          {mode === "view" ? (
             <>
-              {!isAnnulled ? (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={handleAnnul}
-                  disabled={annulPending}
-                >
-                  {annulPending ? "Аннулирование…" : "Аннулировать поставку"}
-                </Button>
-              ) : (
+              {isAnnulled ? (
                 <span className="text-muted-foreground text-sm">
                   Поставка аннулирована
                   {order?.annulled_at
                     ? ` · ${order.annulled_at.slice(0, 16).replace("T", " ")}`
                     : ""}
                 </span>
+              ) : (
+                <span />
               )}
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Закрыть
               </Button>
+            </>
+          ) : mode === "edit" ? (
+            <>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleAnnul}
+                disabled={annulPending || pending}
+              >
+                {annulPending ? "Аннулирование…" : "Аннулировать поставку"}
+              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  disabled={pending}
+                >
+                  Отмена
+                </Button>
+                <Button onClick={handleSave} disabled={pending || annulPending}>
+                  {pending ? "Сохранение…" : "Сохранить"}
+                </Button>
+              </div>
             </>
           ) : (
             <>
@@ -814,7 +850,7 @@ export function SupplyOrderDialog({
                 Отмена
               </Button>
               <Button onClick={handleSave} disabled={pending}>
-                {pending ? "Сохранение..." : "Сохранить"}
+                {pending ? "Сохранение…" : "Сохранить"}
               </Button>
             </>
           )}

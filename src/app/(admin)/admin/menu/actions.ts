@@ -75,6 +75,7 @@ export async function createMenuItem(data: {
   has_sizes: boolean
   weight_grams: number | null
   price: number | null
+  aggregator_price_bani: number | null
   is_active: boolean
   sort_order: number
   discount_percent: number | null
@@ -95,6 +96,7 @@ export async function createMenuItem(data: {
       has_sizes: data.has_sizes,
       weight_grams: data.weight_grams,
       price: data.price,
+      aggregator_price_bani: data.aggregator_price_bani,
       is_active: data.is_active,
       sort_order: data.sort_order,
       discount_percent: data.discount_percent,
@@ -120,6 +122,7 @@ export async function updateMenuItem(
     has_sizes: boolean
     weight_grams: number | null
     price: number | null
+    aggregator_price_bani: number | null
     is_active: boolean
     sort_order: number
     discount_percent: number | null
@@ -140,6 +143,7 @@ export async function updateMenuItem(
       has_sizes: data.has_sizes,
       weight_grams: data.weight_grams,
       price: data.price,
+      aggregator_price_bani: data.aggregator_price_bani,
       is_active: data.is_active,
       sort_order: data.sort_order,
       discount_percent: data.discount_percent,

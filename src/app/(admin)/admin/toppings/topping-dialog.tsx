@@ -51,6 +51,11 @@ function parseLei(s: string): number | null {
   return n
 }
 
+function optionalLeiToBani(s: string): number | null {
+  const lei = parseLei(s)
+  return lei === null ? null : leiToBani(lei)
+}
+
 async function uploadFile(file: File): Promise<string> {
   const fd = new FormData()
   fd.append("file", file)
@@ -137,6 +142,7 @@ export function ToppingDialog({
   const [nameRu, setNameRu] = useState("")
   const [nameRo, setNameRo] = useState("")
   const [priceLei, setPriceLei] = useState("")
+  const [aggregatorPriceLei, setAggregatorPriceLei] = useState("")
   const [sortOrder, setSortOrder] = useState(0)
   const [isActive, setIsActive] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -199,6 +205,7 @@ export function ToppingDialog({
           name: String(raw.name),
           yield_qty: Number(raw.yield_qty) || 0,
           yield_unit: parseIngredientUnit(raw.yield_unit),
+          cost_per_storage_unit: null,
         }),
       )
       setIngredientsCatalog(ingList)
@@ -216,6 +223,7 @@ export function ToppingDialog({
       setNameRu(topping.name_ru ?? "")
       setNameRo(topping.name_ro ?? "")
       setPriceLei(baniToLei(topping.price))
+      setAggregatorPriceLei(baniToLei(topping.aggregator_price_bani))
       setSortOrder(topping.sort_order)
       setIsActive(topping.is_active)
     } else {
@@ -223,6 +231,7 @@ export function ToppingDialog({
       setNameRu("")
       setNameRo("")
       setPriceLei("")
+      setAggregatorPriceLei("")
       setSortOrder(0)
       setIsActive(true)
       setRecipeRows([])
@@ -330,6 +339,7 @@ export function ToppingDialog({
       name_ru: ru,
       name_ro: ro,
       price,
+      aggregator_price_bani: optionalLeiToBani(aggregatorPriceLei),
       sort_order: sortOrder,
       is_active: isActive,
       image_url: imageUrl.trim() || null,
@@ -442,15 +452,28 @@ export function ToppingDialog({
                 onChange={(e) => setNameRo(e.target.value)}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="tp-price">Цена (лей)</Label>
-              <Input
-                id="tp-price"
-                type="text"
-                inputMode="decimal"
-                value={priceLei}
-                onChange={(e) => setPriceLei(e.target.value)}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="tp-price">Цена (лей)</Label>
+                <Input
+                  id="tp-price"
+                  type="text"
+                  inputMode="decimal"
+                  value={priceLei}
+                  onChange={(e) => setPriceLei(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="tp-aggregator-price">Цена агрегатор (MDL)</Label>
+                <Input
+                  id="tp-aggregator-price"
+                  type="text"
+                  inputMode="decimal"
+                  value={aggregatorPriceLei}
+                  onChange={(e) => setAggregatorPriceLei(e.target.value)}
+                  placeholder="Необязательно"
+                />
+              </div>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="tp-sort">Порядок</Label>

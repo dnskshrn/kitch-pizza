@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { calcPosToppingsCharge } from "@/lib/pos-cart-helpers"
+import { calcPosToppingsCharge, getPosCartItemUnitPriceBani } from "@/lib/pos-cart-helpers"
 import {
   cartToppingFromTopping,
   getTotalQuantityInGroup,
@@ -41,6 +41,7 @@ export type PosProductModalMenuItem = Pick<
   | "image_url"
   | "has_sizes"
   | "price"
+  | "aggregator_price_bani"
 > & {
   variants?: MenuItemVariant[] | null
 }
@@ -50,6 +51,7 @@ type UiTopping = {
   name_ru: string
   name_ro: string
   price: number
+  aggregator_price_bani: number | null
   image_url: string | null
   group_id: string
 }
@@ -68,6 +70,15 @@ function formatLei(bani: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
+}
+
+function resolvePosCatalogUnitPriceBani(
+  catalogPrice: number,
+  aggregatorPrice: number | null | undefined,
+  isAggregator: boolean,
+): number {
+  if (isAggregator && aggregatorPrice != null) return aggregatorPrice
+  return catalogPrice
 }
 
 function normalizeOne<T>(v: T | T[] | null | undefined): T | null {
@@ -127,6 +138,7 @@ type PosProductModalProps = {
   item: PosProductModalMenuItem | null
   onClose: () => void
   onAdd: (cartItem: PosCartItem) => void
+  isAggregator?: boolean
   /** Если задано — режим правки строки заказа. */
   editDraft?: PosProductModalEditDraft | null
   /** Сохранение состава строки (асинхронно, ошибки см. родитель). */
@@ -143,6 +155,7 @@ export function PosProductModal({
   item,
   onClose,
   onAdd,
+  isAggregator = false,
   editDraft,
   onEditSave,
   cartEditDraft,
@@ -277,6 +290,7 @@ export function PosProductModal({
             name_ru: meta.name_ru,
             name_ro: meta.name_ro,
             price: meta.price,
+            aggregator_price_bani: meta.aggregator_price_bani,
             topping_group_id: meta.group_id,
           }),
           quantity: d.quantity,
@@ -325,7 +339,7 @@ export function PosProductModal({
         supabase
           .from("menu_item_topping_groups")
           .select(
-            "free_count, topping_groups(id, name_ru, sort_order, max_selections, toppings(id, name_ru, name_ro, price, image_url, is_active, sort_order))",
+            "free_count, topping_groups(id, name_ru, sort_order, max_selections, toppings(id, name_ru, name_ro, price, aggregator_price_bani, image_url, is_active, sort_order))",
           )
           .eq("menu_item_id", item.id),
       ])
@@ -358,6 +372,7 @@ export function PosProductModal({
                 name_ru: string
                 name_ro: string | null
                 price: number
+                aggregator_price_bani: number | null
                 image_url: string | null
                 is_active: boolean | null
                 sort_order: number | null
@@ -373,6 +388,7 @@ export function PosProductModal({
                 name_ru: string
                 name_ro: string | null
                 price: number
+                aggregator_price_bani: number | null
                 image_url: string | null
                 is_active: boolean | null
                 sort_order: number | null
@@ -402,6 +418,10 @@ export function PosProductModal({
             name_ru: t.name_ru,
             name_ro: t.name_ro?.trim() || t.name_ru,
             price: Math.round(t.price ?? 0),
+            aggregator_price_bani:
+              t.aggregator_price_bani != null
+                ? Math.round(t.aggregator_price_bani)
+                : null,
             image_url: t.image_url ?? null,
             group_id: g.id,
           }))
@@ -431,12 +451,27 @@ export function PosProductModal({
   const sizeUnitBani = useMemo(() => {
     if (!item) return 0
     if (!item.has_sizes || sortedVariants.length === 0) {
-      return item.price ?? 0
+      return resolvePosCatalogUnitPriceBani(
+        item.price ?? 0,
+        item.aggregator_price_bani,
+        isAggregator,
+      )
     }
     if (!selectedVariantId) return 0
     const v = sortedVariants.find((x) => x.id === selectedVariantId)
-    return v?.price ?? item.price ?? 0
-  }, [item, sortedVariants, selectedVariantId])
+    if (!v) {
+      return resolvePosCatalogUnitPriceBani(
+        item.price ?? 0,
+        item.aggregator_price_bani,
+        isAggregator,
+      )
+    }
+    return resolvePosCatalogUnitPriceBani(
+      v.price,
+      v.aggregator_price_bani,
+      isAggregator,
+    )
+  }, [item, sortedVariants, selectedVariantId, isAggregator])
 
   const toppingGroupFreeCounts = useMemo(
     () => Object.fromEntries(groups.map((g) => [g.id, g.free_count])),
@@ -444,8 +479,8 @@ export function PosProductModal({
   )
 
   const toppingsUnitBani = useMemo(
-    () => calcPosToppingsCharge(cartToppings, toppingGroupFreeCounts),
-    [cartToppings, toppingGroupFreeCounts],
+    () => calcPosToppingsCharge(cartToppings, toppingGroupFreeCounts, isAggregator),
+    [cartToppings, toppingGroupFreeCounts, isAggregator],
   )
 
   const unitTotalBani = sizeUnitBani + toppingsUnitBani
@@ -460,6 +495,7 @@ export function PosProductModal({
           name_ru: topping.name_ru,
           name_ro: topping.name_ro,
           price: topping.price,
+          aggregator_price_bani: topping.aggregator_price_bani,
           topping_group_id: group.id,
         },
         group.toppings.map((x) => x.id),
@@ -488,6 +524,14 @@ export function PosProductModal({
       vid = selectedVariantId
       sizeSnap = vsel?.name_ru.trim() ?? null
     }
+    const selectedVariant =
+      item.has_sizes && sortedVariants.length > 0 && selectedVariantId
+        ? sortedVariants.find((x) => x.id === selectedVariantId)
+        : null
+    const aggregatorUnitPriceBani =
+      !item.has_sizes || sortedVariants.length === 0
+        ? (item.aggregator_price_bani ?? undefined)
+        : (selectedVariant?.aggregator_price_bani ?? undefined)
     const payload: PosCartItem = {
       menuItemId: item.id,
       category_id: item.category_id,
@@ -495,10 +539,14 @@ export function PosProductModal({
       size: sizeSnap,
       variantId: vid,
       price: unitTotalBani,
+      aggregatorUnitPriceBani,
       qty,
       imageUrl: item.image_url ?? undefined,
       toppings: cartToppings,
       toppingGroupFreeCounts,
+    }
+    if (isAggregator && aggregatorUnitPriceBani != null) {
+      payload.price = getPosCartItemUnitPriceBani(payload, true)
     }
     if (isOrderLineEdit && editDraft && onEditSave) {
       setEditSaving(true)

@@ -22,6 +22,15 @@ import {
 } from "@/lib/recipe-composition-row-updates"
 import { wasteYieldFactor } from "@/lib/recipe-composition-waste"
 import { recipeIngredientStockStorageQty } from "@/lib/product-recipe-ingredient-qty"
+import {
+  buildSemiCostPerUnitById,
+  computeMaterialRecipeCostMdl,
+  computeReferencedMenuItemRecipeCostMdl,
+  enrichProductRecipeCostContext,
+  productRecipeLineCostMdl,
+  type ProductRecipeCostContext,
+  type ProductRecipeCostLine,
+} from "@/lib/product-recipe-cost"
 import { RecipeNameCombobox } from "@/components/admin/menu/RecipeNameCombobox"
 import { Button } from "@/components/ui/button"
 import {
@@ -144,15 +153,30 @@ function stockAvgCostFromRelation(stock: unknown): number {
 
 function calcRowCost(
   row: RecipeEditorRow,
-  ingredientsList: IngredientWithCost[],
+  ctx: ProductRecipeCostContext,
 ): number {
-  if (row.type === "menu_ref") return 0
-  if (row.type !== "ingredient" || !row.ref_id) return 0
-  const ing = ingredientsList.find((i) => i.id === row.ref_id)
-  if (!ing || !ing.avg_cost) return 0
+  if (!row.ref_id.trim()) return 0
+
+  if (row.type === "menu_ref") {
+    return computeReferencedMenuItemRecipeCostMdl(
+      row.ref_id,
+      row.menu_ref_variant_id,
+      ctx,
+    )
+  }
+
   const gross = parseRecipeQtyStrict(row.quantityGrossStr)
   if (gross == null || gross <= 0) return 0
-  return gross * ing.avg_cost
+
+  return productRecipeLineCostMdl(
+    {
+      ingredient_id: row.type === "ingredient" ? row.ref_id : null,
+      semi_finished_id: row.type === "semi" ? row.ref_id : null,
+      quantity: gross,
+      quantity_gross: gross,
+    },
+    ctx,
+  )
 }
 
 function normalizeEmbedArray<T>(raw: unknown): T[] {
@@ -193,12 +217,33 @@ type MenuRefRecipePreview = {
   mixedMass: boolean
 }
 
-function computeReferencedMenuItemRecipePreview(
+function rawRecipeRowsToCostLines(
+  menuItemId: string,
   rawRows: Record<string, unknown>[],
+): ProductRecipeCostLine[] {
+  return rawRows.map((line) => ({
+    menu_item_id: menuItemId,
+    variant_id: null,
+    ingredient_id: (line.ingredient_id as string | null) ?? null,
+    semi_finished_id: (line.semi_finished_id as string | null) ?? null,
+    menu_item_ref_id: (line.menu_item_ref_id as string | null) ?? null,
+    quantity: Number(line.quantity) || 0,
+    quantity_gross:
+      line.quantity_gross !== null &&
+      line.quantity_gross !== undefined &&
+      line.quantity_gross !== ""
+        ? Number(line.quantity_gross)
+        : null,
+  }))
+}
+
+function computeReferencedMenuItemRecipePreview(
+  menuItemId: string,
+  rawRows: Record<string, unknown>[],
+  ctx: ProductRecipeCostContext,
 ): MenuRefRecipePreview {
   const bruttoByUnit: Partial<Record<StorageUnit, number>> = {}
   const netByUnit: Partial<Record<StorageUnit, number>> = {}
-  let costMdlSum = 0
   let materialLineCount = 0
 
   for (const line of rawRows) {
@@ -227,10 +272,6 @@ function computeReferencedMenuItemRecipePreview(
       })
       bruttoByUnit[unit] = (bruttoByUnit[unit] ?? 0) + grossAmt
       netByUnit[unit] = (netByUnit[unit] ?? 0) + qty
-      const avgCost = stockAvgCostFromRelation(ing?.ingredient_stock)
-      if (avgCost > 0) {
-        costMdlSum += grossAmt * avgCost
-      }
       materialLineCount += 1
       continue
     }
@@ -238,8 +279,6 @@ function computeReferencedMenuItemRecipePreview(
     if (semiId) {
       const semi = relationOne(line.semi_finished)
       if (!semi) continue
-      const yieldQtyRaw = Number(semi.yield_qty)
-      const yieldQty = yieldQtyRaw > 0 ? yieldQtyRaw : 0
       const yieldUnit = parseIngredientUnit(semi.yield_unit)
       const grossAmt = recipeIngredientStockStorageQty({
         quantity: qty,
@@ -247,25 +286,12 @@ function computeReferencedMenuItemRecipePreview(
       })
       bruttoByUnit[yieldUnit] = (bruttoByUnit[yieldUnit] ?? 0) + grossAmt
       netByUnit[yieldUnit] = (netByUnit[yieldUnit] ?? 0) + qty
-
-      if (yieldQty > 0) {
-        const factor = grossAmt / yieldQty
-        const items = normalizeEmbedArray<Record<string, unknown>>(
-          semi.semi_finished_items,
-        )
-        for (const si of items) {
-          const siQtyRaw = Number(si.quantity)
-          const siQty = Number.isFinite(siQtyRaw) ? siQtyRaw : 0
-          const ingRel = relationOne(si.ingredients)
-          const avg = stockAvgCostFromRelation(ingRel?.ingredient_stock)
-          if (avg > 0 && siQty > 0) {
-            costMdlSum += siQty * factor * avg
-          }
-        }
-      }
       materialLineCount += 1
     }
   }
+
+  const costLines = rawRecipeRowsToCostLines(menuItemId, rawRows)
+  const costMdlSum = computeMaterialRecipeCostMdl(costLines, ctx)
 
   if ((rawRows?.length ?? 0) === 0 || materialLineCount === 0) {
     return {
@@ -470,6 +496,9 @@ export function RecipeEditorModal({
   const [menuRefRecipePreviewByKey, setMenuRefRecipePreviewByKey] = useState<
     Record<string, MenuRefRecipePreview | "loading">
   >({})
+  const [brandRecipeLines, setBrandRecipeLines] = useState<
+    ProductRecipeCostLine[]
+  >([])
 
   const variantIdsKey = useMemo(
     () => variants.map((v) => v.id).join("\0"),
@@ -484,6 +513,37 @@ export function RecipeEditorModal({
     () => new Map(semis.map((s) => [s.id, s])),
     [semis],
   )
+
+  const menuItemsForRecipeCost = useMemo(() => {
+    const map = new Map<string, { id: string; has_sizes: boolean }>()
+    map.set(item.id, { id: item.id, has_sizes: variants.length > 0 })
+    for (const c of comboMenuCatalog) {
+      if (c.id !== item.id) {
+        map.set(c.id, { id: c.id, has_sizes: c.has_sizes })
+      }
+    }
+    return [...map.values()]
+  }, [item.id, variants.length, comboMenuCatalog])
+
+  const recipeCostCtx = useMemo((): ProductRecipeCostContext => {
+    const ingredientCostById = new Map<string, number>()
+    for (const ing of ingredients) {
+      if (ing.avg_cost > 0) {
+        ingredientCostById.set(ing.id, ing.avg_cost)
+      }
+    }
+    const semiCostPerUnitById = new Map<string, number>()
+    for (const s of semis) {
+      if (s.cost_per_storage_unit != null && s.cost_per_storage_unit > 0) {
+        semiCostPerUnitById.set(s.id, s.cost_per_storage_unit)
+      }
+    }
+    return enrichProductRecipeCostContext(
+      { ingredientCostById, semiCostPerUnitById },
+      brandRecipeLines,
+      menuItemsForRecipeCost,
+    )
+  }, [ingredients, semis, brandRecipeLines, menuItemsForRecipeCost])
 
   const comboMenuCandidates = useMemo(
     () => comboMenuCatalog.filter((m) => m.id !== item.id),
@@ -509,12 +569,15 @@ export function RecipeEditorModal({
             .order("name"),
           supabase
             .from("semi_finished")
-            .select("id, name, yield_qty, yield_unit")
+            .select(
+              "id, name, yield_qty, yield_unit, semi_finished_items!semi_finished_items_semi_finished_id_fkey(quantity, ingredient_id, semi_finished_ref_id)",
+            )
             .order("name"),
         ])
       if (cancelled) return
+      let parsedIngredients: IngredientWithCost[] = []
       if (!ingErr && ings) {
-        const parsed = (ings as {
+        parsedIngredients = (ings as {
           id: string
           name: string
           unit: string
@@ -532,10 +595,38 @@ export function RecipeEditorModal({
           })(),
           avg_cost: stockAvgCostFromRelation(raw.ingredient_stock),
         }))
-        setIngredients(parsed)
+        setIngredients(parsedIngredients)
       }
       if (!sfErr && sfs) {
-        setSemis(sfs as SemiCatalog[])
+        const ingredientCostMap = new Map<string, number>()
+        for (const ing of parsedIngredients) {
+          if (ing.avg_cost > 0) {
+            ingredientCostMap.set(ing.id, ing.avg_cost)
+          }
+        }
+        const semiCostPerUnitById = buildSemiCostPerUnitById(
+          sfs as Record<string, unknown>[],
+          ingredientCostMap,
+        )
+
+        const parsedSemis: SemiCatalog[] = (sfs as Record<string, unknown>[]).map(
+          (raw) => {
+            const id = String(raw.id)
+            const yieldQty = Number(raw.yield_qty) || 0
+            const yieldUnit = (["g", "ml", "pcs"].includes(String(raw.yield_unit))
+              ? raw.yield_unit
+              : "g") as StorageUnit
+            const cpu = semiCostPerUnitById.get(id) ?? null
+            return {
+              id,
+              name: String(raw.name ?? ""),
+              yield_qty: yieldQty,
+              yield_unit: yieldUnit,
+              cost_per_storage_unit: cpu,
+            }
+          },
+        )
+        setSemis(parsedSemis)
       }
     })()
     return () => {
@@ -600,6 +691,48 @@ export function RecipeEditorModal({
       cancelled = true
     }
   }, [open, brandId])
+
+  useEffect(() => {
+    if (!open || !brandId) {
+      setBrandRecipeLines([])
+      return
+    }
+
+    const menuItemIds = [
+      ...new Set([
+        item.id,
+        ...comboMenuCatalog
+          .map((c) => c.id)
+          .filter((id) => id !== item.id),
+      ]),
+    ]
+    if (menuItemIds.length === 0) {
+      setBrandRecipeLines([])
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from("product_recipes")
+        .select(
+          "menu_item_id, variant_id, ingredient_id, semi_finished_id, menu_item_ref_id, menu_item_ref_variant_id, quantity, quantity_gross",
+        )
+        .in("menu_item_id", menuItemIds)
+
+      if (cancelled) return
+      if (error) {
+        setBrandRecipeLines([])
+        return
+      }
+      setBrandRecipeLines((data ?? []) as ProductRecipeCostLine[])
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, brandId, item.id, comboMenuCatalog])
 
   useEffect(() => {
     if (!open) {
@@ -681,7 +814,11 @@ export function RecipeEditorModal({
           )
           return {
             key: t.key,
-            preview: computeReferencedMenuItemRecipePreview(rowsRaw),
+            preview: computeReferencedMenuItemRecipePreview(
+              t.menuItemId,
+              rowsRaw,
+              recipeCostCtx,
+            ),
           }
         }),
       )
@@ -700,7 +837,7 @@ export function RecipeEditorModal({
     return () => {
       cancelled = true
     }
-  }, [open, rows, comboMenuCandidates])
+  }, [open, rows, comboMenuCandidates, recipeCostCtx])
 
   useEffect(() => {
     if (!open) {
@@ -1074,31 +1211,11 @@ export function RecipeEditorModal({
     const tabRows = rows.filter((r) =>
       vId == null ? r.variant_id == null : r.variant_id === vId,
     )
-    let sum = tabRows.reduce(
-      (acc, row) => acc + calcRowCost(row, ingredients),
+    return tabRows.reduce(
+      (acc, row) => acc + calcRowCost(row, recipeCostCtx),
       0,
     )
-
-    for (const row of tabRows) {
-      if (row.type !== "menu_ref") continue
-      if (!rowIsSavable(row, comboMenuCandidates)) continue
-      const cand = comboMenuCandidates.find((c) => c.id === row.ref_id)
-      const vk = readMenuRefRecipeVariantFilter(row, cand)
-      const pvKey = menuRefRecipePreviewStorageKey(row.ref_id, vk)
-      const pv = menuRefRecipePreviewByKey[pvKey]
-      if (pv && pv !== "loading" && !pv.isRecipeEmpty) {
-        sum += pv.costMdlSum
-      }
-    }
-
-    return sum
-  }, [
-    rows,
-    activeTab,
-    ingredients,
-    comboMenuCandidates,
-    menuRefRecipePreviewByKey,
-  ])
+  }, [rows, activeTab, recipeCostCtx])
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -1196,7 +1313,7 @@ export function RecipeEditorModal({
                                 ingById,
                                 semiById,
                               )
-                              const lineCost = calcRowCost(row, ingredients)
+                              const lineCost = calcRowCost(row, recipeCostCtx)
                               const wp = ingredientWastePercentFromMaps(row, ingById)
                               const bruttoEditable =
                                 row.type === "ingredient" &&

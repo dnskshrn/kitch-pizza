@@ -212,7 +212,13 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
       <SupplyOrderDialog
         open={!!viewOrder}
         onOpenChange={(open) => !open && setViewOrder(null)}
-        mode="view"
+        mode={
+          viewOrder
+            ? viewOrder.annulled_at != null
+              ? "view"
+              : "edit"
+            : "view"
+        }
         order={viewOrder}
         suppliers={suppliers}
         ingredients={ingredients}

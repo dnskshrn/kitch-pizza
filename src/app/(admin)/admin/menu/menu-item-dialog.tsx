@@ -66,6 +66,7 @@ type VariantDraft = {
   name_ru: string
   name_ro: string
   priceLei: string
+  aggregatorPriceLei: string
   weightStr: string
 }
 
@@ -75,6 +76,11 @@ function parseLei(s: string): number | null {
   const n = Number(t)
   if (Number.isNaN(n)) return null
   return n
+}
+
+function optionalLeiToBani(s: string): number | null {
+  const lei = parseLei(s)
+  return lei === null ? null : leiToBani(lei)
 }
 
 /** Пустая строка → null; только неотрицательные целые граммы. */
@@ -171,6 +177,7 @@ export function MenuItemDialog({
   const [hasSizes, setHasSizes] = useState(false)
   const [variants, setVariants] = useState<VariantDraft[]>([])
   const [priceLei, setPriceLei] = useState("")
+  const [aggregatorPriceLei, setAggregatorPriceLei] = useState("")
   const [weightGramsStr, setWeightGramsStr] = useState("")
   const [portionLabelStr, setPortionLabelStr] = useState("")
   const [isActive, setIsActive] = useState(true)
@@ -196,6 +203,7 @@ export function MenuItemDialog({
       setImageUrl(item.image_url ?? "")
       setHasSizes(item.has_sizes)
       setPriceLei(baniToLei(item.price))
+      setAggregatorPriceLei(baniToLei(item.aggregator_price_bani))
       setWeightGramsStr(
         item.weight_grams != null ? String(item.weight_grams) : "",
       )
@@ -222,6 +230,7 @@ export function MenuItemDialog({
       setHasSizes(false)
       setVariants([])
       setPriceLei("")
+      setAggregatorPriceLei("")
       setWeightGramsStr("")
       setPortionLabelStr("")
       setIsActive(true)
@@ -260,6 +269,9 @@ export function MenuItemDialog({
             name_ru: v.name_ru as string,
             name_ro: (v.name_ro as string) ?? "",
             priceLei: String((v.price as number) / 100),
+            aggregatorPriceLei: baniToLei(
+              (v.aggregator_price_bani as number | null) ?? null,
+            ),
             weightStr:
               v.weight_grams != null ? String(v.weight_grams as number) : "",
           })) ?? [],
@@ -320,6 +332,7 @@ export function MenuItemDialog({
         name_ru: "",
         name_ro: "",
         priceLei: "",
+        aggregatorPriceLei: "",
         weightStr: "",
       },
     ])
@@ -367,6 +380,7 @@ export function MenuItemDialog({
         name_ru: v.name_ru.trim(),
         name_ro: v.name_ro.trim(),
         price: leiToBani(price),
+        aggregator_price_bani: optionalLeiToBani(v.aggregatorPriceLei),
         weight_grams: w === null ? null : w,
         sort_order: idx,
       }
@@ -397,6 +411,7 @@ export function MenuItemDialog({
         name_ru: row.name_ru,
         name_ro: row.name_ro,
         price: row.price,
+        aggregator_price_bani: row.aggregator_price_bani,
         weight_grams: row.weight_grams,
         sort_order: row.sort_order,
       }
@@ -467,6 +482,7 @@ export function MenuItemDialog({
         has_sizes: true,
         weight_grams: null,
         price: null,
+        aggregator_price_bani: null,
         is_active: isActive,
         sort_order: sortOrder,
         discount_percent,
@@ -493,6 +509,7 @@ export function MenuItemDialog({
         has_sizes: false,
         weight_grams: wG,
         price: leiToBani(p),
+        aggregator_price_bani: optionalLeiToBani(aggregatorPriceLei),
         is_active: isActive,
         sort_order: sortOrder,
         discount_percent,
@@ -701,7 +718,7 @@ export function MenuItemDialog({
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <div className="grid gap-1.5">
                       <Label htmlFor={`mi-var-price-${i}`}>Цена (лей)</Label>
                       <Input
@@ -712,6 +729,21 @@ export function MenuItemDialog({
                         onChange={(e) =>
                           patchVariant(i, { priceLei: e.target.value })
                         }
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor={`mi-var-aggregator-${i}`}>Glovo</Label>
+                      <Input
+                        id={`mi-var-aggregator-${i}`}
+                        type="text"
+                        inputMode="decimal"
+                        value={v.aggregatorPriceLei}
+                        onChange={(e) =>
+                          patchVariant(i, {
+                            aggregatorPriceLei: e.target.value,
+                          })
+                        }
+                        placeholder="Необязательно"
                       />
                     </div>
                     <div className="grid gap-1.5">
@@ -733,15 +765,28 @@ export function MenuItemDialog({
             </div>
           ) : (
             <>
-              <div className="grid gap-2">
-                <Label htmlFor="mi-price">Цена (лей)</Label>
-                <Input
-                  id="mi-price"
-                  type="text"
-                  inputMode="decimal"
-                  value={priceLei}
-                  onChange={(e) => setPriceLei(e.target.value)}
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="mi-price">Цена (лей)</Label>
+                  <Input
+                    id="mi-price"
+                    type="text"
+                    inputMode="decimal"
+                    value={priceLei}
+                    onChange={(e) => setPriceLei(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="mi-aggregator-price">Glovo</Label>
+                  <Input
+                    id="mi-aggregator-price"
+                    type="text"
+                    inputMode="decimal"
+                    value={aggregatorPriceLei}
+                    onChange={(e) => setAggregatorPriceLei(e.target.value)}
+                    placeholder="Необязательно"
+                  />
+                </div>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="mi-weight-g">Вес (гр)</Label>

@@ -27,6 +27,8 @@ export type PosCartTopping = {
   name_ru: string
   name_ro: string
   price: number
+  /** Цена агрегатора за единицу, бани; null/undefined = использовать price. */
+  aggregator_price_bani?: number | null
   quantity: number
   topping_group_id: string
 }
@@ -41,6 +43,8 @@ export type PosCartItem = {
   size: string | null
   variantId?: string | null
   price: number
+  /** Базовая цена позиции для агрегатора (без топпингов), бани. */
+  aggregatorUnitPriceBani?: number
   qty: number
   imageUrl?: string
   toppings: PosCartTopping[]

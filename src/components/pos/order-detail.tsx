@@ -20,10 +20,6 @@ import {
 import { acceptOrderPos } from "@/lib/actions/pos/accept-order-pos"
 import { rejectOrderPos } from "@/lib/actions/pos/reject-order-pos"
 import { orderItemSizeDisplayLabel } from "@/lib/order-item-size-display"
-import {
-  posLineItemName,
-  posToppingsPayloadForDb,
-} from "@/lib/pos-cart-helpers"
 import { migratePosCartToppingsFromLegacy } from "@/lib/pos-cart-toppings"
 import {
   POS_MENU_ITEM_FOR_MODAL_SELECT,
@@ -179,6 +175,7 @@ type EditMenuItemModalRow = Pick<
   | "name_ru"
   | "description_ru"
   | "price"
+  | "aggregator_price_bani"
   | "has_sizes"
   | "image_url"
 > & {
@@ -601,19 +598,11 @@ export function OrderDetail({
     cartPayload: PosCartItem,
   ) => {
     if (!order || !cartPayload.menuItemId) return
-    const toppingsDb = posToppingsPayloadForDb(cartPayload.toppings)
-    const displayName = posLineItemName(cartPayload.name, cartPayload.toppings)
 
     const result = await updateOrderItemCompositionPos({
       orderId: order.id,
       itemId: itemIdLine,
-      menuItemId: cartPayload.menuItemId,
-      itemName: displayName,
-      size: cartPayload.size,
-      variantId: cartPayload.variantId ?? null,
-      quantity: cartPayload.qty,
-      unitPriceBani: cartPayload.price,
-      toppings: toppingsDb,
+      cartItem: cartPayload,
     })
     if (!result.success) throw new Error(result.error)
     setProductEditModal(null)
@@ -976,6 +965,7 @@ export function OrderDetail({
 
       <PosProductModal
         item={productEditModal?.menuRow ?? null}
+        isAggregator={order.delivery_mode === "aggregator"}
         editDraft={
           productEditModal
             ? {

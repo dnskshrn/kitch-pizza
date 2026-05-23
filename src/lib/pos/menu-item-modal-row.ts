@@ -8,6 +8,7 @@ export type PosMenuItemModalSourceRow = Pick<
   | "name_ru"
   | "description_ru"
   | "price"
+  | "aggregator_price_bani"
   | "has_sizes"
   | "image_url"
 > & {
@@ -36,4 +37,4 @@ export function posMenuRowForModal(
 
 /** Общая выборка для загрузки товара в модалку POS (категория нужна списку меню). */
 export const POS_MENU_ITEM_FOR_MODAL_SELECT =
-  "id, name_ru, description_ru, category_id, price, has_sizes, image_url, menu_item_topping_groups(id), menu_item_variants(id, menu_item_id, name_ru, name_ro, price, weight_grams, sort_order, created_at)"
+  "id, name_ru, description_ru, category_id, price, aggregator_price_bani, has_sizes, image_url, menu_item_topping_groups(id), menu_item_variants(id, menu_item_id, name_ru, name_ro, price, aggregator_price_bani, weight_grams, sort_order, created_at)"

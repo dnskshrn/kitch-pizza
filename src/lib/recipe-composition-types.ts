@@ -13,4 +13,6 @@ export type RecipeCompositionSemi = {
   name: string
   yield_qty: number
   yield_unit: StorageUnit
+  /** MDL за ед. хранения (г / мл / шт); null если состав не оценён. */
+  cost_per_storage_unit: number | null
 }

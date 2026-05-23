@@ -48,7 +48,8 @@ src/
 │   ├── MetaPixel.tsx
 │   └── ui/              # shadcn
 ├── hooks/
-│   └── use-store-open.ts       # часы работы витрины по BrandConfig (Europe/Chisinau)
+│   ├── use-store-open.ts       # часы работы витрины по BrandConfig (Europe/Chisinau)
+│   └── use-persist-store-hydration.ts  # ожидание zustand persist (checkout и др.)
 ├── lib/
 │   ├── actions/         # server actions (см. раздел Server Actions)
 │   ├── data/            # storefront fetchers
@@ -60,6 +61,7 @@ src/
 │   ├── delivery-zone-schedule.ts  # слоты расписания зоны (Europe/Chisinau)
 │   ├── actions/admin/analytics.ts, delivery-zone-schedules.ts
 │   ├── inventory-units.ts, recipe-*.ts
+│   ├── semi-finished-cost.ts, ingredient-avg-cost.ts
 │   ├── order-recipe-stock-deduction.ts
 │   └── ...
 ├── types/               # database, cart, pos, promotions
@@ -67,11 +69,14 @@ src/
 └── middleware.ts
 ```
 
+Корень репозитория: `vercel.json` (301 `/ru`, `/ro` → `/`), `supabase/migrations/`.
+
 ## Контракты
 
 ### Money & единицы
 
 - **Заказы в БД — integer bani** (`orders.total`, `price`, `discount`, `delivery_fee`, `bonuses_redeemed`, все `*_bani`). В UI — MDL.
+- **Агрегаторные цены (Glovo):** колонки `aggregator_price_bani` (nullable integer bani) на `menu_items`, `menu_item_variants`, `toppings`. В админке ввод в MDL (÷100); `NULL` = использовать обычную `price`. В POS при `delivery_mode='aggregator'` в корзину и `order_items` пишутся агрегаторные цены (если заданы), иначе fallback на каталожную цену.
 - **Склад в БД — numeric MDL** (`ingredient_stock.avg_cost`, цены в `supply_order_items`). Не bani.
 - **Склад: единица хранения в БД — g / ml / pcs**. В UI админки — кг / л / шт; цены — MDL за кг/л/шт. Конвертация: `src/lib/inventory-units.ts` (`toDisplayQty`/`toStorageQty`, `toDisplayPrice`/`toStoragePrice`).
 - **Исключение:** редактор техкарт (`RecipeEditorModal`), `semi-finished-dialog`, состав топпинга (`RecipeIngredientSemiCompositionTable`) — работают напрямую в г/мл/шт, без конвертации.
@@ -109,7 +114,7 @@ src/
 | `bonus_multiplier` (numeric, default 1) | множитель начисления при `done` |
 | `promo_code`, `discount_rules_applied` (JSON) | скидки |
 
-`order_items`: `variant_id` (FK `menu_item_variants`, nullable), `size` (текстовый snapshot подписи варианта; старые строки могут иметь `s`/`l`), `toppings` (JSONB: `{ name, price, quantity }[]`, тип `OrderItemTopping`), `is_gift`, `gift_rule_id`.
+`order_items`: `variant_id` (FK `menu_item_variants`, nullable), `size` (текстовый snapshot подписи варианта; старые строки могут иметь `s`/`l`), `toppings` (JSONB: `{ name, price, quantity }[]`, тип `OrderItemTopping`), `is_gift`, `gift_rule_id`. Поле `price` — **итог строки в bani** (`unit × quantity`); unit включает базу позиции + платные топпинги. Для Glovo unit и `toppings[].price` в JSON берутся из `aggregator_price_bani` каталога (см. `posLinePayloadFromCartItem`).
 
 ### Multi-brand: что брендовое, что общее
 
@@ -254,11 +259,12 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 - `aggregator` — Glovo: ставит `aggregator='glovo'`, `payment_method='aggregator_card'`, `prep_deadline_at` = +15 мин.
 - Из входящего звонка: `createDraftOrderPos({brandSlug, userPhone, profileId, userName})` — резолв `brand_id`, открытие мастера на шаге 2.
 
-**Меню в мастере:** `usePosMenuCache` (на время браузерной POS-сессии: категории, items с вариантами и группами топпингов, индексы). Fallback — Supabase запрос с `POS_MENU_ITEM_FOR_MODAL_SELECT`. Cookie `pos-brand-slug` обновляется при выборе бренда (синхронизация с KDS).
+**Меню в мастере:** `usePosMenuCache` (на время браузерной POS-сессии: категории, items с вариантами и группами топпингов, индексы). Выборка `POS_MENU_ITEM_FOR_MODAL_SELECT` (`lib/pos/menu-item-modal-row.ts`) включает `aggregator_price_bani` для `menu_items`, `menu_item_variants` и nested `toppings`. Fallback — Supabase запрос с той же константой. Cookie `pos-brand-slug` обновляется при выборе бренда (синхронизация с KDS).
 
 **Корзина — optimistic:**
-- `PosCartItem` / `PosCartTopping` (`src/types/pos.ts`): quantity-aware топпинги + `toppingGroupFreeCounts` (snapshot `free_count` из `menu_item_topping_groups`).
-- Цена строки и payload в БД — `pos-cart-helpers.ts` (`calcPosToppingsCharge`, `getPosCartItemUnitPriceBani`, `posLinePayloadFromCartItem`, `getPosCartItemToppingDisplayLines`).
+- `PosCartItem` / `PosCartTopping` (`src/types/pos.ts`): quantity-aware топпинги + `toppingGroupFreeCounts` (snapshot `free_count` из `menu_item_topping_groups`). Опционально `PosCartItem.aggregatorUnitPriceBani` (база позиции без топпингов) и `PosCartTopping.aggregator_price_bani` — заполняются из каталога при добавлении в модалке.
+- Цена строки в UI и payload в БД — `pos-cart-helpers.ts`: `calcPosToppingsCharge(..., isAggregator)`, `getPosCartItemUnitPriceBani(item, isAggregator)`, `posLinePayloadFromCartItem(item, isAggregator)`, `posToppingsPayloadForDb(..., isAggregator)`, `getPosCartItemToppingDisplayLines`.
+- `PosProductModal` принимает `isAggregator={deliveryMode === 'aggregator'}`; при сохранении в `order_items` server actions (`addOrderItemsPos`, `replaceOrderItemsPos`, `updateOrderItemCompositionPos`) сами определяют `isAggregator` по `orders.delivery_mode` и вызывают `posLinePayloadFromCartItem`.
 - add/remove топпингов в модалке — `posAddTopping` / `posRemoveTopping` (`pos-cart-toppings.ts`); лимит группы — сумма `quantity` (`getTotalQuantityInGroup`).
 - `addCartItem`, `updateQty`, `removeLine`, `saveCartLineFromModal`, `handleClearCart` сначала меняют локальный `cart` (`applyOptimisticCart`) → синхронно обновляют карточку слева через `updateOrderLocalState` (item_count, total, discount, delivery_fee, bonuses_redeemed) → в фоне зовут server actions (`addOrderItemsPos`, `updateOrderItemQuantityPos`, `removeOrderItemPos`, `updateOrderItemCompositionPos`, `replaceOrderItemsPos`).
 - На ошибке — `rollbackOptimisticCart(snapshot, message)` + Sonner.
@@ -276,11 +282,11 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 
 **Скидки в мастере:** `getActiveDiscountRules` (trigger=`auto`) загружается на сервере; промокод через `PromoPanel` + `resolvePromoCode` (`discounts.ts`); финальный расчёт через `evaluateDiscounts` (`src/lib/discount-engine.ts`) с `excludedCategoryIds` из `usePosMenuCache`. Для заказов с сайта с непустым `promo_code` — флаг `skipSeedResolve` (быстрый показ без асинхронного `resolvePromoCode`).
 
-**Меню `⋯` мастера:** «Сделать доставкой» / «Сделать навыносом» (`updateOrderDeliveryModePos` — сбрасывает `aggregator`, `prep_deadline_at`, `scheduled_time` при переходе на pickup; нормализует `aggregator_card → cash`), «Очистить корзину», «Закрыть заказ» (`cancelOrderPos`).
+**Меню `⋯` мастера:** «Сделать доставкой» / «Сделать навыносом» (`updateOrderDeliveryModePos` — сбрасывает `aggregator`, `prep_deadline_at`, `scheduled_time` при переходе на pickup; нормализует `aggregator_card → cash`). При смене типа заказа **с** или **на** `aggregator`, если корзина не пуста — confirmation «При смене типа заказа корзина будет очищена»; после подтверждения — `replaceOrderItemsPos([])` и смена режима. «Очистить корзину», «Закрыть заказ» (`cancelOrderPos`).
 
 **«Отправить бегунок»** — `sendPosDraftToKitchen`:
 - Действует для `draft` / `new` / `confirmed` → `cooking`. Идемпотентно: уже в `cooking` — успех с тем же id.
-- Проставляет `cooking_started_at`, `updated_at`. Уменьшает `total` на `floor(bonus_points × 100)` bani, ставит `bonuses_redeemed`.
+- Проставляет `cooking_started_at`, `updated_at`. Пересчитывает `total` только под **списание бонусов**: берёт уже сохранённый `orders.total` (нетто), восстанавливает gross (`+ bonuses_redeemed × 100`), вычитает новое списание → `bonuses_redeemed`. **Не** пересчитывает subtotal из каталога/`aggregator_price_bani` — агрегаторные цены должны быть записаны в `order_items` на шаге «Оформление» (`replaceOrderItemsPos` / `addOrderItemsPos`).
 - Затем `redeemBonus` из `lib/bonus.ts` (если `bonuses_redeemed > 0` и есть `profile_id`). Ошибки только в `console.error`, заказ не откатывается.
 - Мастер остаётся открытым на том же `orderId`.
 
@@ -295,10 +301,11 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 ### Glovo (delivery_mode='aggregator')
 
 - Создание: `createDraftOrderPos({deliveryMode:'aggregator'})` → `aggregator='glovo'`, `payment_method='aggregator_card'`, `prep_deadline_at` +15 мин.
+- **Цены:** в корзине POS и в `order_items` используются `aggregator_price_bani` из `menu_items` / `menu_item_variants` / `toppings`, если заданы; иначе — обычная `price`. Логика — `posLinePayloadFromCartItem(cartItem, isAggregator)` (server: `update-order-items.ts`, `create-order-pos.ts` читают `delivery_mode`).
 - В мастере на «Деталях»: только блок «Заказ Glovo», оплата (наличные / `aggregator_card`), `comment`. Контакты и адрес скрыты. `runDetailsSaveToServer` передаёт `deliveryAddress=undefined`, `delivery_lat/lng=null`.
 - Оплата по `payOrder` сразу из `ready` (без перехода в `delivery`).
 - Карта Glovo → строка в `cash_transactions` не пишется (см. инварианты `payOrder`).
-- При смене режима на не-aggregator: `updateOrderDeliveryModePos` сбрасывает `aggregator`, `prep_deadline_at`, нормализует `aggregator_card → cash`.
+- При смене режима на не-aggregator: `updateOrderDeliveryModePos` сбрасывает `aggregator`, `prep_deadline_at`, нормализует `aggregator_card → cash`; при непустой корзине — confirmation и очистка (см. меню `⋯`).
 
 ### Шапка POS и входящие звонки
 
@@ -320,7 +327,7 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 - Загрузка через `fetchPosOrderById` + Realtime по заказу и строкам.
 - Кнопки внизу: `WebsiteNewActions` (принять/отклонить) для `new` + `source='website'`; «Передать курьеру» (`ready` + delivery, обычная); «Принять оплату» (`delivery` или (`ready` + aggregator/pickup)).
 - При `interactionMode='readonly'` (статус `done`, список «Выданные» в Sheet) — только просмотр.
-- Редактирование позиций: `POS_MENU_ITEM_FOR_MODAL_SELECT`, `posMenuRowForModal`, `PosProductModal` (quantity-aware топпинги, `ToppingStepperCard`). Минус при qty=1 снимает строку.
+- Редактирование позиций: `POS_MENU_ITEM_FOR_MODAL_SELECT`, `posMenuRowForModal`, `PosProductModal` (`isAggregator` по `order.delivery_mode`; quantity-aware топпинги, `ToppingStepperCard`). Минус при qty=1 снимает строку. `updateOrderItemCompositionPos({ cartItem })`.
 
 ### POS — прочее
 
@@ -395,9 +402,10 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 
 ### Поставки (supply_orders)
 
-- `supply_order_items.received_qty` — nullable. Если null, считается равным `quantity`.
+- `supply_order_items.received_qty` — nullable колонка в БД (legacy). **UI создания** (`supply-order-dialog.tsx`) использует только **Количество**; на сервере `stock_qty = received_qty ?? quantity` (для новых поставок — `quantity`).
 - `supply_orders.annulled_at` — timestamptz, NULL = активная поставка. Аннулирование не удаляет строки.
-- `createSupplyOrder` (`inventory/supplies/actions.ts`): вставка заказа и строк, затем пополнение `ingredient_stock` и `stock_ledger` по **`received_qty ?? quantity`**.
+- **Модалка поставки** (`inventory/supplies/supply-order-dialog.tsx`): колонки **Количество**, цена за ед. без/с НДС, НДС %, цена с НДС / ед., **Итого без НДС**, **Итого с НДС**. **Двусторонний пересчёт** — можно ввести любое из полей цены/итога, остальные заполняются автоматически (`priceAnchor`: `unit_ex` | `unit_inc` | `line_ex` | `line_inc`). Итоги по строке и футер поставки — `количество × цена`. Числовые инпуты — единая ширина (`SUPPLY_ROW_INPUT_CLASS`, 132px).
+- `createSupplyOrder` (`inventory/supplies/actions.ts`): вставка заказа и строк, `total_cost_ex_vat` / `total_cost_inc_vat` по строкам; пополнение склада — RPC **`apply_supply_order_stock_items`** (миграция `*_apply_supply_stock_rpc.sql`, service role): в одной транзакции для каждой позиции **upsert** `ingredient_stock` (средневзвешенный `avg_cost`, `COALESCE` для NULL) и `stock_ledger` (`movement_type='supply'`, `reference_type='supply_order'`). Количество на склад — `received_qty ?? quantity`. При ошибке RPC откатываются строки и заголовок заказа.
 - `annulSupplyOrder(orderId)` (service role): откат остатков и `avg_cost` (обратное средневзвешенное), `stock_ledger` (`movement_type='manual'`, `reference_type='supply_order'`, отрицательный `quantity_delta`, note «Аннулирование поставки»), затем `annulled_at`. Блокируется при недостатке остатка или если уже аннулирована. UI: кнопка в `supply-order-dialog` (режим view), бейдж в `supplies-table`.
 - `avg_cost` пересчитывается **средневзвешенно** по цене поставки (ex-VAT).
 - В UI: цены без НДС и с НДС синхронно (общая VAT % по строке); в БД — ex-VAT, в g/ml через `toStoragePrice`.
@@ -419,10 +427,18 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - `quantity` — нетто; `quantity_gross` — брутто.
 - Объём списания и себестоимость строки с `ingredient_id` — через `recipeIngredientStockStorageQty` (`product-recipe-ingredient-qty.ts`) = `COALESCE(quantity_gross, quantity)`.
 - **Комбо (вложенное блюдо):** `menu_item_ref_id` + `menu_item_ref_variant_id` (NULL если у целевого блюда нет вариантов). При ссылке: `quantity=1`, `ingredient_id`/`semi_finished_id` = NULL. CHECK в миграции.
+- **Embed полуфабрикатов:** при nested select `semi_finished_items(...)` указывать FK-hint `semi_finished_items!semi_finished_items_semi_finished_id_fkey(...)` (страница `/admin/inventory/semi-finished`, `RecipeEditorModal` → `product_recipes`). Для вложенного п/ф в составе — `semi_finished_ref_id` (FK на `semi_finished`), `ingredient_id` = NULL; для ингредиента — наоборот.
 - `ingredients.waste_percent` (0–100): в техкарте нетто = брутто × (1 − %/100).
 - `product_recipe_meta`: `output_qty`, `output_unit` (уникальность по `menu_item_id` + `variant_id`).
 - Расчёт суммарного списания по заказу: `src/lib/order-recipe-stock-deduction.ts` (`computeIngredientTotalsForOrder`). Вложенные комбо разворачиваются на **одну ступень**.
 - **Списание ингредиентов в `payOrder` пока не подключено.**
+
+### Полуфабрикаты (`semi_finished`, `semi_finished_items`)
+
+- `semi_finished`: `name`, `yield_qty`, `yield_unit` (г/мл/шт в БД), `brand_id`.
+- `semi_finished_items`: `semi_finished_id`, `quantity` (ед. хранения), **`ingredient_id`** XOR **`semi_finished_ref_id`** (вложенный п/ф; без рекурсии на себя в UI).
+- Себестоимость п/ф: сумма входа по строкам (`qty × ingredient_stock.avg_cost` для ингредиентов; для вложенного п/ф — `qty × cost_per_yield_unit` вложенного). Реализация — `src/lib/semi-finished-cost.ts`.
+- UI: `/admin/inventory/semi-finished` — список с колонкой себестоимости; диалог — тип строки, combobox, live-расчёт «Себестоимость п/ф» / «Себестоимость / {ед. выхода}». Цены для расчёта передаются с сервера (`ingredient_stock(avg_cost)`), не дублировать клиентский fetch с `brand_id` (склад общий).
 
 ### Топпинги
 
@@ -442,9 +458,10 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - При добавлении в корзину передаются `toppingGroupFreeCounts` и `toppingGroupLabels` из секций модалки.
 
 **POS — модалка позиции** (`pos-product-modal.tsx`, тот же `ToppingStepperCard`, `variant="pos"`):
-- Сетка `grid-cols-4`; загрузка групп с `free_count` из `menu_item_topping_groups`.
+- Сетка `grid-cols-4`; загрузка групп с `free_count` из `menu_item_topping_groups` и `aggregator_price_bani` у топпингов.
+- Проп `isAggregator` — расчёт unit price и payload корзины с агрегаторными ценами.
 - Та же UX-модель: tap по карточке = add, «−» = remove one; лимит группы по сумме `quantity`.
-- В payload корзины: `toppings: PosCartTopping[]`, `toppingGroupFreeCounts`, unit price через `calcPosToppingsCharge`.
+- В payload корзины: `toppings: PosCartTopping[]`, `toppingGroupFreeCounts`, `aggregatorUnitPriceBani` из варианта/позиции, unit price через `calcPosToppingsCharge` / `getPosCartItemUnitPriceBani`.
 
 **POS — корзина в мастере** (`order-form.tsx`, `CartItemRow`):
 - Строки топпингов: `+ Название ×N`; бесплатные — зелёным, платные — серым (`getPosCartItemToppingDisplayLines` + `calcToppingChargesById`).
@@ -457,6 +474,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 **Админка — привязка групп к позиции** (`menu-item-dialog.tsx`):
 - Чекбокс группы + поле «Бесплатных единиц» (min 0); helper: «0 = все платные».
 - Бейдж «N бесплатно» у прикреплённой группы при `free_count > 0`.
+- Поле **Glovo** (`aggregator_price_bani`) рядом с ценой: для позиции без размеров — на уровне `menu_items`; для `has_sizes` — в каждой строке варианта (`menu_item_variants`). Nullable, в UI — MDL.
 - Actions: `getMenuItemToppingGroups` / `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`: `topping_group_id`, `free_count`).
 
 **Витрина — корзина / checkout** (`CartItemToppingDetails`, `CartItemCard`, `order-summary`):
@@ -465,8 +483,8 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 
 **Прочее:**
 - `topping-max-selection.ts` — legacy-хелпер `nextSelectedToppingIdsWithGroupCap` (витрина, flat ids); POS больше не использует `nextSelectedByGroupWithCap`.
-- `topping_recipes` — состав топпинга. RPC `save_topping_with_recipes`.
-- В `/admin/toppings` действие «Существующий» — **копирует** топпинг в новую группу вместе со строками `topping_recipes`. Дубликаты по `name_ru`/`name_ro`/`price` в группе блокируются.
+- `topping_recipes` — состав топпинга. RPC `save_topping_with_recipes` (параметр `p_aggregator_price_bani`; миграция `*_toppings_aggregator_price_rpc.sql`).
+- В `/admin/toppings` — поле «Цена агрегатор (MDL)» в `topping-dialog.tsx`; действие «Существующий» — **копирует** топпинг в новую группу вместе со строками `topping_recipes`. Дубликаты по `name_ru`/`name_ro`/`price` в группе блокируются.
 
 ## Витрина
 
@@ -474,6 +492,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 
 - Языки: `ru`, `ro`. **DEFAULT_LANG = `ro`** (`src/lib/i18n/storefront.ts`).
 - persist key `lang` в localStorage. `<html lang="ro">` по умолчанию; `ClientChrome` синхронизирует `document.documentElement.lang` при смене.
+- Legacy-пути `/ru/*` и `/ro/*` на production редиректятся на корень (`vercel.json`, 301).
 - Динамические названия — `pickLocalizedName`, `pickLocalizedDescription`.
 - Server action `createOrder` принимает язык для snapshot заказа и текстов ошибок.
 
@@ -524,6 +543,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 ### Корзина и checkout
 
 - Адрес доставки с витрины → **одна строка** `orders.delivery_address`. Структурные `address_*` не заполняются.
+- **Checkout:** `checkout-view.tsx` ждёт гидратацию корзины через `usePersistStoreHydration(useCartStore.persist)` — при сбое rehydrate UI не блокируется навсегда (скелетон снимается в `finally`).
 - POS при открытии мастера разрезает через `posCheckoutAddressFieldsFromOrder` (`split-composite-delivery-address.ts`) если все четыре поля пусты. Извлекает Scara / Etaj / Apartament / Interfon (плюс RU/EN аналоги: подъезд/этаж/квартира/домофон, entrance/floor/apartment/intercom). Если хоть одно поле уже заполнено — строка не режется.
 - Точка самовывоза bd. Dacia 27: `storefront-pickup-location.ts`.
 - Меню для апсейла LOSOS использует `menu_categories.show_in_upsell`.
@@ -579,9 +599,9 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 | `/admin/customers/[id]` | RSC: профиль, баланс (`SUM(amount)`), до 50 транзакций, до 20 заказов. `BonusAdjustForm` → `POST /api/admin/bonus/adjust`. |
 | `/admin/settings/bonus` | `bonus_settings` id=1; `updateBonusSettings` (`%` в UI → доли в БД). |
 | `/admin/categories` | `menu_categories`: RU/RO, slug, `image_url`, `show_in_upsell`, `exclude_from_discounts`, `workshop`. |
-| `/admin/menu` | `menu_items` + `menu_item_variants`. Привязка групп топпингов с `free_count` (`menu-item-dialog.tsx`). `RecipeEditorModal` (типы строк: ингредиент, п/ф, комбо). `?edit={id}` автооткрытие. Бейджи покрытия рецептом. |
+| `/admin/menu` | `menu_items` + `menu_item_variants` (+ `aggregator_price_bani`). Привязка групп топпингов с `free_count` (`menu-item-dialog.tsx`). `RecipeEditorModal` (типы строк: ингредиент, п/ф, комбо; embed п/ф — FK-hint `semi_finished_items!semi_finished_items_semi_finished_id_fkey`). `?edit={id}` автооткрытие. Бейджи покрытия рецептом. |
 | `/admin/featured-menu` | «Популярное». |
-| `/admin/toppings` | Группы + топпинги; копирование между группами; состав через `topping_recipes` (RPC). |
+| `/admin/toppings` | Группы + топпинги (`aggregator_price_bani`); копирование между группами; состав через `topping_recipes` (RPC `save_topping_with_recipes`). |
 | `/admin/promotions` | Промо-баннеры RU/RO. |
 | `/admin/discount-rules` | `discount_rules` (все бренды, без `getAdminBrandId()`). Actions: `saveRule`, `deleteRule`, `toggleRuleActive` (service role). |
 | `/admin/promo-codes` | `promo_codes`. |
@@ -595,13 +615,15 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 | `/admin/inventory/suppliers` | Поставщики (CRUD без бренда; удаление с проверкой `supply_orders`). |
 | `/admin/inventory/ingredient-categories` | `ingredient_categories`; при удалении категории — `category_id=NULL` у связанных ингредиентов. |
 | `/admin/inventory/ingredients` | `ingredients` + `ingredient_stock`. Фильтр категории: клиент при <500 строк (`INGREDIENT_SERVER_FILTER_THRESHOLD`), сервер при ≥500 (`?category=`). Поле `waste_percent`. |
-| `/admin/inventory/semi-finished` | Полуфабрикаты; диалог состава работает напрямую в г/мл/шт. |
+| `/admin/inventory/semi-finished` | Полуфабрикаты (`semi-finished-dialog.tsx`, `semi-finished-table.tsx`). Embed: `semi_finished_items!…(*, ingredients(name, unit, ingredient_stock(avg_cost)), semi_finished_ref:semi_finished!semi_finished_items_semi_finished_ref_id_fkey(name, yield_unit))`. Состав: строка **ингредиент** или **вложенный п/ф** (`semi_finished_ref_id`; текущий п/ф в списке выбора исключается). Себестоимость — `computeSemiInputCostMdl` (`lib/semi-finished-cost.ts`) по `ingredient_stock.avg_cost` (общая карта цен с страницы, без фильтра по бренду). В таблице: колонки «Себест.», «Состав» (`truncate` + `title`). В диалоге: combobox с поиском (`IngredientCombobox`, `SemiFinishedCombobox` → `InventorySearchCombobox`). Редактор в г/мл/шт. |
 | `/admin/inventory/tech-cards` | Read-only обзор себестоимости. Ссылка «Открыть в меню» → `/admin/menu?edit={id}`. |
-| `/admin/inventory/supplies` | Поставки с `received_qty`; просмотр/аннулирование (`annulSupplyOrder`, `annulled_at`). |
-| `/admin/inventory/writeoffs` (+ `/new`) | Списания. |
+| `/admin/inventory/supplies` | Поставки: модалка с двусторонним расчётом цен/итогов, выбор ингредиента через `IngredientCombobox` (поиск), просмотр/аннулирование (`annulSupplyOrder`, `annulled_at`). |
+| `/admin/inventory/writeoffs` (+ `/new`) | Списания; выбор ингредиента — `IngredientCombobox`. |
 | `/admin/inventory/audits` (+ `/[id]`) | Инвентаризации (создание + карточка с подтверждением). |
 
 Единое поле поиска для всех inventory-таблиц — `InventorySearch` (`src/components/admin/inventory-search.tsx`); клиентский фильтр поверх данных, **кроме** фильтра категории на `/admin/inventory/ingredients` при ≥500 строк (сервер).
+
+**Combobox выбора ингредиента / п/ф** (длинные списки): `src/app/(admin)/admin/inventory/inventory-search-combobox.tsx` (Command + Popover, фильтр `contains` без учёта регистра). Обёртки: `supplies/ingredient-combobox.tsx`, `semi-finished-combobox.tsx`. Техкарты в меню — `RecipeNameCombobox` (`components/admin/menu/RecipeNameCombobox.tsx`). Короткие Select (категории, единицы, причины списания) — без замены.
 
 ## Данные и БД
 
@@ -613,9 +635,9 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 - `brands` — slug, name, UUID.
 - `menu_categories` — `name_ru/ro`, slug, `image_url`, `is_active`, `sort_order`, `is_condiment` (legacy), `show_in_upsell`, `exclude_from_discounts`, `workshop` (KDS-фильтр).
-- `menu_items` — `has_sizes` (true → цены из variants), `included_items` (JSON `{name_ru,name_ro}[]`), `category_id`, `brand_id`. Legacy: `is_default_condiment`, `condiment_default_qty` (не используются).
-- `menu_item_variants` — `name_ru/ro`, `price` (bani), `sort_order`, `weight_grams`, `menu_item_id`.
-- `topping_groups` (`max_selections` NULL/число), `toppings`, `topping_recipes`, `menu_item_topping_groups` (`menu_item_id`, `topping_group_id`, `free_count`).
+- `menu_items` — `has_sizes` (true → цены из variants), `included_items` (JSON `{name_ru,name_ro}[]`), `category_id`, `brand_id`, `aggregator_price_bani` (nullable bani). Legacy: `is_default_condiment`, `condiment_default_qty` (не используются).
+- `menu_item_variants` — `name_ru/ro`, `price` (bani), `aggregator_price_bani` (nullable bani), `sort_order`, `weight_grams`, `menu_item_id`.
+- `topping_groups` (`max_selections` NULL/число), `toppings` (`aggregator_price_bani`), `topping_recipes`, `menu_item_topping_groups` (`menu_item_id`, `topping_group_id`, `free_count`).
 - `promotions`, `featured_menu_items`, `promo_codes` (с `valid_channels`), `discount_rules`.
 - `delivery_zones` — `polygon` JSONB `[lat,lng][]`, `color` (TEXT, HEX), `delivery_price_bani`, `night_delivery_price_bani`, `active_from`, `active_to`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `is_active`, `sort_order`, `brand_id`.
 - `delivery_zone_schedules` — `zone_id`, `from_time`, `to_time`, `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `sort_order` (миграции `*_delivery_zone_schedules.sql`, `*_delivery_zones_night_and_window.sql` для legacy-колонок зоны).
@@ -625,15 +647,15 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 - `staff`, `shift_logs`, `courier_locations`.
 - `cash_sessions`, `cash_transactions`.
 - `pbx_calls` (ОАТС), `incoming_calls` (legacy MoldCell).
-- Склад: `ingredient_categories`, `ingredients`, `ingredient_stock`, `stock_ledger`, `semi_finished`, `semi_finished_items`, `product_recipes`, `product_recipe_meta`, `suppliers`, `supply_orders` (`annulled_at`), `supply_order_items`, `stock_writeoffs`, `stock_writeoff_items`, `stock_audits`, `stock_audit_items`.
+- Склад: `ingredient_categories`, `ingredients`, `ingredient_stock`, `stock_ledger`, `semi_finished`, `semi_finished_items` (`ingredient_id` **или** `semi_finished_ref_id` на строку состава), `product_recipes`, `product_recipe_meta`, `suppliers`, `supply_orders` (`annulled_at`), `supply_order_items`, `stock_writeoffs`, `stock_writeoff_items`, `stock_audits`, `stock_audit_items`.
 
 ### Типы
 
-`src/types/database.ts` — `OrderStatus`, `Order`, `OrderItem`, `OrderItemTopping` (`toppings` JSONB), `MenuItem`, `MenuItemVariant`, `MenuItemToppingGroup` (`free_count`), `CashSession`, …
+`src/types/database.ts` — `OrderStatus`, `Order`, `OrderItem`, `OrderItemTopping` (`toppings` JSONB), `MenuItem` / `MenuItemVariant` / `Topping` (`aggregator_price_bani?`), `MenuItemToppingGroup` (`free_count`), `CashSession`, …
 
 `src/types/cart.ts` — `CartItem`, `CartTopping` (`quantity`, `topping_group_id`), `toppingGroupFreeCounts`, `toppingGroupLabels`.
 
-`src/types/pos.ts` — `PosCartItem`, `PosCartTopping` (та же форма, что `CartTopping` + `toppingGroupFreeCounts` на строке корзины POS).
+`src/types/pos.ts` — `PosCartItem` (`aggregatorUnitPriceBani?`), `PosCartTopping` (`aggregator_price_bani?`, та же форма что `CartTopping` + `toppingGroupFreeCounts` на строке корзины POS).
 
 `src/lib/supabase/types.ts` — частично генерированный Database (минимальные наброски). Перегенерировать через `supabase gen types` при появлении новых миграций.
 
@@ -698,9 +720,9 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `admin/cash-sessions.ts` — `listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`.
 - `inventory/ingredient-categories.ts` — CRUD категорий (service role).
 - `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive` (service role).
-- `(admin)/admin/menu/actions.ts` — CRUD позиций; `getMenuItemToppingGroups`, `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`).
-- `(admin)/admin/toppings/actions.ts` — `save_topping_with_recipes` (RPC).
-- Inventory: `supplies/actions.ts` (`createSupplyOrder`, `annulSupplyOrder`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role).
+- `(admin)/admin/menu/actions.ts` — CRUD позиций (`aggregator_price_bani`); `getMenuItemToppingGroups`, `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`).
+- `(admin)/admin/toppings/actions.ts` — `save_topping_with_recipes` (RPC, `p_aggregator_price_bani`).
+- Inventory: `supplies/actions.ts` (`createSupplyOrder` → RPC `apply_supply_order_stock_items`, `annulSupplyOrder`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role). Полуфабрикаты: `(admin)/admin/inventory/semi-finished/actions.ts` (`createSemiFinished`, `updateSemiFinished`).
 - `staff/staff-actions.ts`.
 
 ### POS (`src/lib/actions/pos/`)
@@ -710,7 +732,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `cash-session.ts` — `openCashSession`, `getCashSession` (`payment_breakdown`, `manual_breakdown`, `recent_manual_transactions`), `getExpectedInDrawerBani`, `getActiveOrdersCountForShift`, `createCashTransaction`, `closeCashSession`, **`payOrder`** (см. инварианты в разделе POS / Касса).
 - `create-draft-order.ts` — `createDraftOrderPos`.
 - `update-order-brand-pos`, `update-order-details-pos`, `update-order-items`, `updateOrderDeliveryModePos`.
-- `send-pos-draft-to-kitchen.ts` — `draft`/`new`/`confirmed` → `cooking`, `cooking_started_at`, пересчёт `total`/`bonuses_redeemed`, `redeemBonus`.
+- `send-pos-draft-to-kitchen.ts` — `draft`/`new`/`confirmed` → `cooking`, `cooking_started_at`; пересчёт `total`/`bonuses_redeemed` только под списание бонусов (не из каталога); `redeemBonus`.
 - `accept-order-pos`, `reject-order-pos` — для `new` + `source='website'`.
 - `cancel-order-pos`, `delete-draft-order-pos`.
 - `assign-courier-pos.ts` — `assignCourierPos`, `changeCourierPos`. После — `sendCourierAssignmentTelegram`.
@@ -720,8 +742,8 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `update-order-status-kds.ts` — `cooking → ready`.
 - `customers-pos-actions.ts` — `posLookupCustomer` (с `bonus_settings`), `posSaveCustomer`, `posSaveCustomerAddress`.
 - `check-delivery-zone-pos.ts` — `checkDeliveryZoneByAddress` (возвращает `resolvedParams` при `in_zone`), `getZonesByBrandSlug` (+ `isZoneAvailableNow`, `attachResolvedZoneParams`).
-- `create-order-pos.ts` — `order_items.toppings` с `quantity`.
-- `update-order-items.ts` — add/replace/composition; toppings JSON `{ name, price, quantity }`.
+- `create-order-pos.ts` — legacy one-shot создание; `items: PosCartItem[]`, `deliveryMode` incl. `aggregator`; `order_items` через `posLinePayloadFromCartItem(cartItem, isAggregator)`.
+- `update-order-items.ts` — `addOrderItemsPos` / `replaceOrderItemsPos` / `updateOrderItemCompositionPos` принимают `PosCartItem[]` (или `cartItem`); `isAggregator = (delivery_mode === 'aggregator')`; insert/update через `posLinePayloadFromCartItem`. toppings JSON `{ name, price, quantity }`.
 
 ### Полезные lib (не actions)
 
@@ -732,11 +754,14 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/discount-engine.ts` — `evaluateDiscounts`, `isRuleScheduleActive` (pure, без Supabase).
 - `lib/order-recipe-stock-deduction.ts` — `computeIngredientTotalsForOrder`.
 - `lib/inventory-units.ts`.
+- `lib/ingredient-avg-cost.ts` — `parseIngredientAvgCostStorage` из embed `ingredient_stock`.
+- `lib/semi-finished-cost.ts` — `computeSemiInputCostMdl`, `semiCostPerStorageUnitMdl`, `buildSemiFinishedCatalogMap` (рекурсивная себестоимость п/ф по составу).
 - `lib/recipe-editor-qty.ts`, `lib/recipe-composition-row-updates.ts`, `lib/recipe-composition-waste.ts`, `lib/product-recipe-ingredient-qty.ts`.
 - `lib/topping-pricing.ts` — `calcToppingGroupCharge`, `calcToppingChargesById`, `getFreeUnitsRemaining`, `formatStorefrontToppingGroupHeader`.
 - `lib/topping-max-selection.ts`, `lib/cart-toppings.ts`, `lib/cart-helpers.ts` (`getCartItemToppingDisplayGroups`, `getCartItemSizeLabel`).
 - `lib/pos-cart-toppings.ts` — `posAddTopping`, `posRemoveTopping`, `migratePosCartToppingsFromLegacy`, `posCartToppingsConfigKey`.
-- `lib/pos-cart-helpers.ts` — `calcPosToppingsCharge`, `getPosCartItemUnitPriceBani`, `posLinePayloadFromCartItem`, `getPosCartItemToppingDisplayLines`.
+- `lib/pos-cart-helpers.ts` — `calcPosToppingsCharge(..., isAggregator)`, `getPosCartItemUnitPriceBani(item, isAggregator)`, `posLinePayloadFromCartItem(item, isAggregator)`, `posToppingsPayloadForDb(..., isAggregator)`, `getPosCartItemToppingDisplayLines`.
+- `lib/pos/menu-item-modal-row.ts` — `POS_MENU_ITEM_FOR_MODAL_SELECT` (вкл. `aggregator_price_bani`), `posMenuRowForModal`, `posVariantsFromMenuEmbed`.
 - `components/topping-stepper-card.tsx` — общая карточка топпинга (витрина + POS).
 - `lib/data/storefront-item-toppings.ts` — `fetchStorefrontMenuItemToppingGroups` (`free_count` с `menu_item_topping_groups`).
 - `lib/order-item-size-display.ts`.
@@ -745,7 +770,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/seo/brand-seo.ts`, `lib/seo/menu-item-image-alt.ts`.
 - `lib/pbx/diversion-brand-slug.ts`.
 - `lib/pos/alert-sound.ts`, `kds-wakeup.ts`, `scheduled-slots.ts`, `split-composite-delivery-address.ts`, `pos-brand-slug-cookie.ts`, `menu-item-modal-row.ts`, `use-incoming-call.ts`.
-- `hooks/use-store-open.ts`, `lib/store-hours.ts` — часы витрины по `BrandConfig` (Chisinau).
+- `hooks/use-store-open.ts`, `hooks/use-persist-store-hydration.ts`, `lib/store-hours.ts` — часы витрины по `BrandConfig` (Chisinau).
 - `lib/store/cart-store`, `store-closed-store`, `auth-store`, `pos-order-from-call-bridge`, `pos-menu-cache`, `language-store`, `delivery-store` (fee через `resolvedParams.delivery_price_bani`).
 - `lib/supabase/server.ts`, `client.ts`, `service-role.ts`.
 - `lib/leaflet-fix-default-icon.ts`.
@@ -810,6 +835,10 @@ PBX_WEBHOOK_TOKEN=
 | `lint` | `next lint` |
 | `setup:telegram` | `npx tsx scripts/setup-telegram-webhook.ts` |
 
+## Deploy
+
+Корневой `vercel.json`: **301-редиректы** `/ru`, `/ru/*`, `/ro`, `/ro/*` → корень сайта (`permanent: true`). Язык витрины — в localStorage (`lang`), не в URL.
+
 ## Dev notes
 
 - `tsconfig.json`: `"baseUrl": "."` для алиаса `@/*`.
@@ -827,7 +856,8 @@ PBX_WEBHOOK_TOKEN=
 - Guard checkout по сессии (если потребуется).
 - Подключить `night_delivery_price_bani` / `active_from` / `active_to` зоны в `resolveZoneParams` (сейчас только слоты + базовые колонки; колонки в БД — миграция `*_delivery_zones_night_and_window.sql`, применить на remote Supabase).
 - Доработать gallery и lunch sets в админке.
-- Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types`.
+- Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types` (в т.ч. `semi_finished_items.semi_finished_ref_id`, RPC `apply_supply_order_stock_items`).
+- Применить на remote Supabase миграцию `*_apply_supply_stock_rpc.sql`, если `avg_cost` после поставки остаётся NULL.
 - Подключить списание ингредиентов в `payOrder` через `computeIngredientTotalsForOrder`.
 - UI для детали `/admin/finance/cash-sessions/[id]` (сейчас scaffold).
 - Voiding кассовых транзакций в админке.

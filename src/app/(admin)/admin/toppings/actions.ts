@@ -90,6 +90,7 @@ export async function createTopping(data: {
   name_ru: string
   name_ro: string
   price: number
+  aggregator_price_bani: number | null
   sort_order: number
   is_active: boolean
   image_url: string | null
@@ -105,6 +106,7 @@ export async function createTopping(data: {
     p_name_ru: data.name_ru.trim(),
     p_name_ro: data.name_ro.trim(),
     p_price: data.price,
+    p_aggregator_price_bani: data.aggregator_price_bani,
     p_sort_order: data.sort_order,
     p_is_active: data.is_active,
     p_image_url: data.image_url,
@@ -208,6 +210,7 @@ export async function updateTopping(
     name_ru: string
     name_ro: string
     price: number
+    aggregator_price_bani: number | null
     sort_order: number
     is_active: boolean
     image_url: string | null
@@ -224,6 +227,7 @@ export async function updateTopping(
     p_name_ru: data.name_ru.trim(),
     p_name_ro: data.name_ro.trim(),
     p_price: data.price,
+    p_aggregator_price_bani: data.aggregator_price_bani,
     p_sort_order: data.sort_order,
     p_is_active: data.is_active,
     p_image_url: data.image_url,

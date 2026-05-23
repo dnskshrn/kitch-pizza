@@ -10,22 +10,42 @@ export type SemiFinishedPayload = {
 }
 
 export type SemiFinishedItemInput = {
-  ingredient_id: string
+  ingredient_id: string | null
+  semi_finished_ref_id: string | null
   quantity: number
 }
 
+function itemRefKey(row: SemiFinishedItemInput): string | null {
+  const ing = (row.ingredient_id ?? "").trim()
+  const semi = (row.semi_finished_ref_id ?? "").trim()
+  if (ing && semi) return null
+  if (ing) return `ing:${ing}`
+  if (semi) return `semi:${semi}`
+  return null
+}
+
 function assertValidItems(items: SemiFinishedItemInput[]) {
-  const ids = items.map((i) => i.ingredient_id).filter(Boolean)
-  if (ids.length === 0) {
-    throw new Error("Добавьте хотя бы один ингредиент")
+  if (items.length === 0) {
+    throw new Error("Добавьте хотя бы один компонент состава")
   }
-  const unique = new Set(ids)
-  if (unique.size !== ids.length) {
-    throw new Error("Один и тот же ингредиент указан дважды")
+
+  const keys: string[] = []
+  for (const row of items) {
+    const key = itemRefKey(row)
+    if (!key) {
+      throw new Error("У каждой строки должен быть выбран ингредиент или полуфабрикат")
+    }
+    keys.push(key)
   }
+
+  const unique = new Set(keys)
+  if (unique.size !== keys.length) {
+    throw new Error("Один и тот же компонент указан дважды")
+  }
+
   for (const row of items) {
     if (!Number.isFinite(row.quantity) || row.quantity <= 0) {
-      throw new Error("Укажите положительное количество для каждого ингредиента")
+      throw new Error("Укажите положительное количество для каждой строки")
     }
   }
 }
@@ -34,7 +54,7 @@ export async function createSemiFinished(
   payload: SemiFinishedPayload,
   items: SemiFinishedItemInput[]
 ) {
-  const cleaned = items.filter((i) => i.ingredient_id.trim() !== "")
+  const cleaned = items.filter((i) => itemRefKey(i) != null)
   assertValidItems(cleaned)
   const supabase = await createClient()
 
@@ -52,7 +72,8 @@ export async function createSemiFinished(
 
   const rows = cleaned.map((i) => ({
     semi_finished_id: row.id,
-    ingredient_id: i.ingredient_id,
+    ingredient_id: (i.ingredient_id ?? "").trim() || null,
+    semi_finished_ref_id: (i.semi_finished_ref_id ?? "").trim() || null,
     quantity: i.quantity,
   }))
 
@@ -69,7 +90,7 @@ export async function updateSemiFinished(
   payload: SemiFinishedPayload,
   items: SemiFinishedItemInput[]
 ) {
-  const cleaned = items.filter((i) => i.ingredient_id.trim() !== "")
+  const cleaned = items.filter((i) => itemRefKey(i) != null)
   assertValidItems(cleaned)
   const supabase = await createClient()
 
@@ -93,7 +114,8 @@ export async function updateSemiFinished(
 
   const rows = cleaned.map((i) => ({
     semi_finished_id: id,
-    ingredient_id: i.ingredient_id,
+    ingredient_id: (i.ingredient_id ?? "").trim() || null,
+    semi_finished_ref_id: (i.semi_finished_ref_id ?? "").trim() || null,
     quantity: i.quantity,
   }))
 

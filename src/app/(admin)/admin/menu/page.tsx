@@ -1,6 +1,11 @@
 import { Suspense } from "react"
 import { getAdminBrandId } from "@/lib/get-admin-brand-id"
-import { recipeIngredientStockStorageQty } from "@/lib/product-recipe-ingredient-qty"
+import {
+  buildMenuItemRecipeCostMap,
+  buildProductRecipeCostContext,
+  enrichProductRecipeCostContext,
+  type ProductRecipeCostLine,
+} from "@/lib/product-recipe-cost"
 import { createClient } from "@/lib/supabase/server"
 import type { MenuItem } from "@/types/database"
 import { getToppingGroups } from "./actions"
@@ -8,72 +13,6 @@ import { MenuTable } from "./menu-table"
 
 type MenuItemRow = MenuItem & {
   category: { id: string; name_ru: string; name_ro: string } | null
-}
-
-type RecipeCostRow = {
-  menu_item_id: string
-  variant_id: string | null
-  quantity: number
-  quantity_gross?: number | null
-  ingredients: unknown
-}
-
-function firstAvgCost(stock: unknown): number {
-  if (stock == null) return 0
-  if (Array.isArray(stock)) {
-    const row = stock[0] as { avg_cost?: unknown } | undefined
-    return Number(row?.avg_cost ?? 0) || 0
-  }
-  return Number((stock as { avg_cost?: unknown }).avg_cost ?? 0) || 0
-}
-
-function ingredientLineCostMdl(row: RecipeCostRow): number {
-  const ingRaw = row.ingredients
-  if (ingRaw == null) return 0
-  const ing = Array.isArray(ingRaw) ? ingRaw[0] : ingRaw
-  if (!ing || typeof ing !== "object") return 0
-  const stock = (ing as { ingredient_stock?: unknown }).ingredient_stock
-  const avgCost = firstAvgCost(stock)
-  if (!avgCost) return 0
-  const qty = recipeIngredientStockStorageQty({
-    quantity: Number(row.quantity) || 0,
-    quantity_gross: row.quantity_gross ?? null,
-  })
-  return qty * avgCost
-}
-
-function buildTheoreticalCostMap(
-  recipeRows: RecipeCostRow[] | null,
-): Record<string, number> {
-  type Bucket = { base: number; byVariant: Map<string, number> }
-  const byItem = new Map<string, Bucket>()
-
-  for (const row of recipeRows ?? []) {
-    const line = ingredientLineCostMdl(row)
-    if (line <= 0) continue
-    const itemId = row.menu_item_id
-    let bucket = byItem.get(itemId)
-    if (!bucket) {
-      bucket = { base: 0, byVariant: new Map() }
-      byItem.set(itemId, bucket)
-    }
-    if (row.variant_id == null) {
-      bucket.base += line
-    } else {
-      const vid = row.variant_id
-      bucket.byVariant.set(vid, (bucket.byVariant.get(vid) ?? 0) + line)
-    }
-  }
-
-  const out: Record<string, number> = {}
-  for (const [itemId, bucket] of byItem) {
-    if (bucket.base > 0) {
-      out[itemId] = bucket.base
-    } else if (bucket.byVariant.size > 0) {
-      out[itemId] = Math.min(...bucket.byVariant.values())
-    }
-  }
-  return out
 }
 
 export default async function AdminMenuPage() {
@@ -125,16 +64,34 @@ export default async function AdminMenuPage() {
   let costMap: Record<string, number> = {}
 
   if (itemIds.length > 0) {
-    const { data: recipeCosts } = await supabase.from("product_recipes").select(`
-        menu_item_id,
-        variant_id,
-        quantity,
-        quantity_gross,
-        ingredients(unit, ingredient_stock(avg_cost))
-      `).in("menu_item_id", itemIds)
+    const [recipeRes, ingRes, semiRes] = await Promise.all([
+      supabase
+        .from("product_recipes")
+        .select(
+          "menu_item_id, variant_id, ingredient_id, semi_finished_id, menu_item_ref_id, menu_item_ref_variant_id, quantity, quantity_gross",
+        )
+        .in("menu_item_id", itemIds),
+      supabase
+        .from("ingredients")
+        .select("id, ingredient_stock(avg_cost)"),
+      supabase
+        .from("semi_finished")
+        .select(
+          "id, yield_qty, semi_finished_items!semi_finished_items_semi_finished_id_fkey(quantity, ingredient_id, semi_finished_ref_id)",
+        ),
+    ])
 
-    const typed = (recipeCosts ?? []) as unknown as RecipeCostRow[]
-    costMap = buildTheoreticalCostMap(typed)
+    const recipeLines = (recipeRes.data ?? []) as ProductRecipeCostLine[]
+    const baseCtx = buildProductRecipeCostContext(
+      (ingRes.data ?? []) as { id: string; ingredient_stock?: unknown }[],
+      (semiRes.data ?? []) as Record<string, unknown>[],
+    )
+    const ctx = enrichProductRecipeCostContext(
+      baseCtx,
+      recipeLines,
+      rows.map((r) => ({ id: r.id, has_sizes: Boolean(r.has_sizes) })),
+    )
+    costMap = buildMenuItemRecipeCostMap(recipeLines, ctx)
   }
 
   return (

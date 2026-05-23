@@ -11,24 +11,34 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Pencil, Plus } from "lucide-react"
-import type { IngredientSelectOption, SemiFinishedWithItems } from "./types"
+import type { IngredientSelectOption, SemiFinishedListRow } from "./types"
 import { InventorySearch } from "@/components/admin/inventory-search"
 import { SemiFinishedDialog } from "./semi-finished-dialog"
 import { displayUnit, toDisplayQty } from "@/lib/inventory-units"
+
+function formatCostMdl(cost: number | null): string {
+  if (cost == null || !Number.isFinite(cost) || cost <= 0) return "—"
+  return `${cost.toFixed(2)} MDL`
+}
 
 function formatComposition(
   items: SemiFinishedWithItems["semi_finished_items"]
 ): string {
   if (!items.length) return "—"
   const parts = items.map((it) => {
-    const name = it.ingredients?.name ?? "?"
-    const u = it.ingredients?.unit
-      ? displayUnit(it.ingredients.unit)
-      : ""
-    const qDisp = it.ingredients?.unit
-      ? toDisplayQty(Number(it.quantity), it.ingredients.unit)
+    const isSemiRef = Boolean(it.semi_finished_ref_id)
+    const name = isSemiRef
+      ? (it.semi_finished_ref?.name ?? "?")
+      : (it.ingredients?.name ?? "?")
+    const unit = isSemiRef
+      ? it.semi_finished_ref?.yield_unit
+      : it.ingredients?.unit
+    const u = unit ? displayUnit(unit) : ""
+    const qDisp = unit
+      ? toDisplayQty(Number(it.quantity), unit)
       : String(it.quantity)
-    return `${name} (${qDisp} ${u})`.trim()
+    const prefix = isSemiRef ? "п/ф " : ""
+    return `${prefix}${name} (${qDisp} ${u})`.trim()
   })
   return parts.join(", ")
 }
@@ -36,12 +46,14 @@ function formatComposition(
 export function SemiFinishedTable({
   rows,
   ingredientOptions,
+  ingredientCostById,
 }: {
-  rows: SemiFinishedWithItems[]
+  rows: SemiFinishedListRow[]
   ingredientOptions: IngredientSelectOption[]
+  ingredientCostById: Record<string, number>
 }) {
   const [createOpen, setCreateOpen] = useState(false)
-  const [editRow, setEditRow] = useState<SemiFinishedWithItems | null>(null)
+  const [editRow, setEditRow] = useState<SemiFinishedListRow | null>(null)
   const [search, setSearch] = useState("")
 
   const filteredRows = useMemo(() => {
@@ -73,12 +85,13 @@ export function SemiFinishedTable({
         />
       </div>
 
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
             <TableHead>Название</TableHead>
-            <TableHead>Выход</TableHead>
-            <TableHead>Состав</TableHead>
+            <TableHead className="w-36">Выход</TableHead>
+            <TableHead className="w-32 text-right">Себест.</TableHead>
+            <TableHead className="max-w-md w-80">Состав</TableHead>
             <TableHead className="w-28 text-right">Действия</TableHead>
           </TableRow>
         </TableHeader>
@@ -86,7 +99,7 @@ export function SemiFinishedTable({
           {rows.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={4}
+                colSpan={5}
                 className="text-muted-foreground text-center"
               >
                 Пока нет полуфабрикатов
@@ -95,14 +108,28 @@ export function SemiFinishedTable({
           ) : filteredRows.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={4}
+                colSpan={5}
                 className="text-muted-foreground text-center"
               >
                 Ничего не найдено
               </TableCell>
             </TableRow>
           ) : (
-            filteredRows.map((row) => (
+            filteredRows.map((row) => {
+              const composition = formatComposition(row.semi_finished_items)
+              const costPerUnit =
+                row.costMdl != null && row.yield_qty > 0
+                  ? row.costMdl / row.yield_qty
+                  : null
+              const costTitle =
+                row.costMdl != null
+                  ? `Всего: ${formatCostMdl(row.costMdl)}${
+                      costPerUnit != null
+                        ? ` · ${costPerUnit.toFixed(4)} MDL/${displayUnit(row.yield_unit)}`
+                        : ""
+                    }`
+                  : undefined
+              return (
               <TableRow key={row.id}>
                 <TableCell className="font-medium">{row.name}</TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">
@@ -111,8 +138,17 @@ export function SemiFinishedTable({
                   }).format(toDisplayQty(row.yield_qty, row.yield_unit))}{" "}
                   {displayUnit(row.yield_unit)}
                 </TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {formatComposition(row.semi_finished_items)}
+                <TableCell
+                  className="text-right text-sm tabular-nums"
+                  title={costTitle}
+                >
+                  {formatCostMdl(row.costMdl)}
+                </TableCell>
+                <TableCell
+                  className="max-w-md text-muted-foreground text-sm"
+                  title={composition}
+                >
+                  <span className="block truncate">{composition}</span>
                 </TableCell>
                 <TableCell className="text-right">
                   <Button
@@ -125,7 +161,8 @@ export function SemiFinishedTable({
                   </Button>
                 </TableCell>
               </TableRow>
-            ))
+              )
+            })
           )}
         </TableBody>
       </Table>
@@ -136,6 +173,8 @@ export function SemiFinishedTable({
         mode="create"
         semiFinished={null}
         ingredientOptions={ingredientOptions}
+        ingredientCostById={ingredientCostById}
+        semiFinishedCatalog={rows}
       />
       <SemiFinishedDialog
         open={!!editRow}
@@ -143,6 +182,8 @@ export function SemiFinishedTable({
         mode="edit"
         semiFinished={editRow}
         ingredientOptions={ingredientOptions}
+        ingredientCostById={ingredientCostById}
+        semiFinishedCatalog={rows}
       />
     </>
   )

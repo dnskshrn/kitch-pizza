@@ -1,8 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState, useTransition } from "react"
-import type { SemiFinishedItem } from "@/types/database"
-import { createClient } from "@/lib/supabase/client"
 import {
   createSemiFinished,
   updateSemiFinished,
@@ -15,6 +13,13 @@ import {
   parseRecipeQtyStrict,
   recipeEditorStorageUnitShort,
 } from "@/lib/recipe-editor-qty"
+import { displayUnit, toDisplayPrice } from "@/lib/inventory-units"
+import { IngredientCombobox } from "../supplies/ingredient-combobox"
+import { SemiFinishedCombobox } from "../semi-finished-combobox"
+import {
+  buildSemiFinishedCatalogMap,
+  semiCostPerStorageUnitMdl,
+} from "@/lib/semi-finished-cost"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -40,20 +45,6 @@ const UNITS = [
   { value: "pcs" as const, label: "шт" },
 ]
 
-const EMPTY = "__none__"
-
-function firstRelation<T extends Record<string, unknown>>(rel: unknown): T | null {
-  if (rel == null) return null
-  if (Array.isArray(rel)) return (rel[0] as T | undefined) ?? null
-  return rel as T
-}
-
-function readAdminBrandSlug(): string | null {
-  if (typeof document === "undefined") return null
-  const m = document.cookie.match(/(?:^|;\s*)admin-brand-slug=([^;]*)/)
-  return m ? decodeURIComponent(m[1].trim()) : null
-}
-
 function formatMdl2(n: number): string {
   return `${n.toFixed(2)} MDL`
 }
@@ -66,8 +57,11 @@ type EnrichedIngredient = {
   avgCost: number | null
 }
 
+type ItemRowType = "ingredient" | "semi"
+
 type ItemRow = {
-  ingredientId: string
+  rowType: ItemRowType
+  refId: string
   quantityStr: string
 }
 
@@ -77,29 +71,30 @@ type Props = {
   mode: "create" | "edit"
   semiFinished: SemiFinishedWithItems | null
   ingredientOptions: IngredientSelectOption[]
+  ingredientCostById: Record<string, number>
+  semiFinishedCatalog: SemiFinishedWithItems[]
 }
 
-function normalizeItems(
-  raw: unknown
-): Array<
-  SemiFinishedItem & {
-    ingredients: { name: string; unit: "g" | "ml" | "pcs" } | null
-  }
-> {
+function normalizeItems(raw: unknown): SemiFinishedWithItems["semi_finished_items"] {
   if (!raw) return []
   const list = Array.isArray(raw) ? raw : [raw]
   return list.map((row) => {
-    const r = row as {
-      ingredients?:
-        | { name: string; unit: "g" | "ml" | "pcs" }
-        | { name: string; unit: "g" | "ml" | "pcs" }[]
-        | null
-    } & SemiFinishedItem
+    const r = row as Record<string, unknown>
     const ing = r.ingredients
     const ingredients = Array.isArray(ing)
-      ? ing[0] ?? null
-      : ing ?? null
-    return { ...r, ingredients }
+      ? (ing[0] as { name: string; unit: "g" | "ml" | "pcs" } | null) ?? null
+      : (ing as { name: string; unit: "g" | "ml" | "pcs" } | null) ?? null
+    const semiRef = r.semi_finished_ref
+    const semi_finished_ref = Array.isArray(semiRef)
+      ? (semiRef[0] as { name: string; yield_unit: "g" | "ml" | "pcs" } | null) ??
+        null
+      : (semiRef as { name: string; yield_unit: "g" | "ml" | "pcs" } | null) ??
+        null
+    return {
+      ...(r as SemiFinishedWithItems["semi_finished_items"][number]),
+      ingredients,
+      semi_finished_ref,
+    }
   })
 }
 
@@ -109,110 +104,75 @@ export function SemiFinishedDialog({
   mode,
   semiFinished,
   ingredientOptions,
+  ingredientCostById,
+  semiFinishedCatalog,
 }: Props) {
   const [name, setName] = useState("")
   const [yieldQtyStr, setYieldQtyStr] = useState("")
   const [yieldUnit, setYieldUnit] = useState<"g" | "ml" | "pcs">("g")
   const [itemRows, setItemRows] = useState<ItemRow[]>([
-    { ingredientId: "", quantityStr: "" },
+    { rowType: "ingredient", refId: "", quantityStr: "" },
   ])
   const [pending, startTransition] = useTransition()
-  const [enrichedIngredients, setEnrichedIngredients] = useState<
-    EnrichedIngredient[]
-  >([])
-  const [ingredientsLoading, setIngredientsLoading] = useState(false)
-  const [ingredientsError, setIngredientsError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setIngredientsLoading(true)
-    setIngredientsError(null)
-
-    ;(async () => {
-      const supabase = createClient()
-      let brandId: string | null = semiFinished?.brand_id ?? null
-      if (!brandId) {
-        const slug = readAdminBrandSlug()
-        if (slug) {
-          const { data } = await supabase
-            .from("brands")
-            .select("id")
-            .eq("slug", slug)
-            .eq("is_active", true)
-            .maybeSingle()
-          brandId = data?.id ?? null
-        }
-      }
-
-      if (!brandId) {
-        if (!cancelled) {
-          setIngredientsLoading(false)
-          setIngredientsError("Не удалось определить бренд")
-          setEnrichedIngredients([])
-        }
-        return
-      }
-
-      const { data, error } = await supabase
-        .from("ingredients")
-        .select("id, name, unit, ingredient_stock(avg_cost)")
-        .eq("brand_id", brandId)
-        .order("name")
-
-      if (cancelled) return
-      setIngredientsLoading(false)
-
-      if (error) {
-        setIngredientsError(error.message)
-        setEnrichedIngredients([])
-        return
-      }
-
-      const rows = (data ?? []).map((row: unknown) => {
-        const r = row as {
-          id: string
-          name: string
-          unit: "g" | "ml" | "pcs"
-          ingredient_stock: unknown
-        }
-        const st = firstRelation<{ avg_cost?: unknown }>(r.ingredient_stock)
-        let avgCost: number | null = null
-        if (st && "avg_cost" in st && st.avg_cost != null) {
-          const v = Number(st.avg_cost)
-          avgCost = Number.isFinite(v) ? v : null
-        }
-        return {
-          id: r.id,
-          name: r.name,
-          unit: r.unit,
-          avgCost,
-        } satisfies EnrichedIngredient
-      })
-      setEnrichedIngredients(rows)
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [open, semiFinished?.brand_id])
+  const ingredientCostMap = useMemo(
+    () => new Map(Object.entries(ingredientCostById)),
+    [ingredientCostById]
+  )
 
   const ingredientById = useMemo(() => {
     const map = new Map<string, EnrichedIngredient>()
-    for (const ing of enrichedIngredients) map.set(ing.id, ing)
-    return map
-  }, [enrichedIngredients])
-
-  const selectOptions: IngredientSelectOption[] = useMemo(() => {
-    if (enrichedIngredients.length > 0) {
-      return enrichedIngredients.map((i) => ({
-        id: i.id,
-        name: i.name,
-        unit: i.unit,
-      }))
+    for (const o of ingredientOptions) {
+      const storageCost = ingredientCostById[o.id]
+      map.set(o.id, {
+        id: o.id,
+        name: o.name,
+        unit: o.unit,
+        avgCost:
+          storageCost != null && storageCost > 0 ? storageCost : null,
+      })
     }
-    return ingredientOptions
-  }, [enrichedIngredients, ingredientOptions])
+    return map
+  }, [ingredientOptions, ingredientCostById])
+
+  const semiCatalogById = useMemo(
+    () => buildSemiFinishedCatalogMap(semiFinishedCatalog),
+    [semiFinishedCatalog]
+  )
+
+  const semiSelectOptions = useMemo(() => {
+    const excludeId = mode === "edit" ? semiFinished?.id : null
+    return semiFinishedCatalog
+      .filter((s) => s.id !== excludeId)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        yield_unit: s.yield_unit,
+        yield_qty: s.yield_qty,
+      }))
+  }, [semiFinishedCatalog, mode, semiFinished?.id])
+
+  const ingredientComboboxOptions = useMemo(
+    () =>
+      ingredientOptions.map((o) => ({
+        id: o.id,
+        name: o.name,
+        suffix: recipeEditorStorageUnitShort(o.unit),
+      })),
+    [ingredientOptions]
+  )
+
+  const semiComboboxOptions = useMemo(
+    () =>
+      semiSelectOptions.map((s) => ({
+        id: s.id,
+        name: s.name,
+        suffix: recipeEditorStorageUnitShort(s.yield_unit),
+      })),
+    [semiSelectOptions]
+  )
+
+  const selectOptions: IngredientSelectOption[] = ingredientOptions
 
   const liveSummary = useMemo(() => {
     let inputTotal = 0
@@ -220,22 +180,36 @@ export function SemiFinishedDialog({
     let totalLineCost = 0
 
     for (const row of itemRows) {
-      if (!row.ingredientId) continue
-
-      const ing = ingredientById.get(row.ingredientId)
-      const fromProp = ingredientOptions.find((o) => o.id === row.ingredientId)
-      const unit = ing?.unit ?? fromProp?.unit ?? "g"
-      if (row.ingredientId) {
-        unitsOrdered.push(unit)
-      }
+      if (!row.refId) continue
 
       const q = parseRecipeQtyStrict(row.quantityStr ?? "")
       const qty = q != null && q > 0 ? q : 0
       inputTotal += qty
 
-      const avgCost = ing?.avgCost
-      if (qty > 0 && avgCost != null && avgCost > 0) {
-        totalLineCost += qty * avgCost
+      if (row.rowType === "ingredient") {
+        const ing = ingredientById.get(row.refId)
+        const fromProp = ingredientOptions.find((o) => o.id === row.refId)
+        const unit = ing?.unit ?? fromProp?.unit ?? "g"
+        unitsOrdered.push(unit)
+
+        const avgCost = ing?.avgCost
+        if (qty > 0 && avgCost != null && avgCost > 0) {
+          totalLineCost += qty * avgCost
+        }
+        continue
+      }
+
+      const semi = semiCatalogById.get(row.refId)
+      const unit = semi?.yield_unit ?? "g"
+      unitsOrdered.push(unit)
+
+      const costPerUnit = semiCostPerStorageUnitMdl(
+        row.refId,
+        semiCatalogById,
+        ingredientCostMap
+      )
+      if (qty > 0 && costPerUnit != null && costPerUnit > 0) {
+        totalLineCost += qty * costPerUnit
       }
     }
 
@@ -281,7 +255,15 @@ export function SemiFinishedDialog({
       totalCostStr,
       costPerYield,
     }
-  }, [itemRows, yieldQtyStr, yieldUnit, ingredientById, ingredientOptions])
+  }, [
+    itemRows,
+    yieldQtyStr,
+    yieldUnit,
+    ingredientById,
+    ingredientCostMap,
+    ingredientOptions,
+    semiCatalogById,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -295,11 +277,12 @@ export function SemiFinishedDialog({
       setYieldUnit(semiFinished.yield_unit)
       const items = normalizeItems(semiFinished.semi_finished_items)
       if (items.length === 0) {
-        setItemRows([{ ingredientId: "", quantityStr: "" }])
+        setItemRows([{ rowType: "ingredient", refId: "", quantityStr: "" }])
       } else {
         setItemRows(
           items.map((i) => ({
-            ingredientId: i.ingredient_id,
+            rowType: i.semi_finished_ref_id ? "semi" : "ingredient",
+            refId: i.semi_finished_ref_id ?? i.ingredient_id ?? "",
             quantityStr: formatRecipeQtyNormalized(Number(i.quantity)),
           }))
         )
@@ -308,12 +291,15 @@ export function SemiFinishedDialog({
       setName("")
       setYieldQtyStr("")
       setYieldUnit("g")
-      setItemRows([{ ingredientId: "", quantityStr: "" }])
+      setItemRows([{ rowType: "ingredient", refId: "", quantityStr: "" }])
     }
   }, [open, mode, semiFinished])
 
   function addRow() {
-    setItemRows((prev) => [...prev, { ingredientId: "", quantityStr: "" }])
+    setItemRows((prev) => [
+      ...prev,
+      { rowType: "ingredient", refId: "", quantityStr: "" },
+    ])
   }
 
   function removeRow(index: number) {
@@ -327,15 +313,17 @@ export function SemiFinishedDialog({
   }
 
   function buildPayload(): SemiFinishedItemInput[] | null {
-    const filled = itemRows.filter((r) => (r.ingredientId ?? "").trim() !== "")
-    const ids = filled.map((r) => r.ingredientId)
-    const unique = new Set(ids)
-    if (ids.length === 0) {
-      alert("Добавьте хотя бы один ингредиент")
+    const filled = itemRows.filter((r) => (r.refId ?? "").trim() !== "")
+    const keys = filled.map((r) =>
+      r.rowType === "semi" ? `semi:${r.refId}` : `ing:${r.refId}`
+    )
+    if (keys.length === 0) {
+      alert("Добавьте хотя бы один компонент состава")
       return null
     }
-    if (unique.size !== ids.length) {
-      alert("Нельзя выбрать один и тот же ингредиент дважды")
+    const unique = new Set(keys)
+    if (unique.size !== keys.length) {
+      alert("Нельзя выбрать один и тот же компонент дважды")
       return null
     }
     const out: SemiFinishedItemInput[] = []
@@ -346,7 +334,8 @@ export function SemiFinishedDialog({
         return null
       }
       out.push({
-        ingredient_id: r.ingredientId,
+        ingredient_id: r.rowType === "ingredient" ? r.refId : null,
+        semi_finished_ref_id: r.rowType === "semi" ? r.refId : null,
         quantity: q,
       })
     }
@@ -389,26 +378,47 @@ export function SemiFinishedDialog({
   }
 
   const hasOptions =
-    selectOptions.length > 0 || ingredientOptions.length > 0
+    selectOptions.length > 0 ||
+    ingredientOptions.length > 0 ||
+    semiSelectOptions.length > 0
 
   function rowUnitAndCost(row: ItemRow): { unitText: string; costText: string } {
-    const ing = row.ingredientId ? ingredientById.get(row.ingredientId) : undefined
-    const fromProp = row.ingredientId
-      ? ingredientOptions.find((o) => o.id === row.ingredientId)
+    const q = parseRecipeQtyStrict(row.quantityStr ?? "")
+    const qty = q != null && q > 0 ? q : 0
+
+    if (row.rowType === "semi") {
+      const semi = row.refId ? semiCatalogById.get(row.refId) : undefined
+      const u = semi?.yield_unit ?? "g"
+      const unitText = recipeEditorStorageUnitShort(u)
+      const costPerUnit = row.refId
+        ? semiCostPerStorageUnitMdl(row.refId, semiCatalogById, ingredientCostMap)
+        : null
+
+      if (!row.refId || qty <= 0 || costPerUnit == null || costPerUnit === 0) {
+        return { unitText, costText: "—" }
+      }
+      const displayUnitPrice = toDisplayPrice(costPerUnit, u)
+      return {
+        unitText,
+        costText: `${displayUnitPrice.toFixed(4)} MDL/${displayUnit(u)} × ${new Intl.NumberFormat("ro-MD", { maximumFractionDigits: 6 }).format(qty)} ${unitText} = ${formatMdl2(costPerUnit * qty)}`,
+      }
+    }
+
+    const ing = row.refId ? ingredientById.get(row.refId) : undefined
+    const fromProp = row.refId
+      ? ingredientOptions.find((o) => o.id === row.refId)
       : undefined
     const u = ing?.unit ?? fromProp?.unit ?? "g"
     const unitText = recipeEditorStorageUnitShort(u)
-
-    const q = parseRecipeQtyStrict(row.quantityStr ?? "")
-    const qty = q != null && q > 0 ? q : 0
     const ac = ing?.avgCost
 
-    if (!row.ingredientId || qty <= 0 || ac == null || ac === 0) {
+    if (!row.refId || qty <= 0 || ac == null || ac === 0) {
       return { unitText, costText: "—" }
     }
+    const displayUnitPrice = toDisplayPrice(ac, u)
     return {
       unitText,
-      costText: `${ac.toFixed(4)} MDL/${unitText} × ${new Intl.NumberFormat("ro-MD", { maximumFractionDigits: 6 }).format(qty)} = ${formatMdl2(ac * qty)}`,
+      costText: `${displayUnitPrice.toFixed(4)} MDL/${displayUnit(u)} × ${new Intl.NumberFormat("ro-MD", { maximumFractionDigits: 6 }).format(qty)} ${unitText} = ${formatMdl2(ac * qty)}`,
     }
   }
 
@@ -469,21 +479,15 @@ export function SemiFinishedDialog({
 
           <div className="grid gap-2">
             <div className="flex items-center justify-between">
-              <Label>Ингредиенты</Label>
+              <Label>Состав</Label>
               <Button type="button" variant="outline" size="sm" onClick={addRow}>
-                Добавить ингредиент
+                Добавить строку
               </Button>
             </div>
-            {ingredientsLoading ? (
-              <p className="text-muted-foreground text-sm">Загрузка ингредиентов…</p>
-            ) : null}
-            {ingredientsError ? (
-              <p className="text-destructive text-sm">{ingredientsError}</p>
-            ) : null}
             {!hasOptions ? (
               <p className="text-muted-foreground text-sm">
-                Нет ингредиентов для выбора. Сначала добавьте их в разделе
-                «Ингредиенты».
+                Нет ингредиентов или полуфабрикатов для выбора. Сначала добавьте
+                их в соответствующих разделах.
               </p>
             ) : (
               <div className="flex flex-col gap-3">
@@ -494,30 +498,43 @@ export function SemiFinishedDialog({
                       key={index}
                       className="flex flex-col gap-2 border-b pb-3 last:border-0 last:pb-0 sm:flex-row sm:flex-wrap sm:items-end"
                     >
-                      <div className="grid min-w-[140px] flex-1 gap-1 sm:min-w-[180px]">
-                        <span className="text-muted-foreground text-xs">
-                          Ингредиент
-                        </span>
+                      <div className="grid min-w-[120px] gap-1 sm:min-w-[132px]">
+                        <span className="text-muted-foreground text-xs">Тип</span>
                         <Select
-                          value={row.ingredientId || EMPTY}
+                          value={row.rowType}
                           onValueChange={(v) =>
                             updateRow(index, {
-                              ingredientId: v === EMPTY ? "" : v,
+                              rowType: v as ItemRowType,
+                              refId: "",
                             })
                           }
                         >
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Выберите" />
+                            <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value={EMPTY}>—</SelectItem>
-                            {selectOptions.map((opt) => (
-                              <SelectItem key={opt.id} value={opt.id}>
-                                {opt.name}
-                              </SelectItem>
-                            ))}
+                            <SelectItem value="ingredient">Ингредиент</SelectItem>
+                            <SelectItem value="semi">Полуфабрикат</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                      <div className="grid min-w-[140px] flex-1 gap-1 sm:min-w-[180px]">
+                        <span className="text-muted-foreground text-xs">
+                          {row.rowType === "semi" ? "Полуфабрикат" : "Ингредиент"}
+                        </span>
+                        {row.rowType === "semi" ? (
+                          <SemiFinishedCombobox
+                            value={row.refId}
+                            onChange={(v) => updateRow(index, { refId: v })}
+                            semiFinished={semiComboboxOptions}
+                          />
+                        ) : (
+                          <IngredientCombobox
+                            value={row.refId}
+                            onChange={(v) => updateRow(index, { refId: v })}
+                            ingredients={ingredientComboboxOptions}
+                          />
+                        )}
                       </div>
                       <div className="flex flex-wrap items-end gap-2">
                         <div className="grid w-24 gap-1 sm:w-28">

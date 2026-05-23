@@ -7,6 +7,16 @@ import type { PosCartItem, PosCartTopping } from "@/types/pos"
 
 export type PosCartLang = "RU" | "RO"
 
+function posToppingUnitPriceBani(
+  t: PosCartTopping,
+  isAggregator: boolean,
+): number {
+  if (isAggregator && t.aggregator_price_bani != null) {
+    return t.aggregator_price_bani
+  }
+  return t.price
+}
+
 export function posToppingDisplayName(
   t: PosCartTopping,
   lang: PosCartLang = "RU",
@@ -88,7 +98,7 @@ export function getPosCartItemToppingDisplayLines(
   }
 
   for (const t of ungrouped) {
-    const chargeBani = t.price * t.quantity
+    const chargeBani = posToppingUnitPriceBani(t, false) * t.quantity
     lines.push({
       toppingId: t.id,
       name: posToppingDisplayName(t, lang),
@@ -104,6 +114,7 @@ export function getPosCartItemToppingDisplayLines(
 export function calcPosToppingsCharge(
   toppings: PosCartTopping[],
   toppingGroupFreeCounts: Record<string, number> = {},
+  isAggregator = false,
 ): number {
   const resolved = migratePosCartToppingsFromLegacy(toppings)
   const byGroup = new Map<
@@ -113,12 +124,13 @@ export function calcPosToppingsCharge(
   let sum = 0
 
   for (const t of resolved) {
+    const unitPrice = posToppingUnitPriceBani(t, isAggregator)
     if (!t.topping_group_id) {
-      sum += t.price * t.quantity
+      sum += unitPrice * t.quantity
       continue
     }
     const list = byGroup.get(t.topping_group_id) ?? []
-    list.push({ id: t.id, price: t.price, quantity: t.quantity })
+    list.push({ id: t.id, price: unitPrice, quantity: t.quantity })
     byGroup.set(t.topping_group_id, list)
   }
 
@@ -133,14 +145,20 @@ export function calcPosToppingsCharge(
 
 /** Цена одной единицы позиции POS (база + топпинги с учётом free_count). */
 export function getPosCartItemUnitPriceBani(
-  basePriceBani: number,
-  toppings: PosCartTopping[],
-  toppingGroupFreeCounts: Record<string, number> = {},
+  item: PosCartItem,
+  isAggregator: boolean,
 ): number {
-  return (
-    Math.round(basePriceBani) +
-    calcPosToppingsCharge(toppings, toppingGroupFreeCounts)
-  )
+  if (isAggregator && item.aggregatorUnitPriceBani != null) {
+    return (
+      Math.round(item.aggregatorUnitPriceBani) +
+      calcPosToppingsCharge(
+        item.toppings,
+        item.toppingGroupFreeCounts ?? {},
+        true,
+      )
+    )
+  }
+  return Math.round(item.price)
 }
 
 export function isSamePosCartToppingConfig(
@@ -160,10 +178,11 @@ export type PosOrderItemToppingPayload = {
 export function posToppingsPayloadForDb(
   toppings: PosCartTopping[],
   lang: PosCartLang = "RU",
+  isAggregator = false,
 ): PosOrderItemToppingPayload[] {
   return migratePosCartToppingsFromLegacy(toppings).map((t) => ({
     name: posToppingDisplayName(t, lang),
-    price: Math.round(t.price),
+    price: Math.round(posToppingUnitPriceBani(t, isAggregator)),
     quantity: t.quantity,
   }))
 }
@@ -177,15 +196,22 @@ export function posLineItemName(
   return part ? `${baseName} + ${part}` : baseName
 }
 
-export function posLinePayloadFromCartItem(c: PosCartItem) {
+export function posLinePayloadFromCartItem(
+  item: PosCartItem,
+  isAggregator = false,
+) {
+  const unitPriceBani = isAggregator
+    ? getPosCartItemUnitPriceBani(item, true)
+    : Math.round(item.price)
+
   return {
-    menuItemId: c.menuItemId,
-    name: posLineItemName(c.name, c.toppings),
-    size: c.size,
-    variantId: c.variantId ?? null,
-    unitPriceBani: c.price,
-    qty: c.qty,
-    toppings: posToppingsPayloadForDb(c.toppings),
+    menuItemId: item.menuItemId,
+    name: posLineItemName(item.name, item.toppings),
+    size: item.size,
+    variantId: item.variantId ?? null,
+    unitPriceBani,
+    qty: item.qty,
+    toppings: posToppingsPayloadForDb(item.toppings, "RU", isAggregator),
   }
 }
 
@@ -193,13 +219,25 @@ export function posLinePayloadFromCartItem(c: PosCartItem) {
 export function withPosCartItemRecalculatedPrice(
   item: PosCartItem,
   basePriceBani: number,
+  isAggregator: boolean,
+  aggregatorBasePriceBani?: number | null,
 ): PosCartItem {
-  return {
+  const next: PosCartItem = {
     ...item,
-    price: getPosCartItemUnitPriceBani(
-      basePriceBani,
-      item.toppings,
-      item.toppingGroupFreeCounts ?? {},
-    ),
+    ...(isAggregator && aggregatorBasePriceBani != null
+      ? { aggregatorUnitPriceBani: aggregatorBasePriceBani }
+      : {}),
+    price:
+      Math.round(basePriceBani) +
+      calcPosToppingsCharge(
+        item.toppings,
+        item.toppingGroupFreeCounts ?? {},
+        isAggregator,
+      ),
   }
+  if (isAggregator && aggregatorBasePriceBani != null) {
+    next.aggregatorUnitPriceBani = aggregatorBasePriceBani
+    next.price = getPosCartItemUnitPriceBani(next, true)
+  }
+  return next
 }

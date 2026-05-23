@@ -22,6 +22,8 @@ export type MenuItemVariant = {
   name_ru: string
   name_ro: string
   price: number
+  /** Цена для агрегатора (Glovo и т.п.), бани; null = не задана. */
+  aggregator_price_bani: number | null
   weight_grams: number | null
   sort_order: number
   created_at: string
@@ -40,6 +42,8 @@ export type MenuItem = {
   /** Вес в граммах для позиции без размеров (has_sizes = false). */
   weight_grams: number | null
   price: number | null
+  /** Цена для агрегатора (Glovo и т.п.), бани; null = не задана. */
+  aggregator_price_bani: number | null
   is_active: boolean
   sort_order: number
   created_at: string
@@ -70,6 +74,8 @@ export type Topping = {
   name_ru: string
   name_ro: string
   price: number
+  /** Цена для агрегатора (Glovo и т.п.), бани; null = не задана. */
+  aggregator_price_bani: number | null
   image_url: string | null
   is_active: boolean
   sort_order: number

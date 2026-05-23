@@ -1,26 +1,17 @@
 "use server"
 
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
+import { posLinePayloadFromCartItem } from "@/lib/pos-cart-helpers"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { OrderStatus } from "@/types/database"
-
-export type CreateOrderPosItem = {
-  menuItemId: string
-  name: string
-  /** Текст размера / снимок варианта для `order_items.size` */
-  size: string | null
-  price: number
-  qty: number
-  toppings?: { name: string; price: number; quantity?: number }[]
-  variantId?: string | null
-}
+import type { PosCartItem } from "@/types/pos"
 
 export type CreateOrderPosInput = {
   brandSlug: string
-  items: CreateOrderPosItem[]
+  items: PosCartItem[]
   userName: string
   userPhone: string
-  deliveryMode: "delivery" | "pickup"
+  deliveryMode: "delivery" | "pickup" | "aggregator"
   deliveryAddress?: string
   addressEntrance?: string | null
   addressFloor?: string | null
@@ -76,18 +67,21 @@ export async function createOrderPos(
   }
 
   const effectiveDeliveryMode = input.deliveryMode
+  const isAggregator = effectiveDeliveryMode === "aggregator"
 
   const name = input.userName.trim()
   const phone = input.userPhone.trim()
   if (!name) return { success: false, error: "Укажите имя" }
-  if (!phone) return { success: false, error: "Укажите телефон" }
+  if (!isAggregator && !phone) {
+    return { success: false, error: "Укажите телефон" }
+  }
 
   const deliveryFeeBani = Math.max(0, Math.round(input.deliveryFee ?? 0))
   const discountBani = Math.max(0, Math.round(input.discount ?? 0))
-  const subtotalBani = input.items.reduce(
-    (sum, it) => sum + Math.round(it.price) * it.qty,
-    0,
-  )
+  const subtotalBani = input.items.reduce((sum, cartItem) => {
+    const line = posLinePayloadFromCartItem(cartItem, isAggregator)
+    return sum + Math.round(line.unitPriceBani) * line.qty
+  }, 0)
   const totalBani = subtotalBani - discountBani + deliveryFeeBani
   if (totalBani < 0) {
     return { success: false, error: "Некорректная сумма заказа" }
@@ -96,7 +90,9 @@ export async function createOrderPos(
   const deliveryAddress =
     effectiveDeliveryMode === "pickup"
       ? "Самовывоз — bd. Dacia 27"
-      : (input.deliveryAddress?.trim() ?? "")
+      : effectiveDeliveryMode === "aggregator"
+        ? null
+        : (input.deliveryAddress?.trim() ?? "")
 
   if (effectiveDeliveryMode === "delivery" && !deliveryAddress) {
     return { success: false, error: "Укажите адрес доставки" }
@@ -169,21 +165,20 @@ export async function createOrderPos(
   const orderId = (orderRow as { id: string }).id
   const orderNumber = Number((orderRow as { order_number: number }).order_number)
 
-  const itemRows = input.items.map((it) => ({
-    order_id: orderId,
-    menu_item_id: it.menuItemId,
-    lunch_set_id: null as string | null,
-    variant_id: it.variantId ?? null,
-    item_name: it.name,
-    size: it.size,
-    quantity: it.qty,
-    toppings: (it.toppings ?? []) as {
-      name: string
-      price: number
-      quantity?: number
-    }[],
-    price: Math.round(it.price) * it.qty,
-  }))
+  const itemRows = input.items.map((cartItem) => {
+    const line = posLinePayloadFromCartItem(cartItem, isAggregator)
+    return {
+      order_id: orderId,
+      menu_item_id: line.menuItemId,
+      lunch_set_id: null as string | null,
+      variant_id: line.variantId ?? null,
+      item_name: line.name,
+      size: line.size,
+      quantity: line.qty,
+      toppings: line.toppings,
+      price: Math.round(line.unitPriceBani) * line.qty,
+    }
+  })
 
   const { error: itemsError } = await supabase.from("order_items").insert(itemRows)
 

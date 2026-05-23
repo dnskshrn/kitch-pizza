@@ -82,7 +82,7 @@ import {
 import { writePosBrandSlugCookie } from "@/lib/pos/pos-brand-slug-cookie"
 import {
   getPosCartItemToppingDisplayLines,
-  posLinePayloadFromCartItem,
+  getPosCartItemUnitPriceBani,
 } from "@/lib/pos-cart-helpers"
 import {
   migratePosCartToppingsFromLegacy,
@@ -250,6 +250,7 @@ type MenuItemRow = Pick<
   | "description_ru"
   | "category_id"
   | "price"
+  | "aggregator_price_bani"
   | "has_sizes"
   | "image_url"
 > & {
@@ -1015,6 +1016,9 @@ export function OrderForm({
   )
   const [clearCartBusy, setClearCartBusy] = useState(false)
   const [deliveryModeBusy, setDeliveryModeBusy] = useState(false)
+  const [deliveryModeSwitchConfirm, setDeliveryModeSwitchConfirm] = useState<
+    "delivery" | "pickup" | null
+  >(null)
   const [orderMenuOpen, setOrderMenuOpen] = useState(false)
   const cartInteractionDisabled =
     cartActionBusy || extendSubmitting || clearCartBusy || deliveryModeBusy || runnerBusy
@@ -1838,11 +1842,8 @@ export function OrderForm({
     setCart(lines)
   }, [posOrderId])
 
-  const handleClearCart = useCallback(async () => {
-    if (cart.length === 0) {
-      toast.message("Корзина уже пуста")
-      return
-    }
+  const clearCartOnServer = useCallback(async (): Promise<boolean> => {
+    if (cart.length === 0) return true
     const snapshot = cart
     const nextCart: PosCartItem[] = []
     setModalItem(null)
@@ -1859,9 +1860,10 @@ export function OrderForm({
           snapshot,
           res.error ?? "Не удалось очистить корзину",
         )
-        return
+        return false
       }
       lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
+      return true
     } finally {
       setClearCartBusy(false)
     }
@@ -1872,9 +1874,33 @@ export function OrderForm({
     rollbackOptimisticCart,
   ])
 
-  const handleChangeDeliveryMode = useCallback(
+  const handleClearCart = useCallback(async () => {
+    if (cart.length === 0) {
+      toast.message("Корзина уже пуста")
+      return
+    }
+    await clearCartOnServer()
+  }, [cart.length, clearCartOnServer])
+
+  const deliveryModeChangeInvolvesAggregator = useCallback(
+    (
+      currentMode: typeof deliveryMode,
+      nextMode: "delivery" | "pickup" | "aggregator",
+    ) => currentMode === "aggregator" || nextMode === "aggregator",
+    [],
+  )
+
+  const performChangeDeliveryMode = useCallback(
     async (nextMode: "delivery" | "pickup") => {
       if (deliveryMode === nextMode || deliveryModeBusy) return
+
+      if (
+        deliveryModeChangeInvolvesAggregator(deliveryMode, nextMode) &&
+        cart.length > 0
+      ) {
+        const cleared = await clearCartOnServer()
+        if (!cleared) return
+      }
 
       setOrderMenuOpen(false)
       setDeliveryModeBusy(true)
@@ -1924,11 +1950,36 @@ export function OrderForm({
       }
     },
     [
+      cart.length,
+      clearCartOnServer,
       deliveryMode,
       deliveryModeBusy,
+      deliveryModeChangeInvolvesAggregator,
       form,
       posOrderId,
       updateOrderLocalState,
+    ],
+  )
+
+  const requestChangeDeliveryMode = useCallback(
+    (nextMode: "delivery" | "pickup") => {
+      if (deliveryMode === nextMode || deliveryModeBusy) return
+      if (
+        deliveryModeChangeInvolvesAggregator(deliveryMode, nextMode) &&
+        cart.length > 0
+      ) {
+        setOrderMenuOpen(false)
+        setDeliveryModeSwitchConfirm(nextMode)
+        return
+      }
+      void performChangeDeliveryMode(nextMode)
+    },
+    [
+      cart.length,
+      deliveryMode,
+      deliveryModeBusy,
+      deliveryModeChangeInvolvesAggregator,
+      performChangeDeliveryMode,
     ],
   )
 
@@ -1981,7 +2032,7 @@ export function OrderForm({
         } else {
           const res = await addOrderItemsPos({
             orderId: posOrderId,
-            lines: [posLinePayloadFromCartItem(entry)],
+            lines: [entry],
           })
           if (!res.success) {
             rollbackOptimisticCart(snapshot, "Не удалось добавить позицию")
@@ -2011,24 +2062,30 @@ export function OrderForm({
       setCartEditIndex(null)
       const hasToppingGroups = (row.menu_item_topping_groups?.length ?? 0) > 0
       if (!row.has_sizes && !hasToppingGroups) {
+        const isAggregator = deliveryMode === "aggregator"
         const price = unitPriceBani(row)
         if (price <= 0) return
-        void addCartItem({
+        const entry: PosCartItem = {
           menuItemId: row.id,
           category_id: row.category_id,
           name: row.name_ru,
           size: null,
           variantId: null,
           price,
+          aggregatorUnitPriceBani: row.aggregator_price_bani ?? undefined,
           qty: 1,
           imageUrl: row.image_url ?? undefined,
           toppings: [],
-        })
+        }
+        if (isAggregator && entry.aggregatorUnitPriceBani != null) {
+          entry.price = getPosCartItemUnitPriceBani(entry, true)
+        }
+        void addCartItem(entry)
         return
       }
       setModalItem(posMenuRowForModal(row))
     },
-    [addCartItem, cartInteractionDisabled],
+    [addCartItem, cartInteractionDisabled, deliveryMode],
   )
 
   const updateQty = useCallback(
@@ -2177,17 +2234,10 @@ export function OrderForm({
       applyOptimisticCart(nextCart)
       setCartActionBusy(true)
       try {
-        const linePayload = posLinePayloadFromCartItem(c)
         const res = await updateOrderItemCompositionPos({
           orderId: posOrderId,
           itemId: prevLine.orderItemId,
-          menuItemId: c.menuItemId,
-          itemName: linePayload.name,
-          size: c.size,
-          variantId: linePayload.variantId ?? null,
-          quantity: c.qty,
-          unitPriceBani: c.price,
-          toppings: linePayload.toppings,
+          cartItem: c,
         })
         if (!res.success) {
           rollbackOptimisticCart(
@@ -2247,10 +2297,9 @@ export function OrderForm({
     setExtendError(null)
     setExtendSubmitting(true)
     try {
-      const linesPayload = cart.map((c) => posLinePayloadFromCartItem(c))
       const res = await replaceOrderItemsPos({
         orderId: posOrderId,
-        lines: linesPayload,
+        lines: cart,
       })
       if (!res.success) {
         setExtendError(res.error)
@@ -2754,6 +2803,44 @@ export function OrderForm({
     </Dialog>
   )
 
+  const deliveryModeSwitchDialog = (
+    <Dialog
+      open={deliveryModeSwitchConfirm !== null}
+      onOpenChange={(o) => {
+        if (!o) setDeliveryModeSwitchConfirm(null)
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Сменить тип заказа?</DialogTitle>
+        </DialogHeader>
+        <p className="text-muted-foreground text-sm">
+          При смене типа заказа корзина будет очищена. Продолжить?
+        </p>
+        <DialogFooter className="gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setDeliveryModeSwitchConfirm(null)}
+          >
+            Отмена
+          </Button>
+          <Button
+            type="button"
+            disabled={deliveryModeBusy || clearCartBusy}
+            onClick={() => {
+              const nextMode = deliveryModeSwitchConfirm
+              setDeliveryModeSwitchConfirm(null)
+              if (nextMode) void performChangeDeliveryMode(nextMode)
+            }}
+          >
+            Продолжить
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
   const handleRunnerFromStep2 = async () => {
     if (runnerAlreadySent) return
     if (runnerKitchenLockedRef.current) return
@@ -2974,7 +3061,7 @@ export function OrderForm({
           type="button"
           disabled={deliveryMode === "delivery" || deliveryModeBusy}
           onClick={() => {
-            void handleChangeDeliveryMode("delivery")
+            void requestChangeDeliveryMode("delivery")
           }}
           className={cn(
             "flex w-full items-center rounded-lg px-3 py-2.5 text-left text-[13px] font-medium text-[#242424]",
@@ -2987,7 +3074,7 @@ export function OrderForm({
           type="button"
           disabled={deliveryMode === "pickup" || deliveryModeBusy}
           onClick={() => {
-            void handleChangeDeliveryMode("pickup")
+            void requestChangeDeliveryMode("pickup")
           }}
           className={cn(
             "flex w-full items-center rounded-lg px-3 py-2.5 text-left text-[13px] font-medium text-[#242424]",
@@ -3130,6 +3217,7 @@ export function OrderForm({
           </div>
         </div>
         {closeOrderDialog}
+        {deliveryModeSwitchDialog}
       </>
     )
   }
@@ -3337,6 +3425,7 @@ export function OrderForm({
           item={modalItem}
           onClose={closeProductModal}
           onAdd={(c) => void addCartItem(c)}
+          isAggregator={deliveryMode === "aggregator"}
           cartEditDraft={
             cartEditIndex !== null &&
             modalItem &&
@@ -3401,6 +3490,7 @@ export function OrderForm({
           />
         ) : null}
         {closeOrderDialog}
+        {deliveryModeSwitchDialog}
       </>
     )
   }
@@ -4236,6 +4326,7 @@ export function OrderForm({
         item={modalItem}
         onClose={closeProductModal}
         onAdd={(c) => void addCartItem(c)}
+        isAggregator={deliveryMode === "aggregator"}
         cartEditDraft={
           cartEditIndex !== null &&
           modalItem &&
@@ -4269,6 +4360,7 @@ export function OrderForm({
         />
       ) : null}
       {closeOrderDialog}
+      {deliveryModeSwitchDialog}
     </>
   )
 }

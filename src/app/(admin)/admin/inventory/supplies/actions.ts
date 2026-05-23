@@ -18,36 +18,38 @@ export type CreateSupplyOrderInput = {
   items: CreateSupplyOrderItemInput[]
 }
 
+export type UpdateSupplyOrderInput = CreateSupplyOrderInput
+
+type NormalizedSupplyItem = {
+  ingredient_id: string
+  quantity: number
+  received_qty: number | null
+  stock_qty: number
+  price_per_unit: number
+  vat_rate: number
+  price_per_unit_with_vat: number
+  line_ex: number
+  line_inc: number
+}
+
+type StockRpcItem = {
+  ingredient_id: string
+  stock_qty: number
+  price_per_unit: number
+}
+
 function round4(value: number): number {
   return Math.round(value * 10000) / 10000
 }
 
-export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
-  const supabase = createServiceRoleClient()
-
-  const supplierId = (payload.supplier_id ?? "").trim()
-  if (!supplierId) {
-    throw new Error("Выберите поставщика")
-  }
-
-  const itemsRaw = payload.items ?? []
+function normalizeSupplyOrderItems(
+  itemsRaw: CreateSupplyOrderItemInput[],
+): NormalizedSupplyItem[] {
   if (itemsRaw.length === 0) {
     throw new Error("Добавьте хотя бы одну позицию")
   }
 
-  const { data: supplierRow, error: supplierError } = await supabase
-    .from("suppliers")
-    .select("id")
-    .eq("id", supplierId)
-    .eq("is_active", true)
-    .maybeSingle()
-
-  if (supplierError) throw new Error(supplierError.message)
-  if (!supplierRow) {
-    throw new Error("Поставщик не найден или неактивен")
-  }
-
-  const normalized = itemsRaw.map((row) => {
+  return itemsRaw.map((row) => {
     const qty = Number(row.quantity)
     const price = Number(row.price_per_unit)
     const vat = Number(row.vat_rate)
@@ -87,8 +89,12 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
       line_inc: billingQty * priceWithVat,
     }
   })
+}
 
-  const ingredientIds = [...new Set(normalized.map((n) => n.ingredient_id))]
+async function assertIngredientsExist(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  ingredientIds: string[],
+) {
   const { data: ingRows, error: ingError } = await supabase
     .from("ingredients")
     .select("id")
@@ -98,6 +104,46 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
   if (!ingRows || ingRows.length !== ingredientIds.length) {
     throw new Error("Один или несколько ингредиентов не найдены")
   }
+}
+
+function toStockRpcPayload(items: NormalizedSupplyItem[]): StockRpcItem[] {
+  return items.map((r) => ({
+    ingredient_id: r.ingredient_id,
+    stock_qty: r.stock_qty,
+    price_per_unit: r.price_per_unit,
+  }))
+}
+
+function revalidateSupplyPaths() {
+  revalidatePath("/admin/inventory/supplies")
+  revalidatePath("/admin/inventory/ingredients")
+  revalidatePath("/admin/inventory/stock")
+}
+
+export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
+  const supabase = createServiceRoleClient()
+
+  const supplierId = (payload.supplier_id ?? "").trim()
+  if (!supplierId) {
+    throw new Error("Выберите поставщика")
+  }
+
+  const normalized = normalizeSupplyOrderItems(payload.items ?? [])
+  const ingredientIds = [...new Set(normalized.map((n) => n.ingredient_id))]
+
+  const { data: supplierRow, error: supplierError } = await supabase
+    .from("suppliers")
+    .select("id")
+    .eq("id", supplierId)
+    .eq("is_active", true)
+    .maybeSingle()
+
+  if (supplierError) throw new Error(supplierError.message)
+  if (!supplierRow) {
+    throw new Error("Поставщик не найден или неактивен")
+  }
+
+  await assertIngredientsExist(supabase, ingredientIds)
 
   const totalCostExVat = normalized.reduce((s, r) => s + r.line_ex, 0)
   const totalCostIncVat = normalized.reduce((s, r) => s + r.line_inc, 0)
@@ -145,94 +191,25 @@ export async function createSupplyOrder(payload: CreateSupplyOrderInput) {
     throw new Error(itemsError.message)
   }
 
-  const ts = new Date().toISOString()
+  const { error: stockRpcError } = await supabase.rpc(
+    "apply_supply_order_stock_items",
+    {
+      p_order_id: orderId,
+      p_items: toStockRpcPayload(normalized),
+      p_note: null,
+    },
+  )
 
-  const { data: stockRows, error: stockReadError } = await supabase
-    .from("ingredient_stock")
-    .select("ingredient_id, quantity, avg_cost")
-    .in("ingredient_id", ingredientIds)
-
-  if (stockReadError) throw new Error(stockReadError.message)
-
-  const stockMap = new Map<string, { quantity: number; avg_cost: number }>()
-  for (const row of stockRows ?? []) {
-    stockMap.set(row.ingredient_id, {
-      quantity: Number(row.quantity),
-      avg_cost: Number(row.avg_cost ?? 0),
-    })
+  if (stockRpcError) {
+    await supabase
+      .from("supply_order_items")
+      .delete()
+      .eq("supply_order_id", orderId)
+    await supabase.from("supply_orders").delete().eq("id", orderId)
+    throw new Error(stockRpcError.message)
   }
 
-  const missingStockIds = ingredientIds.filter((id) => !stockMap.has(id))
-  if (missingStockIds.length > 0) {
-    const { error: insertStockError } = await supabase
-      .from("ingredient_stock")
-      .insert(
-        missingStockIds.map((ingredient_id) => ({
-          ingredient_id,
-          quantity: 0,
-          avg_cost: 0,
-          updated_at: ts,
-        })),
-      )
-
-    if (insertStockError) throw new Error(insertStockError.message)
-
-    for (const ingredientId of missingStockIds) {
-      stockMap.set(ingredientId, { quantity: 0, avg_cost: 0 })
-    }
-  }
-
-  for (const r of normalized) {
-    const stock = stockMap.get(r.ingredient_id)
-    if (!stock) {
-      throw new Error("Не найдена строка остатка для ингредиента")
-    }
-
-    const currentQty = stock.quantity
-    const currentCost = stock.avg_cost
-    const incomingQty = r.stock_qty
-    const incomingCost = r.price_per_unit
-
-    const newQty = currentQty + incomingQty
-    const newAvgCost =
-      newQty > 0
-        ? (currentQty * currentCost + incomingQty * incomingCost) / newQty
-        : incomingCost
-
-    const { error: stockUpError } = await supabase
-      .from("ingredient_stock")
-      .update({
-        quantity: newQty,
-        avg_cost: round4(newAvgCost),
-        updated_at: ts,
-      })
-      .eq("ingredient_id", r.ingredient_id)
-
-    if (stockUpError) throw new Error(stockUpError.message)
-
-    stockMap.set(r.ingredient_id, {
-      quantity: newQty,
-      avg_cost: round4(newAvgCost),
-    })
-
-    const { error: ledgerError } = await supabase
-      .from("stock_ledger")
-      .insert({
-        ingredient_id: r.ingredient_id,
-        movement_type: "supply",
-        reference_id: orderId,
-        reference_type: "supply_order",
-        quantity_delta: incomingQty,
-        cost_per_unit: incomingCost,
-        note: null,
-      })
-
-    if (ledgerError) throw new Error(ledgerError.message)
-  }
-
-  revalidatePath("/admin/inventory/supplies")
-  revalidatePath("/admin/inventory/ingredients")
-  revalidatePath("/admin/inventory/stock")
+  revalidateSupplyPaths()
 }
 
 type SupplyOrderItemRow = {
@@ -240,19 +217,187 @@ type SupplyOrderItemRow = {
   quantity: number | string
   received_qty: number | string | null
   price_per_unit: number | string
+  vat_rate?: number | string
+  price_per_unit_with_vat?: number | string
 }
 
-function reverseAvgCost(
-  currentQty: number,
-  currentCost: number,
-  removeQty: number,
-  removeCost: number,
-): number {
-  const nextQty = currentQty - removeQty
-  if (nextQty > 0) {
-    return round4((currentQty * currentCost - removeQty * removeCost) / nextQty)
+function normalizeExistingSupplyItems(
+  itemRows: SupplyOrderItemRow[],
+): NormalizedSupplyItem[] {
+  return itemRows.map((row) => {
+    const qty = Number(row.quantity)
+    const receivedRaw = row.received_qty
+    const receivedQty =
+      receivedRaw != null && receivedRaw !== "" ? Number(receivedRaw) : null
+    const stockQty =
+      receivedQty != null && Number.isFinite(receivedQty) ? receivedQty : qty
+    const price = Number(row.price_per_unit)
+
+    if (!Number.isFinite(stockQty) || stockQty <= 0) {
+      throw new Error("Некорректное количество в позиции поставки")
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      throw new Error("Некорректная цена в позиции поставки")
+    }
+
+    return {
+      ingredient_id: row.ingredient_id,
+      quantity: qty,
+      received_qty: receivedQty,
+      stock_qty: stockQty,
+      price_per_unit: price,
+      vat_rate: 0,
+      price_per_unit_with_vat: price,
+      line_ex: stockQty * price,
+      line_inc: stockQty * price,
+    }
+  })
+}
+
+export async function updateSupplyOrder(
+  orderId: string,
+  payload: UpdateSupplyOrderInput,
+) {
+  const id = (orderId ?? "").trim()
+  if (!id) {
+    throw new Error("Не указана поставка")
   }
-  return 0
+
+  const supabase = createServiceRoleClient()
+
+  const { data: orderRow, error: orderError } = await supabase
+    .from("supply_orders")
+    .select("id, annulled_at")
+    .eq("id", id)
+    .maybeSingle()
+
+  if (orderError) throw new Error(orderError.message)
+  if (!orderRow) {
+    throw new Error("Поставка не найдена")
+  }
+  if (orderRow.annulled_at != null) {
+    throw new Error("Нельзя редактировать аннулированную поставку")
+  }
+
+  const supplierId = (payload.supplier_id ?? "").trim()
+  if (!supplierId) {
+    throw new Error("Выберите поставщика")
+  }
+
+  const { data: supplierRow, error: supplierError } = await supabase
+    .from("suppliers")
+    .select("id")
+    .eq("id", supplierId)
+    .eq("is_active", true)
+    .maybeSingle()
+
+  if (supplierError) throw new Error(supplierError.message)
+  if (!supplierRow) {
+    throw new Error("Поставщик не найден или неактивен")
+  }
+
+  const { data: oldItemRows, error: oldItemsError } = await supabase
+    .from("supply_order_items")
+    .select(
+      "ingredient_id, quantity, received_qty, price_per_unit, vat_rate, price_per_unit_with_vat",
+    )
+    .eq("supply_order_id", id)
+
+  if (oldItemsError) throw new Error(oldItemsError.message)
+  if (!oldItemRows || oldItemRows.length === 0) {
+    throw new Error("У поставки нет позиций")
+  }
+
+  const oldNormalized = normalizeExistingSupplyItems(
+    oldItemRows as SupplyOrderItemRow[],
+  )
+  const normalized = normalizeSupplyOrderItems(payload.items ?? [])
+  const ingredientIds = [
+    ...new Set([
+      ...oldNormalized.map((r) => r.ingredient_id),
+      ...normalized.map((r) => r.ingredient_id),
+    ]),
+  ]
+
+  await assertIngredientsExist(supabase, ingredientIds)
+
+  const totalCostExVat = normalized.reduce((s, r) => s + r.line_ex, 0)
+  const totalCostIncVat = normalized.reduce((s, r) => s + r.line_inc, 0)
+  const note =
+    payload.note != null && String(payload.note).trim() !== ""
+      ? String(payload.note).trim()
+      : null
+
+  const { error: orderUpError } = await supabase
+    .from("supply_orders")
+    .update({
+      supplier_id: supplierId,
+      delivery_date: payload.delivery_date,
+      note,
+      total_cost_ex_vat: totalCostExVat,
+      total_cost_inc_vat: totalCostIncVat,
+    })
+    .eq("id", id)
+    .is("annulled_at", null)
+
+  if (orderUpError) throw new Error(orderUpError.message)
+
+  const { error: deleteItemsError } = await supabase
+    .from("supply_order_items")
+    .delete()
+    .eq("supply_order_id", id)
+
+  if (deleteItemsError) throw new Error(deleteItemsError.message)
+
+  const itemRows = normalized.map((r) => ({
+    supply_order_id: id,
+    ingredient_id: r.ingredient_id,
+    quantity: r.quantity,
+    received_qty: r.received_qty,
+    price_per_unit: r.price_per_unit,
+    vat_rate: r.vat_rate,
+    price_per_unit_with_vat: r.price_per_unit_with_vat,
+  }))
+
+  const { error: insertItemsError } = await supabase
+    .from("supply_order_items")
+    .insert(itemRows)
+
+  if (insertItemsError) throw new Error(insertItemsError.message)
+
+  const { error: stockError } = await supabase.rpc(
+    "replace_supply_order_stock_items",
+    {
+      p_order_id: id,
+      p_revert_items: toStockRpcPayload(oldNormalized),
+      p_apply_items: toStockRpcPayload(normalized),
+      p_revert_note: "Редактирование поставки (откат)",
+      p_apply_note: "Редактирование поставки (применение)",
+    },
+  )
+
+  if (stockError) {
+    await supabase.from("supply_order_items").delete().eq("supply_order_id", id)
+    const restoreRows = (oldItemRows as SupplyOrderItemRow[]).map((row) => ({
+      supply_order_id: id,
+      ingredient_id: row.ingredient_id,
+      quantity: Number(row.quantity),
+      received_qty:
+        row.received_qty != null && row.received_qty !== ""
+          ? Number(row.received_qty)
+          : null,
+      price_per_unit: Number(row.price_per_unit),
+      vat_rate: Number(row.vat_rate ?? 0),
+      price_per_unit_with_vat: Number(
+        row.price_per_unit_with_vat ?? row.price_per_unit,
+      ),
+    }))
+    await supabase.from("supply_order_items").insert(restoreRows)
+    throw new Error(stockError.message)
+  }
+
+  revalidateSupplyPaths()
+  revalidatePath("/admin/finance/ledger")
 }
 
 export async function annulSupplyOrder(orderId: string) {
@@ -287,112 +432,22 @@ export async function annulSupplyOrder(orderId: string) {
     throw new Error("У поставки нет позиций")
   }
 
-  const normalized = (itemRows as SupplyOrderItemRow[]).map((row) => {
-    const qty = Number(row.quantity)
-    const receivedRaw = row.received_qty
-    const receivedQty =
-      receivedRaw != null && receivedRaw !== "" ? Number(receivedRaw) : null
-    const stockQty =
-      receivedQty != null && Number.isFinite(receivedQty) ? receivedQty : qty
-    const price = Number(row.price_per_unit)
+  const normalized = normalizeExistingSupplyItems(
+    itemRows as SupplyOrderItemRow[],
+  )
 
-    if (!Number.isFinite(stockQty) || stockQty <= 0) {
-      throw new Error("Некорректное количество в позиции поставки")
-    }
-    if (!Number.isFinite(price) || price < 0) {
-      throw new Error("Некорректная цена в позиции поставки")
-    }
+  const { error: revertError } = await supabase.rpc(
+    "revert_supply_order_stock_items",
+    {
+      p_order_id: id,
+      p_items: toStockRpcPayload(normalized),
+      p_note: "Аннулирование поставки",
+    },
+  )
 
-    return {
-      ingredient_id: row.ingredient_id,
-      stock_qty: stockQty,
-      price_per_unit: price,
-    }
-  })
-
-  const ingredientIds = [...new Set(normalized.map((row) => row.ingredient_id))]
-
-  const { data: stockRows, error: stockReadError } = await supabase
-    .from("ingredient_stock")
-    .select("ingredient_id, quantity, avg_cost")
-    .in("ingredient_id", ingredientIds)
-
-  if (stockReadError) throw new Error(stockReadError.message)
-
-  const stockMap = new Map<string, { quantity: number; avg_cost: number }>()
-  for (const row of stockRows ?? []) {
-    stockMap.set(row.ingredient_id, {
-      quantity: Number(row.quantity),
-      avg_cost: Number(row.avg_cost ?? 0),
-    })
-  }
-
-  const needByIngredient = new Map<string, number>()
-  for (const row of normalized) {
-    needByIngredient.set(
-      row.ingredient_id,
-      (needByIngredient.get(row.ingredient_id) ?? 0) + row.stock_qty,
-    )
-  }
-
-  for (const [ingredientId, need] of needByIngredient) {
-    const stock = stockMap.get(ingredientId)
-    if (!stock) {
-      throw new Error("Нет данных об остатке для одного из ингредиентов")
-    }
-    if (stock.quantity < need) {
-      throw new Error(
-        "Недостаточно остатка для аннулирования: часть товара уже списана или использована",
-      )
-    }
-  }
+  if (revertError) throw new Error(revertError.message)
 
   const ts = new Date().toISOString()
-
-  for (const row of normalized) {
-    const stock = stockMap.get(row.ingredient_id)
-    if (!stock) {
-      throw new Error("Нет данных об остатке для одного из ингредиентов")
-    }
-
-    const removeQty = row.stock_qty
-    const removeCost = row.price_per_unit
-    const newQty = stock.quantity - removeQty
-    const newAvgCost = reverseAvgCost(
-      stock.quantity,
-      stock.avg_cost,
-      removeQty,
-      removeCost,
-    )
-
-    const { error: stockUpError } = await supabase
-      .from("ingredient_stock")
-      .update({
-        quantity: newQty,
-        avg_cost: newAvgCost,
-        updated_at: ts,
-      })
-      .eq("ingredient_id", row.ingredient_id)
-
-    if (stockUpError) throw new Error(stockUpError.message)
-
-    stockMap.set(row.ingredient_id, {
-      quantity: newQty,
-      avg_cost: newAvgCost,
-    })
-
-    const { error: ledgerError } = await supabase.from("stock_ledger").insert({
-      ingredient_id: row.ingredient_id,
-      movement_type: "manual",
-      reference_id: id,
-      reference_type: "supply_order",
-      quantity_delta: -removeQty,
-      cost_per_unit: removeCost,
-      note: "Аннулирование поставки",
-    })
-
-    if (ledgerError) throw new Error(ledgerError.message)
-  }
 
   const { error: annulError } = await supabase
     .from("supply_orders")
@@ -402,8 +457,6 @@ export async function annulSupplyOrder(orderId: string) {
 
   if (annulError) throw new Error(annulError.message)
 
-  revalidatePath("/admin/inventory/supplies")
-  revalidatePath("/admin/inventory/ingredients")
-  revalidatePath("/admin/inventory/stock")
+  revalidateSupplyPaths()
   revalidatePath("/admin/finance/ledger")
 }

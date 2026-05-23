@@ -2,7 +2,9 @@
 
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { refreshCourierOrderTelegramMessage } from "@/lib/actions/pos/courier-telegram-message"
+import { posLinePayloadFromCartItem } from "@/lib/pos-cart-helpers"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
+import type { PosCartItem } from "@/types/pos"
 
 type UpdateOrderItemsResult =
   | { success: true }
@@ -172,10 +174,38 @@ export async function removeOrderItemPos({
 
 type PosOrderTotalsRow = {
   id: string
+  delivery_mode: "delivery" | "pickup" | "aggregator"
   delivery_fee: number
   discount: number
   bonuses_redeemed: number | null
   order_items: OrderItemRow[] | null
+}
+
+function isAggregatorDeliveryMode(
+  mode: string | null | undefined,
+): boolean {
+  return mode === "aggregator"
+}
+
+function orderItemInsertsFromCartLines(
+  orderId: string,
+  lines: PosCartItem[],
+  isAggregator: boolean,
+) {
+  return lines.map((cartItem) => {
+    const line = posLinePayloadFromCartItem(cartItem, isAggregator)
+    return {
+      order_id: orderId,
+      menu_item_id: line.menuItemId,
+      variant_id: line.variantId ?? null,
+      lunch_set_id: null as string | null,
+      item_name: line.name,
+      size: line.size,
+      quantity: line.qty,
+      toppings: line.toppings,
+      price: Math.round(line.unitPriceBani) * line.qty,
+    }
+  })
 }
 
 async function loadOrderForTotals(orderId: string): Promise<PosOrderTotalsRow | null> {
@@ -183,7 +213,7 @@ async function loadOrderForTotals(orderId: string): Promise<PosOrderTotalsRow | 
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
+      "id, delivery_mode, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
     )
     .eq("id", orderId)
     .maybeSingle()
@@ -208,15 +238,7 @@ export async function addOrderItemsPos({
   lines,
 }: {
   orderId: string
-  lines: Array<{
-    menuItemId: string
-    name: string
-    size: string | null
-    variantId?: string | null
-    unitPriceBani: number
-    qty: number
-    toppings: { name: string; price: number; quantity?: number }[]
-  }>
+  lines: PosCartItem[]
 }): Promise<UpdateOrderItemsResult> {
   const staff = await getCurrentStaff()
   if (!staff) return { success: false, error: "Сессия кассира недействительна" }
@@ -228,17 +250,8 @@ export async function addOrderItemsPos({
   const order = await loadOrderForTotals(orderId)
   if (!order) return { success: false, error: "Заказ не найден" }
 
-  const inserts = lines.map((line) => ({
-    order_id: orderId,
-    menu_item_id: line.menuItemId,
-    variant_id: line.variantId ?? null,
-    lunch_set_id: null as string | null,
-    item_name: line.name,
-    size: line.size,
-    quantity: line.qty,
-    toppings: line.toppings,
-    price: Math.round(line.unitPriceBani) * line.qty,
-  }))
+  const isAggregator = isAggregatorDeliveryMode(order.delivery_mode)
+  const inserts = orderItemInsertsFromCartLines(orderId, lines, isAggregator)
 
   const supabase = createServiceRoleClient()
 
@@ -252,7 +265,7 @@ export async function addOrderItemsPos({
   const { data: refreshed, error: refreshError } = await supabase
     .from("orders")
     .select(
-      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
+      "id, delivery_mode, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
     )
     .eq("id", orderId)
     .maybeSingle()
@@ -292,15 +305,7 @@ export async function replaceOrderItemsPos({
   lines,
 }: {
   orderId: string
-  lines: Array<{
-    menuItemId: string
-    name: string
-    size: string | null
-    variantId?: string | null
-    unitPriceBani: number
-    qty: number
-    toppings: { name: string; price: number; quantity?: number }[]
-  }>
+  lines: PosCartItem[]
 }): Promise<UpdateOrderItemsResult> {
   const staff = await getCurrentStaff()
   if (!staff) return { success: false, error: "Сессия кассира недействительна" }
@@ -308,6 +313,7 @@ export async function replaceOrderItemsPos({
   const order = await loadOrderForTotals(orderId)
   if (!order) return { success: false, error: "Заказ не найден" }
 
+  const isAggregator = isAggregatorDeliveryMode(order.delivery_mode)
   const supabase = createServiceRoleClient()
 
   const { error: deleteError } = await supabase
@@ -321,17 +327,7 @@ export async function replaceOrderItemsPos({
   }
 
   if (lines.length > 0) {
-    const inserts = lines.map((line) => ({
-      order_id: orderId,
-      menu_item_id: line.menuItemId,
-      variant_id: line.variantId ?? null,
-      lunch_set_id: null as string | null,
-      item_name: line.name,
-      size: line.size,
-      quantity: line.qty,
-      toppings: line.toppings,
-      price: Math.round(line.unitPriceBani) * line.qty,
-    }))
+    const inserts = orderItemInsertsFromCartLines(orderId, lines, isAggregator)
 
     const { error: insertError } = await supabase.from("order_items").insert(inserts)
 
@@ -379,39 +375,29 @@ export async function replaceOrderItemsPos({
 export async function updateOrderItemCompositionPos({
   orderId,
   itemId,
-  menuItemId,
-  itemName,
-  size,
-  variantId,
-  quantity,
-  unitPriceBani,
-  toppings,
+  cartItem,
 }: {
   orderId: string
   itemId: string
-  menuItemId: string
-  itemName: string
-  size: string | null
-  variantId?: string | null
-  quantity: number
-  unitPriceBani: number
-  toppings: { name: string; price: number; quantity?: number }[]
+  cartItem: PosCartItem
 }): Promise<UpdateOrderItemsResult> {
   const staff = await getCurrentStaff()
   if (!staff) return { success: false, error: "Сессия кассира недействительна" }
 
-  const nextQuantity = Math.round(quantity)
+  const nextQuantity = Math.round(cartItem.qty)
   if (nextQuantity < 1) {
     return { success: false, error: "Количество должно быть больше нуля" }
   }
-
-  const unit = Math.round(unitPriceBani)
-  if (unit < 1) return { success: false, error: "Некорректная цена" }
 
   const order = await loadOrderForTotals(orderId)
   const items = order?.order_items ?? []
   const exists = items.some((row) => row.id === itemId)
   if (!order || !exists) return { success: false, error: "Позиция не найдена" }
+
+  const isAggregator = isAggregatorDeliveryMode(order.delivery_mode)
+  const line = posLinePayloadFromCartItem(cartItem, isAggregator)
+  const unit = Math.round(line.unitPriceBani)
+  if (unit < 1) return { success: false, error: "Некорректная цена" }
 
   const linePrice = unit * nextQuantity
   const supabase = createServiceRoleClient()
@@ -419,12 +405,12 @@ export async function updateOrderItemCompositionPos({
   const { error: itemError } = await supabase
     .from("order_items")
     .update({
-      menu_item_id: menuItemId,
-      variant_id: variantId ?? null,
-      item_name: itemName,
-      size,
+      menu_item_id: line.menuItemId,
+      variant_id: line.variantId ?? null,
+      item_name: line.name,
+      size: line.size,
       quantity: nextQuantity,
-      toppings,
+      toppings: line.toppings,
       price: linePrice,
     })
     .eq("id", itemId)

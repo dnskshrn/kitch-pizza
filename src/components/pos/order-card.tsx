@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import type { OrderStatus } from "@/types/database"
 import type { PosOrder, PosOrderStatus } from "@/types/pos"
 import { MapPin, Phone, Store, Truck, Tag, User, CircleUser, Bike } from "lucide-react"
 import { useEffect, useState } from "react"
@@ -216,6 +217,12 @@ export function WebsiteNewActions({
 
 export type OrderWithBrand = PosOrder
 
+const HIGHLIGHT_CARD_STATUSES: OrderStatus[] = ["new", "confirmed"]
+
+function isHighlightOrderStatus(status: PosOrderStatus): boolean {
+  return HIGHLIGHT_CARD_STATUSES.includes(status as OrderStatus)
+}
+
 type OrderCardProps = {
   order: OrderWithBrand
   isSelected: boolean
@@ -238,7 +245,11 @@ export function OrderCard({
         "flex flex-col gap-0 rounded-lg border-0 bg-white px-4 py-4 shadow-none transition-colors",
         isSelected
           ? "ring-2 ring-inset ring-[#242424]"
-          : "cursor-pointer hover:bg-[#fafafa]",
+          : cn(
+              "cursor-pointer hover:bg-[#fafafa]",
+              isHighlightOrderStatus(order.status) &&
+                "ring-2 ring-inset ring-orange-400",
+            ),
       )}
     >
       <div

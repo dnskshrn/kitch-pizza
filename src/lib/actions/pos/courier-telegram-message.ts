@@ -1,12 +1,14 @@
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
+import { posCheckoutAddressFieldsFromOrder } from "@/lib/pos/split-composite-delivery-address"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import { editMessageText, sendLocation, sendMessage } from "@/lib/telegram/bot"
+import type { PaymentMethod } from "@/types/database"
 
 export const COURIER_ORDER_ASSIGNMENT_SELECT =
-  "id, status, delivery_mode, courier_id, order_number, total, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
+  "id, status, delivery_mode, courier_id, order_number, total, delivery_fee, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
 
 export const COURIER_ORDER_TELEGRAM_SELECT =
-  "id, status, delivery_mode, courier_id, courier_tg_chat_id, courier_tg_message_id, courier_tg_message_updated_at, order_number, total, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
+  "id, status, delivery_mode, courier_id, courier_tg_chat_id, courier_tg_message_id, courier_tg_message_updated_at, order_number, total, delivery_fee, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
 
 export type CourierOrderTelegramFields = {
   id?: string
@@ -18,6 +20,7 @@ export type CourierOrderTelegramFields = {
   courier_tg_message_updated_at?: string | null
   order_number: number
   total: number
+  delivery_fee: number
   user_name: string | null
   delivery_address: string | null
   delivery_lat: number | null
@@ -27,7 +30,7 @@ export type CourierOrderTelegramFields = {
   address_entrance: string | null
   address_intercom: string | null
   user_phone: string | null
-  payment_method: "cash" | "card" | null
+  payment_method: PaymentMethod | null
   change_from: number | null
   order_items: CourierOrderTelegramItem[] | null
   brands: { slug: string | null } | { slug: string | null }[] | null
@@ -115,56 +118,87 @@ async function withResolvedDeliveryCoords(
   }
 }
 
-function paymentMethodLabel(row: CourierOrderTelegramFields): string {
-  if (row.payment_method === "card") return "Картой"
-  if (row.payment_method === "cash") {
-    return row.change_from != null && row.change_from > 0
-      ? `Наличными, сдача с ${(row.change_from / 100).toFixed(0)} MDL`
-      : "Наличными"
+function formatMdl(bani: number): string {
+  return (bani / 100).toFixed(2)
+}
+
+function paymentMethodLabel(method: PaymentMethod | null | undefined): string {
+  switch (method) {
+    case "cash":
+      return "Наличными"
+    case "card":
+      return "Картой"
+    case "mixed":
+      return "Смешанная оплата"
+    default:
+      return "Не указан"
   }
-  return "Не указан"
 }
 
-function paymentMethodEmoji(row: CourierOrderTelegramFields): string {
-  if (row.payment_method === "card") return "💳"
-  if (row.payment_method === "cash") return "💵"
-  return "💰"
+function formatCourierDeliveryAddress(row: CourierOrderTelegramFields): string {
+  const { deliveryAddress, entrance, floor, apartment } =
+    posCheckoutAddressFieldsFromOrder({
+      delivery_mode: "delivery",
+      delivery_address: row.delivery_address,
+      address_entrance: row.address_entrance,
+      address_floor: row.address_floor,
+      address_apartment: row.address_apartment,
+      address_intercom: row.address_intercom,
+    })
+
+  const parts = [
+    deliveryAddress,
+    entrance ? `подъезд ${entrance}` : "",
+    floor ? `эт. ${floor}` : "",
+    apartment ? `кв. ${apartment}` : "",
+  ].filter((p) => p.length > 0)
+
+  return parts.length > 0 ? parts.join(", ") : "—"
 }
 
-function orderItemsLines(items: CourierOrderTelegramItem[] | null): string[] {
+function orderItemsBlock(items: CourierOrderTelegramItem[] | null): string {
   const rows = (items ?? []).filter((item) => item.item_name?.trim())
-  if (!rows.length) return ["—"]
+  if (!rows.length) return "—"
 
-  return rows.map((item) => {
-    const qty = Math.max(1, Math.round(item.quantity ?? 1))
-    const price = Math.max(0, Math.round(item.price ?? 0))
-    const priceText = price > 0 ? ` — ${(price / 100).toFixed(0)} MDL` : ""
-    return `• ${qty} x ${item.item_name?.trim()}${priceText}`
-  })
+  return rows
+    .map((item) => {
+      const qty = Math.max(1, Math.round(item.quantity ?? 1))
+      const priceBani = Math.max(0, Math.round(item.price ?? 0))
+      return `• ${qty} x ${item.item_name?.trim()} — ${formatMdl(priceBani)} MDL`
+    })
+    .join("\n")
 }
 
 function buildCourierAssignmentMessage(row: CourierOrderTelegramFields): string {
-  const addressParts = [
-    row.delivery_address ?? "—",
-    row.address_entrance ? `, подъезд ${row.address_entrance}` : "",
-    row.address_floor ? `, эт. ${row.address_floor}` : "",
-    row.address_apartment ? `, кв. ${row.address_apartment}` : "",
-    row.address_intercom ? `, домофон ${row.address_intercom}` : "",
-  ].join("")
+  const totalBani = Math.max(0, Math.round(row.total ?? 0))
+  const deliveryFeeBani = Math.max(0, Math.round(row.delivery_fee ?? 0))
+  const subtotalBani = Math.max(0, totalBani - deliveryFeeBani)
+  const deliveryPriceText =
+    deliveryFeeBani === 0 ? "Бесплатно" : `${formatMdl(deliveryFeeBani)} MDL`
 
-  return [
+  const clientName = row.user_name?.trim() ?? ""
+  const lines: string[] = [
     `🛵 Новый заказ #${row.order_number}`,
     "",
-    `👤 ${row.user_name?.trim() || "Клиент не указан"}`,
-    `${paymentMethodEmoji(row)} ${paymentMethodLabel(row)}`,
-    "",
-    `📍 ${addressParts}`,
-    `📞 ${row.user_phone ?? "не указан"}`,
-    `💰 ${(row.total / 100).toFixed(0)} MDL`,
+  ]
+
+  if (clientName) {
+    lines.push(`👤 ${clientName}`)
+  }
+
+  lines.push(
+    `📞 ${row.user_phone?.trim() || "не указан"}`,
+    `📍 ${formatCourierDeliveryAddress(row)}`,
     "",
     "Состав заказа:",
-    ...orderItemsLines(row.order_items),
-  ].join("\n")
+    orderItemsBlock(row.order_items),
+    "",
+    `🧾 Сумма заказа: ${formatMdl(subtotalBani)} MDL`,
+    `🚗 Доставка: ${deliveryPriceText}`,
+    `💰 К оплате: ${formatMdl(totalBani)} MDL — ${paymentMethodLabel(row.payment_method)}`,
+  )
+
+  return lines.join("\n")
 }
 
 function telegramMessageId(raw: number | string | null | undefined): number | null {

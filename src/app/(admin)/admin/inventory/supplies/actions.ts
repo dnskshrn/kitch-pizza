@@ -408,54 +408,10 @@ export async function annulSupplyOrder(orderId: string) {
 
   const supabase = createServiceRoleClient()
 
-  const { data: orderRow, error: orderError } = await supabase
-    .from("supply_orders")
-    .select("id, annulled_at")
-    .eq("id", id)
-    .maybeSingle()
-
-  if (orderError) throw new Error(orderError.message)
-  if (!orderRow) {
-    throw new Error("Поставка не найдена")
-  }
-  if (orderRow.annulled_at != null) {
-    throw new Error("Поставка уже аннулирована")
-  }
-
-  const { data: itemRows, error: itemsError } = await supabase
-    .from("supply_order_items")
-    .select("ingredient_id, quantity, received_qty, price_per_unit")
-    .eq("supply_order_id", id)
-
-  if (itemsError) throw new Error(itemsError.message)
-  if (!itemRows || itemRows.length === 0) {
-    throw new Error("У поставки нет позиций")
-  }
-
-  const normalized = normalizeExistingSupplyItems(
-    itemRows as SupplyOrderItemRow[],
-  )
-
-  const { error: revertError } = await supabase.rpc(
-    "revert_supply_order_stock_items",
-    {
-      p_order_id: id,
-      p_items: toStockRpcPayload(normalized),
-      p_note: "Аннулирование поставки",
-    },
-  )
-
-  if (revertError) throw new Error(revertError.message)
-
-  const ts = new Date().toISOString()
-
-  const { error: annulError } = await supabase
-    .from("supply_orders")
-    .update({ annulled_at: ts })
-    .eq("id", id)
-    .is("annulled_at", null)
-
-  if (annulError) throw new Error(annulError.message)
+  const { error } = await supabase.rpc("annul_supply_order_stock", {
+    p_order_id: id,
+  })
+  if (error) throw new Error(error.message)
 
   revalidateSupplyPaths()
   revalidatePath("/admin/finance/ledger")

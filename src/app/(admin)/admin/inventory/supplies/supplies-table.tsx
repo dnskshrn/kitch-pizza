@@ -15,10 +15,8 @@ import {
 import { Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import {
-  SupplyOrderDialog,
-  type SupplyOrderViewModel,
-} from "./supply-order-dialog"
+import { SupplyOrderDialog } from "./supply-order-dialog"
+import type { SupplyOrderViewModel } from "./types"
 
 function formatMdlTable(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(Number(value))) return "—"
@@ -63,7 +61,7 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
         supplierNameById[o.supplier_id] ?? ""
       ).toLowerCase()
       const note = (o.note ?? "").toLowerCase()
-      const delivery = o.delivery_date.toLowerCase()
+      const delivery = (o.delivery_date ?? "").toLowerCase()
       const totals = [
         o.total_cost_ex_vat != null
           ? formatMdlTable(o.total_cost_ex_vat).toLowerCase()
@@ -144,7 +142,7 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
                 <TableCell
                   className={cn("font-medium", isAnnulled && "line-through")}
                 >
-                  {o.delivery_date.slice(0, 10)}
+                  {(o.delivery_date ?? "").slice(0, 10) || "—"}
                 </TableCell>
                 <TableCell className={cn(isAnnulled && "line-through")}>
                   {supplierNameById[o.supplier_id] ?? "—"}

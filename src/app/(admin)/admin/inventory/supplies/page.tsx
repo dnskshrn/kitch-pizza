@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
 import type { Ingredient, Supplier } from "@/types/database"
 import { SuppliesTable } from "./supplies-table"
-import type { SupplyOrderViewModel } from "./supply-order-dialog"
+import type { SupplyOrderViewModel } from "./types"
+
+export const dynamic = "force-dynamic"
 
 type RawSupplyItemRow = {
   id: string
@@ -23,7 +25,12 @@ type RawSupplyOrderRow = {
   total_cost_inc_vat: number | string | null
   annulled_at: string | null
   suppliers: unknown
-  supply_order_items: RawSupplyItemRow[] | null
+  supply_order_items: RawSupplyItemRow[] | RawSupplyItemRow | null
+}
+
+function asRelationArray<T>(value: T | T[] | null | undefined): T[] {
+  if (value == null) return []
+  return Array.isArray(value) ? value : [value]
 }
 
 function firstRelation<T extends Record<string, unknown>>(
@@ -39,7 +46,7 @@ function firstRelation<T extends Record<string, unknown>>(
 }
 
 function toSupplyOrderViewModel(row: RawSupplyOrderRow): SupplyOrderViewModel {
-  const items = (row.supply_order_items ?? []).map((it) => {
+  const items = asRelationArray(row.supply_order_items).map((it) => {
     const ing = firstRelation<{ name: string; unit: string }>(it.ingredients)
     return {
       id: it.id,

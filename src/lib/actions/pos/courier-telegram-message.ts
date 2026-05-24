@@ -5,15 +5,16 @@ import { editMessageText, sendLocation, sendMessage } from "@/lib/telegram/bot"
 import type { PaymentMethod } from "@/types/database"
 
 export const COURIER_ORDER_ASSIGNMENT_SELECT =
-  "id, status, delivery_mode, courier_id, order_number, total, delivery_fee, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
+  "id, status, delivery_mode, created_at, courier_id, order_number, total, delivery_fee, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
 
 export const COURIER_ORDER_TELEGRAM_SELECT =
-  "id, status, delivery_mode, courier_id, courier_tg_chat_id, courier_tg_message_id, courier_tg_message_updated_at, order_number, total, delivery_fee, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
+  "id, status, delivery_mode, created_at, courier_id, courier_tg_chat_id, courier_tg_message_id, courier_tg_message_updated_at, order_number, total, delivery_fee, user_name, delivery_address, delivery_lat, delivery_lng, address_floor, address_apartment, address_entrance, address_intercom, user_phone, payment_method, change_from, brands(slug), order_items(item_name, quantity, price)"
 
 export type CourierOrderTelegramFields = {
   id?: string
   status?: string | null
   delivery_mode?: string | null
+  created_at?: string | null
   courier_id?: string | null
   courier_tg_chat_id?: string | null
   courier_tg_message_id?: number | string | null
@@ -169,6 +170,16 @@ function orderItemsBlock(items: CourierOrderTelegramItem[] | null): string {
     .join("\n")
 }
 
+function estimatedDeliveryTime(createdAt: string | null | undefined): string {
+  if (!createdAt) return "—"
+  const date = new Date(new Date(createdAt).getTime() + 60 * 60 * 1000)
+  return date.toLocaleTimeString("ru-RU", {
+    timeZone: "Europe/Chisinau",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
 function buildCourierAssignmentMessage(row: CourierOrderTelegramFields): string {
   const totalBani = Math.max(0, Math.round(row.total ?? 0))
   const deliveryFeeBani = Math.max(0, Math.round(row.delivery_fee ?? 0))
@@ -189,6 +200,7 @@ function buildCourierAssignmentMessage(row: CourierOrderTelegramFields): string 
   lines.push(
     `📞 ${row.user_phone?.trim() || "не указан"}`,
     `📍 ${formatCourierDeliveryAddress(row)}`,
+    `🕐 Доставить до: ${estimatedDeliveryTime(row.created_at)}`,
     "",
     "Состав заказа:",
     orderItemsBlock(row.order_items),

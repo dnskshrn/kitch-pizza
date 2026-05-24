@@ -7,10 +7,27 @@ import {
   saveCustomer,
   saveCustomerAddress,
   type CustomerAddressInput,
+  type CustomerAddressRow,
   type CustomerWithAddresses,
 } from "@/lib/customers"
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
+import type { CustomerAddress } from "@/types/database"
+
+function toCustomerAddress(row: CustomerAddressRow): CustomerAddress {
+  return {
+    id: row.id,
+    address: row.address,
+    label: row.label ?? null,
+    entrance: row.entrance ?? null,
+    floor: row.floor ?? null,
+    apartment: row.apartment ?? null,
+    intercom: row.intercom ?? null,
+    delivery_lat: row.delivery_lat ?? null,
+    delivery_lng: row.delivery_lng ?? null,
+    is_default: row.is_default,
+  }
+}
 
 const DEFAULT_MAX_REDEMPTION_RATE = 0.3
 
@@ -36,6 +53,7 @@ export type PosLookupCustomerResult =
   | {
       ok: true
       customer: CustomerWithAddresses | null
+      addresses: CustomerAddress[]
       bonusBalance: number | null
       maxRedemptionRate: number | null
     }
@@ -51,6 +69,7 @@ export async function posLookupCustomer(
     return {
       ok: true,
       customer: null,
+      addresses: [],
       bonusBalance: null,
       maxRedemptionRate: null,
     }
@@ -61,10 +80,13 @@ export async function posLookupCustomer(
     return {
       ok: true,
       customer: null,
+      addresses: [],
       bonusBalance: null,
       maxRedemptionRate: null,
     }
   }
+
+  const addresses = customer.addresses.map(toCustomerAddress)
 
   const [bonusBalance, maxRedemptionRate] = await Promise.all([
     getUserBalance(customer.profile.id),
@@ -74,6 +96,7 @@ export async function posLookupCustomer(
   return {
     ok: true,
     customer,
+    addresses,
     bonusBalance,
     maxRedemptionRate,
   }

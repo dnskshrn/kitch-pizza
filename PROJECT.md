@@ -32,7 +32,7 @@ src/
 ├── app/
 │   ├── (client)/        # витрина, checkout, account
 │   ├── (admin)/admin/   # админка
-│   ├── pos/             # POS + KDS
+│   ├── pos/             # POS + KDS (страницы App Router)
 │   ├── api/             # REST endpoints
 │   ├── robots.ts, sitemap.ts
 │   ├── globals.css
@@ -41,7 +41,7 @@ src/
 ├── components/
 │   ├── client/          # витрина, корзина, checkout, auth
 │   ├── admin/           # AdminShell, sidebar, analytics, inventory, cash-sessions
-│   ├── pos/             # PosAppShell, OrderForm, KdsScreen и др.
+│   ├── pos/             # PosAppShell, OrderForm, KdsScreen; order-form/pos-address-cards.tsx
 │   ├── store-closed-modal.tsx  # оверлей «магазин закрыт» (витрина)
 │   ├── topping-stepper-card.tsx  # карточка топпинга со stepper (витрина + POS)
 │   ├── seo/JsonLd.tsx
@@ -55,6 +55,7 @@ src/
 │   ├── data/            # storefront fetchers
 │   ├── store/           # Zustand stores (cart, delivery, store-closed, …)
 │   ├── i18n/, pos/, pbx/, seo/, telegram/, supabase/
+│   ├── admin/           # get-actual-balance, orders-url, cash-sessions-url, orders-today-metrics
 │   ├── bonus.ts, customers.ts, discount-engine.ts
 │   ├── store-hours.ts, cart-toppings.ts, cart-helpers.ts, topping-pricing.ts, topping-max-selection.ts
 │   ├── pos-cart-toppings.ts, pos-cart-helpers.ts
@@ -247,7 +248,7 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 - `src/app/pos/page.tsx`: слева `OrdersPanel` (24 ч активных + 50 «Выданных»; `ORDERS_POS_SELECT` в `src/lib/pos/fetch-orders.ts`); справа — `idle` (выбор типа: доставка / навынос / Glovo), `wizard` (мастер `OrderForm`) или `detail` (только `done`).
 - При монтировании страница один раз грузит `brands(id, name, slug)`, склеивает с `BrandConfig` в `wizardBrands` (`PosWizardBrandOption`), затем предзагружает меню всех брендов в `usePosMenuCache`.
 - **Realtime POS:** два канала в `orders-panel.tsx` на anon-клиенте — `pos-orders` и `pos-order-items`, `postgres_changes`, `event:*`. На каждое событие — `reloadOrders()` → `fetchPosOrders` / `fetchCompletedPosOrders` + `mergeOrdersPreserveBrandSlug` (сохраняет `brand_slug` если ответ пришёл с пустым slug при том же `brand_id`). При `INSERT` в `orders` — `playPosNewOrderSound()`.
-- Левая `OrderCard` — **только просмотр**: статус и курьер read-only. Все переходы статусов делаются из мастера/деталки (`update-order-status-kds`, `assign-courier-pos`, `payOrder`).
+- Левая `OrderCard` (`components/pos/order-card.tsx`) — **только просмотр**: статус и курьер read-only. Все переходы статусов делаются из мастера/деталки (`update-order-status-kds`, `assign-courier-pos`, `payOrder`). Карточки со статусом **`new`** или **`confirmed`** — оранжевая внутренняя обводка `ring-2 ring-inset ring-orange-400` (при выборе — чёрная `ring-[#242424]`).
 - Принять / отклонить заказ с сайта (`new` + `source='website'`) — только из `OrderDetail` (`accept-order-pos`, `reject-order-pos`).
 
 ### Мастер заказа (OrderForm)
@@ -276,7 +277,8 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 - Время доставки (`ScheduledTimePicker`, `generateScheduledSlots`): `asap` или `HH:MM` → `orders.scheduled_time`. Слоты по `BrandConfig.openHour/closeHour`.
 - Оплата: `cash` / `card` / `mixed`. Сохранение — сразу по клику (для `mixed` — только когда обе суммы согласованы с итогом, защита DB constraint).
 - Дополнительно: `comment` (общий) и опционально `kitchen_note` (только для KDS).
-- **Lookup клиента** (`posLookupCustomer`): по телефону, debounce 500 мс + дедупликация. Возвращает профиль, адреса, баланс бонусов, `bonus_settings.max_redemption_rate` (id=1, дефолт 0.3 при сбое).
+- **Lookup клиента** (`posLookupCustomer`): по телефону, debounce 500 мс + дедупликация. Возвращает `customer` (профиль + `addresses[]`), отдельное поле `addresses: CustomerAddress[]`, баланс бонусов, `bonus_settings.max_redemption_rate` (id=1, дефолт 0.3 при сбое). Адреса подгружаются в `getCustomerByPhone` одним JOIN на `customer_addresses`.
+- **Адрес на «Деталях» (delivery):** при найденном клиенте с сохранёнными адресами — карточки `PosAddressCards` (`components/pos/order-form/pos-address-cards.tsx`) вместо полей ввода; выбор карточки заполняет `delivery_address`, `address_*`, координаты и вызывает `checkDeliveryZoneByAddress`. «+ Новый адрес» — ручной ввод; после успешного «Отправить бегунок» новый адрес сохраняется через `posSaveCustomerAddress` (ошибка — `console.error`, отправку не блокирует). Состояние: `selectedAddressId`, `showNewAddressForm`.
 - **Списание бонусов:** поле при найденном клиенте, `total > 0`, `balance > 0`. Потолок = `floor(min(balance, totalBani/100 × max_redemption_rate))`. `totalBani` после скидок и доставки.
 - Все правки на «Деталях» уходят через `updateOrderDetailsPos` с **debounce 600 мс** (контакт, адрес, координаты, comment, kitchen_note, profile_id, скидки, промо, синхронизация подарочных строк).
 
@@ -288,6 +290,7 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 - Действует для `draft` / `new` / `confirmed` → `cooking`. Идемпотентно: уже в `cooking` — успех с тем же id.
 - Проставляет `cooking_started_at`, `updated_at`. Пересчитывает `total` только под **списание бонусов**: берёт уже сохранённый `orders.total` (нетто), восстанавливает gross (`+ bonuses_redeemed × 100`), вычитает новое списание → `bonuses_redeemed`. **Не** пересчитывает subtotal из каталога/`aggregator_price_bani` — агрегаторные цены должны быть записаны в `order_items` на шаге «Оформление» (`replaceOrderItemsPos` / `addOrderItemsPos`).
 - Затем `redeemBonus` из `lib/bonus.ts` (если `bonuses_redeemed > 0` и есть `profile_id`). Ошибки только в `console.error`, заказ не откатывается.
+- После успеха на шаге «Детали»: если введён **новый** адрес (`showNewAddressForm`) и есть `profile_id` — best-effort `posSaveCustomerAddress` (не блокирует отправку).
 - Мастер остаётся открытым на том же `orderId`.
 
 **«Назначить курьера»** — только из мастера, шаг «Оформление»:
@@ -348,7 +351,7 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 - Webhook: `POST /api/telegram` с заголовком `X-Telegram-Bot-Api-Secret-Token`. Команды: `/start` (привязка по токену), `/shift_start`, `/shift_end`; live location → `courier_locations`.
 - Исходящие — через `src/lib/telegram/bot.ts`: `sendMessage(chatId, text, replyMarkup?)` → `message_id`, `sendLocation(chatId, lat, lng, replyToMessageId?)`, `editMessageText(chatId, messageId, text, replyMarkup?)`.
 - При assign (`sendCourierAssignmentTelegram` в `courier-telegram-message.ts`):
-  1. `sendMessage` — карточка заказа (оплата с 💳/💵, сумма 💰).
+  1. `sendMessage` — карточка заказа (`buildCourierAssignmentMessage`): заголовок «🛵 Новый заказ #N», опционально 👤 имя, 📞 телефон, 📍 адрес (через `posCheckoutAddressFieldsFromOrder` / `split-composite-delivery-address`), блок «Состав заказа» (`• qty x name — price MDL` из `order_items.price` в bani), итоги: 🧾 сумма заказа = `total - delivery_fee`, 🚗 доставка («Бесплатно» или MDL), 💰 к оплате + способ (`Наличными` / `Картой` / `Смешанная оплата`). Select включает `delivery_fee`.
   2. `sendLocation` с `reply_to_message_id` к карточке, если есть координаты (иначе `withResolvedDeliveryCoords` + `checkDeliveryZoneByAddress`).
   3. В `orders` пишутся `courier_tg_chat_id`, `courier_tg_message_id` (**только текстовая карточка**, для `editMessageText`), `courier_tg_message_updated_at`.
 - При смене курьера: старая карточка правится через `editPreviousCourierAssignmentTelegram`, новому курьеру — новая пара.
@@ -381,9 +384,21 @@ Bootstrap для витрины — `getStorefrontCartPricingBootstrap` в `disc
 
 Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceSupabaseClient`).
 
-- `getUserBalance(profileId)` — последняя `balance_after` в `bonus_transactions` (**используется на витрине и в POS**).
-- В админке `/api/admin/bonus/adjust` баланс считается как `SUM(amount)`. Может расходиться с `getUserBalance`, если знаки в истории смешаны.
+- `getUserBalance(profileId)` — последняя `balance_after` в `bonus_transactions` (**витрина, POS, `/api/bonus/balance`**).
+- **`getActualBalance(profileId)`** — `src/lib/admin/get-actual-balance.ts`: тот же алгоритм (последний `balance_after`); **админка** — заголовок `/admin/customers/[id]` и `POST /api/admin/bonus/adjust` (расчёт `balance_after` новой транзакции = текущий ± сумма).
 - `getBonusSettings()`, `manualAdjust`, `accrueBonus`, `redeemBonus`, `processBonusAccrualOnOrderDone(profileId, orderId, totalBani, multiplier?)`.
+
+**Список клиентов (RPC `admin_customers_list`):**
+
+- Возвращает **JSON** `{ data: [...], total: N }` (не TABLE). В `page.tsx`: `listResult.data.data`, `listResult.data.total`.
+- Параметры (**snake_case**, имена должны совпадать с PostgreSQL — иначе PostgREST подставит дефолты и вернёт пустой результат):
+  - `search_q` — поиск по телефону (`ILIKE '%q%'`); при отсутствии поиска передавать `''`, не `null`
+  - `list_limit`, `list_offset` — пагинация (100 на страницу)
+  - `activity_segment`: `all` | `active_7` | `active_30` | `sleeping_30_90` | `sleeping_90`
+  - `orders_segment`: `all` | `one_time` | `returning` | `loyal`
+  - `sort_by`: `last_order` | `ltv` | `order_count`
+- Поле `bonus_balance` в строках = последний `balance_after` (миграция `*_admin_customers_list_bonus_balance.sql`), не `SUM(amount)`. `amount` в `bonus_transactions` всегда > 0; знак операции — поле `type` (`accrual`/`manual_add` vs `redemption`/`manual_deduct`).
+- Миграции в репозитории: `*_admin_customers_list.sql`, `*_admin_customers_list_bonus_balance.sql`, `*_admin_customers_list_pagination.sql`. На remote — актуальная версия с JSON-ответом и фильтрами.
 
 **Начисление** (после успешного `payOrder`): `Math.round((totalBani / 100) × accrual_rate × bonus_multiplier)`. `totalBani` уже с учётом списанных бонусов. Ошибки логируются, оплату не блокируют.
 
@@ -407,8 +422,8 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - **Модалка поставки** (`inventory/supplies/supply-order-dialog.tsx`): колонки **Количество**, цена за ед. без/с НДС, НДС %, цена с НДС / ед., **Итого без НДС**, **Итого с НДС**. **Двусторонний пересчёт** — можно ввести любое из полей цены/итога, остальные заполняются автоматически (`priceAnchor`: `unit_ex` | `unit_inc` | `line_ex` | `line_inc`). Итоги по строке и футер поставки — `количество × цена`. Числовые инпуты — единая ширина (`SUPPLY_ROW_INPUT_CLASS`, 132px).
 - `createSupplyOrder` (`inventory/supplies/actions.ts`): вставка заказа и строк, `total_cost_ex_vat` / `total_cost_inc_vat` по строкам; пополнение склада — RPC **`apply_supply_order_stock_items(p_order_id, p_items, p_note?)`** (миграции `*_apply_supply_stock_rpc.sql`, `*_revert_supply_stock_and_update.sql`, service role): для каждой позиции **upsert** `ingredient_stock` (средневзвешенный `avg_cost`) и `stock_ledger` (`movement_type='supply'`, `reference_type='supply_order'`). Количество на склад — `received_qty ?? quantity`. При ошибке RPC откатываются строки и заголовок заказа.
 - **`updateSupplyOrder(orderId, payload)`** (service role): редактирование **активной** поставки (`annulled_at IS NULL`). Порядок: обновление шапки `supply_orders` + замена `supply_order_items`; затем RPC **`replace_supply_order_stock_items`** (атомарно: откат старых строк через `revert_supply_order_stock_items` + применение новых через `apply_supply_order_stock_items`). В `stock_ledger`: откат — `movement_type='manual'`, note «Редактирование поставки (откат)»; применение — `movement_type='supply'`, note «Редактирование поставки (применение)». При ошибке RPC строки поставки восстанавливаются из снимка. Блокировка при недостатке остатка для отката.
-- `annulSupplyOrder(orderId)` (service role): RPC **`revert_supply_order_stock_items`** (откат qty/`avg_cost`, `stock_ledger` manual, note «Аннулирование поставки»), затем `annulled_at`. Блокируется при недостатке остатка или если уже аннулирована.
-- **UI** (`supply-order-dialog.tsx`): режимы `create` | `edit` | `view`. Активная поставка открывается в **edit** (редактируемые поля, «Сохранить» → `updateSupplyOrder` с confirm «пересчитает остатки»). Аннулированная — только **view**. В edit доступно аннулирование. Список — `supplies-table.tsx` (бейдж «Аннулирована»).
+- `annulSupplyOrder(orderId)` (service role): один RPC **`annul_supply_order_stock(p_order_id)`** — атомарно: проверка «не аннулирована», откат `ingredient_stock` / `avg_cost`, `stock_ledger`, `annulled_at`. Ошибки БД — через `throw new Error(error.message)`.
+- **UI** (`supply-order-dialog.tsx`): режимы `create` | `edit` | `view`. Типы — `inventory/supplies/types.ts` (`SupplyOrderViewModel`, без импорта из client-компонента). Активная поставка открывается в **edit** (редактируемые поля, «Сохранить» → `updateSupplyOrder` с confirm «пересчитает остатки»). Аннулированная — только **view**. В edit доступно аннулирование. Список — `supplies-table.tsx` (бейдж «Аннулирована»). Страница `/admin/inventory/supplies` — `force-dynamic`; вложенные `supply_order_items` нормализуются в массив (`asRelationArray`, как на semi-finished).
 - `avg_cost` пересчитывается **средневзвешенно** по цене поставки (ex-VAT).
 - В UI: цены без НДС и с НДС синхронно (общая VAT % по строке); в БД — ex-VAT, в g/ml через `toStoragePrice`.
 
@@ -553,6 +568,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - Storefront-разработка: использовать `storefront-modal-*`, `storefront-checkout-*`, `storefront-input` вместо локальных цветов.
 - Доставка: `delivery-store` + `getStorefrontDeliveryLineDisplay` (`storefront-delivery-display.ts`); fee из `getDeliveryFeeBani` → `selectedZone.resolvedParams`. Модалка адреса — `DeliveryRoot` / `getActiveDeliveryZones` (зоны уже отфильтрованы по `isZoneAvailableNow`).
 - Корзина: `cart-store` (`CART_STORAGE_KEY` = `kitch-cart` в persist; брендовые ключи в `BrandConfig.cartKey` / `deliveryKey` — см. TODO). `cartToppings` + legacy `selectedToppingIds` синхронизируются при записи; `toppingGroupFreeCounts` / `toppingGroupLabels` — snapshot при добавлении из модалки. Детали топпингов в UI — `CartItemToppingDetails`.
+- **Списание бонусов в checkout:** `BonusRedeemBlock` (`components/client/bonus-redeem-block.tsx`) — слайдер + строка «Списать N бонусов = −N MDL» (`t.bonus.redeemSummary`); текст итога — `var(--color-text)` (контраст на белом фоне).
 - Вне часов работы бренда — см. **«Модалка „магазин закрыт"»**.
 
 ### /account
@@ -598,8 +614,8 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 |---|---|
 | `/admin/analytics` | Дашборд KPI и графики: `getAnalyticsData` (`lib/actions/admin/analytics.ts`), `AnalyticsDashboard` (recharts). Фильтры: период 7/14/30 дней, бренд или все. Заказы `status=done`, выручка в MDL (bani/100). |
 | `/admin/orders` | Метрики за сутки UTC (`getAdminOrdersTodayMetrics`) + фильтры (`status_group`, `brand_id`, `order_src`, `search`, даты — дефолт сегодня UTC) + таблица. Клик по строке → `OrderDetailSheet` через `fetchAdminOrderDetail` (service role). |
-| `/admin/customers` | RPC `admin_customers_list(search_q)`; поиск `?q=`. |
-| `/admin/customers/[id]` | RSC: профиль, баланс (`SUM(amount)`), до 50 транзакций, до 20 заказов. `BonusAdjustForm` → `POST /api/admin/bonus/adjust`. |
+| `/admin/customers` | RSC `page.tsx`: RPC **`admin_customers_list`** (100 строк/стр., JSON `{ data, total }`). URL: `?q=` (телефон), `?page=`, `?activity_segment=`, `?orders_segment=`, `?sort_by=` — при смене фильтра/поиска сброс `page`. Клиентские части: `customers-search.tsx` (debounce 300 ms), `customers-filters.tsx` + `customers-filters-config.ts` (pill-кнопки, accent `#ccff00`), `customers-pagination.tsx` («← Назад / Вперёд →», «Страница X из Y»). Таблица `customers-table.tsx`: телефон, **адрес** (`hidden md:table-cell`, truncate), имя, заказы, LTV, **бонусы**, даты первого/последнего заказа; клик → `/admin/customers/[id]`. Счётчик «Клиентов: X из Y». |
+| `/admin/customers/[id]` | RSC: профиль, баланс через **`getActualBalance`**, до 50 транзакций, до 20 заказов. `BonusAdjustForm` → `POST /api/admin/bonus/adjust` (тоже `getActualBalance` для `balance_after`). |
 | `/admin/settings/bonus` | `bonus_settings` id=1; `updateBonusSettings` (`%` в UI → доли в БД). |
 | `/admin/categories` | `menu_categories`: RU/RO, slug, `image_url`, `show_in_upsell`, `exclude_from_discounts`, `workshop`. |
 | `/admin/menu` | `menu_items` + `menu_item_variants` (+ `aggregator_price_bani`). Привязка групп топпингов с `free_count` (`menu-item-dialog.tsx`). `RecipeEditorModal` (типы строк: ингредиент, п/ф, комбо; себестоимость — `product-recipe-cost.ts`; embed п/ф — FK-hint `semi_finished_items!semi_finished_items_semi_finished_id_fkey`). `?edit={id}` автооткрытие. Бейджи покрытия рецептом + **себестоимость рецепта** (MDL) из `buildMenuItemRecipeCostMap` на сервере. |
@@ -620,7 +636,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 | `/admin/inventory/ingredients` | `ingredients` + `ingredient_stock`. Фильтр категории: клиент при <500 строк (`INGREDIENT_SERVER_FILTER_THRESHOLD`), сервер при ≥500 (`?category=`). Поле `waste_percent`. |
 | `/admin/inventory/semi-finished` | Полуфабрикаты (`semi-finished-dialog.tsx`, `semi-finished-table.tsx`). Embed: `semi_finished_items!…(*, ingredients(name, unit, ingredient_stock(avg_cost)), semi_finished_ref:semi_finished!semi_finished_items_semi_finished_ref_id_fkey(name, yield_unit))`. Состав: строка **ингредиент** или **вложенный п/ф** (`semi_finished_ref_id`; текущий п/ф в списке выбора исключается). Себестоимость — `computeSemiInputCostMdl` (`lib/semi-finished-cost.ts`) по `ingredient_stock.avg_cost` (общая карта цен с страницы, без фильтра по бренду). В таблице: колонки «Себест.», «Состав» (`truncate` + `title`). В диалоге: combobox с поиском (`IngredientCombobox`, `SemiFinishedCombobox` → `InventorySearchCombobox`). Редактор в г/мл/шт. |
 | `/admin/inventory/tech-cards` | Read-only обзор себестоимости. Ссылка «Открыть в меню» → `/admin/menu?edit={id}`. |
-| `/admin/inventory/supplies` | Поставки: модалка (`create` / `edit` / `view`) с двусторонним расчётом цен/итогов, `IngredientCombobox`; **редактирование** активных (`updateSupplyOrder`), просмотр аннулированных, аннулирование (`annulSupplyOrder`). |
+| `/admin/inventory/supplies` | Поставки: RSC `page.tsx` + `types.ts`; модалка (`create` / `edit` / `view`) с двусторонним расчётом цен/итогов, `IngredientCombobox`; **редактирование** активных (`updateSupplyOrder`), просмотр аннулированных, аннулирование (`annulSupplyOrder` → RPC `annul_supply_order_stock`). |
 | `/admin/inventory/writeoffs` (+ `/new`) | Списания; выбор ингредиента — `IngredientCombobox`. |
 | `/admin/inventory/audits` (+ `/[id]`) | Инвентаризации (создание + карточка с подтверждением). |
 
@@ -654,7 +670,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 ### Типы
 
-`src/types/database.ts` — `OrderStatus`, `Order`, `OrderItem`, `OrderItemTopping` (`toppings` JSONB), `MenuItem` / `MenuItemVariant` / `Topping` (`aggregator_price_bani?`), `MenuItemToppingGroup` (`free_count`), `CashSession`, …
+`src/types/database.ts` — `OrderStatus`, `Order`, `OrderItem`, `OrderItemTopping` (`toppings` JSONB), `MenuItem` / `MenuItemVariant` / `Topping` (`aggregator_price_bani?`), `MenuItemToppingGroup` (`free_count`), **`CustomerAddress`** (сохранённые адреса клиента для POS/API), `CashSession`, …
 
 `src/types/cart.ts` — `CartItem`, `CartTopping` (`quantity`, `topping_group_id`), `toppingGroupFreeCounts`, `toppingGroupLabels`.
 
@@ -694,7 +710,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 | `GET /api/bonus/settings` | Публично: `accrualRate`, `maxRedemptionRate`, `isEnabled` |
 | `GET /api/bonus/balance?profileId=` | `getUserBalance`; без `profileId` → `{ balance: 0 }` |
 | `GET /api/admin/bonus/settings` | Для админки (проценты ×100) |
-| `POST /api/admin/bonus/adjust` | Корректировка `bonus_transactions`; `staff_id` из тела |
+| `POST /api/admin/bonus/adjust` | Корректировка `bonus_transactions`; `staff_id` из тела; `balance_after` через `getActualBalance` ± сумма; `amount` > 0, тип `manual_add` / `manual_deduct` |
 | `GET /api/avatar/[profileId]` | SVG DiceBear thumbs |
 | `POST /api/pbx/incoming` | ОАТС (`crm_token` = `PBX_WEBHOOK_TOKEN`); cmd contact/event/history |
 | `POST /api/pbx-webhook` | Legacy MoldCell → `incoming_calls` |
@@ -725,7 +741,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive` (service role).
 - `(admin)/admin/menu/actions.ts` — CRUD позиций (`aggregator_price_bani`); `getMenuItemToppingGroups`, `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`).
 - `(admin)/admin/toppings/actions.ts` — `save_topping_with_recipes` (RPC, `p_aggregator_price_bani`).
-- Inventory: `supplies/actions.ts` (`createSupplyOrder` → RPC `apply_supply_order_stock_items`; **`updateSupplyOrder`** → `replace_supply_order_stock_items`; `annulSupplyOrder` → `revert_supply_order_stock_items`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role). Полуфабрикаты: `(admin)/admin/inventory/semi-finished/actions.ts` (`createSemiFinished`, `updateSemiFinished`).
+- Inventory: `supplies/actions.ts` (`createSupplyOrder` → RPC `apply_supply_order_stock_items`; **`updateSupplyOrder`** → `replace_supply_order_stock_items`; `annulSupplyOrder` → RPC `annul_supply_order_stock`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role). Полуфабрикаты: `(admin)/admin/inventory/semi-finished/actions.ts` (`createSemiFinished`, `updateSemiFinished`).
 - `staff/staff-actions.ts`.
 
 ### POS (`src/lib/actions/pos/`)
@@ -743,15 +759,16 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `fetch-orders.ts` — `ORDERS_POS_SELECT`, `fetchPosOrders`, `fetchCompletedPosOrders`, `mergeOrdersPreserveBrandSlug`.
 - `fetch-kds-orders.ts` — `fetchKdsCookingOrdersPos`, `fetchKdsOrderByIdPos`.
 - `update-order-status-kds.ts` — `cooking → ready`.
-- `customers-pos-actions.ts` — `posLookupCustomer` (с `bonus_settings`), `posSaveCustomer`, `posSaveCustomerAddress`.
+- `customers-pos-actions.ts` — `posLookupCustomer` (профиль, **`addresses[]`**, `bonus_settings`), `posSaveCustomer`, `posSaveCustomerAddress`.
 - `check-delivery-zone-pos.ts` — `checkDeliveryZoneByAddress` (возвращает `resolvedParams` при `in_zone`), `getZonesByBrandSlug` (+ `isZoneAvailableNow`, `attachResolvedZoneParams`).
 - `create-order-pos.ts` — legacy one-shot создание; `items: PosCartItem[]`, `deliveryMode` incl. `aggregator`; `order_items` через `posLinePayloadFromCartItem(cartItem, isAggregator)`.
 - `update-order-items.ts` — `addOrderItemsPos` / `replaceOrderItemsPos` / `updateOrderItemCompositionPos` принимают `PosCartItem[]` (или `cartItem`); `isAggregator = (delivery_mode === 'aggregator')`; insert/update через `posLinePayloadFromCartItem`. toppings JSON `{ name, price, quantity }`.
 
 ### Полезные lib (не actions)
 
-- `lib/bonus.ts` — лояльность.
-- `lib/customers.ts` — `getCustomerByPhone`, `saveCustomer`, `saveCustomerAddress`, `setDefaultAddress`, `getDefaultAddress`. Service role.
+- `lib/bonus.ts` — лояльность (витрина / POS).
+- `lib/admin/get-actual-balance.ts` — `getActualBalance` для админки клиентов.
+- `lib/customers.ts` — `getCustomerByPhone` (JOIN `customer_addresses`), `saveCustomer`, `saveCustomerAddress`, `setDefaultAddress`, `getDefaultAddress`. Service role.
 - `lib/delivery-zone-schedule.ts` — `getActiveSchedule`, `isZoneAvailableNow`, `resolveZoneParams`, `attachResolvedZoneParams`.
 - `lib/actions/admin/delivery-zone-schedules.ts` — CRUD слотов расписания зоны.
 - `lib/discount-engine.ts` — `evaluateDiscounts`, `isRuleScheduleActive` (pure, без Supabase).
@@ -759,6 +776,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/inventory-units.ts`.
 - `lib/ingredient-avg-cost.ts` — `parseIngredientAvgCostStorage` из embed `ingredient_stock`.
 - `lib/semi-finished-cost.ts` — `computeSemiInputCostMdl`, `semiCostPerStorageUnitMdl`, `buildSemiFinishedCatalogMap` (рекурсивная себестоимость п/ф по составу).
+- `lib/pos/split-composite-delivery-address.ts` — `splitCompositeDeliveryAddress`, `posCheckoutAddressFieldsFromOrder` (раскладка подъезд/этаж/кв. из строки `delivery_address`; POS «Детали» и адрес в Telegram курьеру).
 - `lib/product-recipe-cost.ts` — `buildProductRecipeCostContext`, `enrichProductRecipeCostContext`, `productRecipeLineCostMdl`, `computeMaterialRecipeCostMdl`, `computeReferencedMenuItemRecipeCostMdl`, `buildMenuItemRecipeCostMap`, `resolveMenuRefRecipeVariantFilter` (себестоимость техкарт: ингредиент + п/ф + комбо).
 - `lib/recipe-editor-qty.ts`, `lib/recipe-composition-row-updates.ts`, `lib/recipe-composition-waste.ts`, `lib/product-recipe-ingredient-qty.ts`, `lib/recipe-composition-types.ts` (`RecipeCompositionSemi.cost_per_storage_unit`).
 - `lib/topping-pricing.ts` — `calcToppingGroupCharge`, `calcToppingChargesById`, `getFreeUnitsRemaining`, `formatStorefrontToppingGroupHeader`.
@@ -767,6 +785,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/pos-cart-helpers.ts` — `calcPosToppingsCharge(..., isAggregator)`, `getPosCartItemUnitPriceBani(item, isAggregator)`, `posLinePayloadFromCartItem(item, isAggregator)`, `posToppingsPayloadForDb(..., isAggregator)`, `getPosCartItemToppingDisplayLines`.
 - `lib/pos/menu-item-modal-row.ts` — `POS_MENU_ITEM_FOR_MODAL_SELECT` (вкл. `aggregator_price_bani`), `posMenuRowForModal`, `posVariantsFromMenuEmbed`.
 - `components/topping-stepper-card.tsx` — общая карточка топпинга (витрина + POS).
+- `components/pos/order-form/pos-address-cards.tsx` — карточки сохранённых адресов на шаге «Детали» POS.
 - `lib/data/storefront-item-toppings.ts` — `fetchStorefrontMenuItemToppingGroups` (`free_count` с `menu_item_topping_groups`; select включает `aggregator_price_bani` у топпингов).
 - `lib/order-item-size-display.ts`.
 - `lib/storefront-delivery-display.ts`, `lib/storefront-pickup-location.ts`, `lib/storefront-account-path.ts`.
@@ -860,8 +879,8 @@ PBX_WEBHOOK_TOKEN=
 - Guard checkout по сессии (если потребуется).
 - Подключить `night_delivery_price_bani` / `active_from` / `active_to` зоны в `resolveZoneParams` (сейчас только слоты + базовые колонки; колонки в БД — миграция `*_delivery_zones_night_and_window.sql`, применить на remote Supabase).
 - Доработать gallery и lunch sets в админке.
-- Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types` (в т.ч. `semi_finished_items.semi_finished_ref_id`, RPC `apply_supply_order_stock_items`, `revert_supply_order_stock_items`, `replace_supply_order_stock_items`).
-- Применить на remote Supabase миграции склада поставок: `*_apply_supply_stock_rpc.sql`, `*_revert_supply_stock_and_update.sql` (если `avg_cost` после поставки NULL или нет редактирования/аннулирования через RPC).
+- Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types` (в т.ч. `semi_finished_items.semi_finished_ref_id`, RPC `apply_supply_order_stock_items`, `revert_supply_order_stock_items`, `replace_supply_order_stock_items`, `annul_supply_order_stock`).
+- Применить на remote Supabase миграции: **`admin_customers_list`** (JSON `{ data, total }`, фильтры `activity_segment` / `orders_segment` / `sort_by`, пагинация `list_limit` / `list_offset`; локально — `*_admin_customers_list_bonus_balance.sql`, `*_admin_customers_list_pagination.sql`); склад поставок — `*_apply_supply_stock_rpc.sql`, `*_revert_supply_stock_and_update.sql`, функцию **`annul_supply_order_stock`** (если `avg_cost` после поставки NULL, нет редактирования/аннулирования через RPC или падает `annulSupplyOrder`).
 - Подключить списание ингредиентов в `payOrder` через `computeIngredientTotalsForOrder`.
 - UI для детали `/admin/finance/cash-sessions/[id]` (сейчас scaffold).
 - Voiding кассовых транзакций в админке.

@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { createServiceSupabaseClient } from "@/lib/supabase/server"
+import { getActualBalance } from "@/lib/admin/get-actual-balance"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -109,13 +110,13 @@ export default async function AdminCustomerDetailPage({
 
   const [
     profileRes,
-    balanceRes,
+    bonusBalance,
     txRes,
     ordersRes,
     staffRes,
   ] = await Promise.all([
     supabase.from("profiles").select("id, phone, name").eq("id", id).maybeSingle(),
-    supabase.from("bonus_transactions").select("amount").eq("profile_id", id),
+    getActualBalance(id),
     supabase
       .from("bonus_transactions")
       .select("id, type, amount, balance_after, note, order_id, created_at")
@@ -145,11 +146,6 @@ export default async function AdminCustomerDetailPage({
   const phoneDisplay = profile.phone?.trim() ? profile.phone : "—"
   const nameDisplay =
     profile.name != null && profile.name.trim() !== "" ? profile.name : "—"
-
-  const bonusBalance = (balanceRes.data ?? []).reduce(
-    (s, r) => s + Number((r as { amount?: unknown }).amount ?? 0),
-    0,
-  )
 
   const bonusRows = (txRes.data ?? []) as BonusTxRow[]
   const ordersList = (ordersRes.data ?? []) as OrderRow[]

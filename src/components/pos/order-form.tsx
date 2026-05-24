@@ -5,6 +5,7 @@ import { DiscountBreakdown } from "@/components/pos/discount-breakdown"
 import type { OrdersPanelHandle } from "@/components/pos/orders-panel"
 import { AssignCourierModal } from "@/components/pos/AssignCourierModal"
 import { PayOrderModal } from "@/components/pos/pay-order-modal"
+import { PosAddressCards } from "@/components/pos/order-form/pos-address-cards"
 import { PromoPanel } from "@/components/pos/promo-panel"
 import { ScheduledTimePicker } from "@/components/pos/scheduled-time-picker"
 import { useCashSession } from "@/components/pos/cash-session-context"
@@ -30,7 +31,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -69,7 +69,8 @@ import {
   posSaveCustomerAddress,
 } from "@/lib/actions/pos/customers-pos-actions"
 import { evaluateDiscounts } from "@/lib/discount-engine"
-import type { CustomerAddressRow, CustomerWithAddresses } from "@/lib/customers"
+import type { CustomerWithAddresses } from "@/lib/customers"
+import type { CustomerAddress } from "@/types/database"
 import { usePosMenuCache } from "@/lib/store/pos-menu-cache"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -911,12 +912,8 @@ export function OrderForm({
   const [posCustomerLoading, setPosCustomerLoading] = useState(false)
   const [posCustomerLookupDone, setPosCustomerLookupDone] = useState(false)
   const lastCustomerLookupPhoneRef = useRef<string | null>(null)
-  /** saved: из справочника; new: ввод вручную */
-  const [addressBookMode, setAddressBookMode] = useState<"saved" | "new">("saved")
-  const [selectedSavedAddressId, setSelectedSavedAddressId] = useState<string | null>(
-    null,
-  )
-  const [saveNewAddressOnSubmit, setSaveNewAddressOnSubmit] = useState(false)
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null)
+  const [showNewAddressForm, setShowNewAddressForm] = useState(false)
   /** undefined — не трогать orders.profile_id; null — сбросить */
   const [linkedProfileId, setLinkedProfileId] = useState<string | null | undefined>(
     undefined,
@@ -1051,6 +1048,26 @@ export function OrderForm({
   const cardAmountWatched = form.watch("cardAmount")
   const deliveryAddress = form.watch("deliveryAddress")
   const userPhoneWatched = form.watch("userPhone")
+
+  const showSavedAddressCards =
+    deliveryMode === "delivery" &&
+    posCustomerData != null &&
+    posCustomerData.addresses.length > 0 &&
+    !showNewAddressForm
+
+  const savedCustomerAddresses: CustomerAddress[] =
+    posCustomerData?.addresses.map((a) => ({
+      id: a.id,
+      address: a.address,
+      label: a.label ?? null,
+      entrance: a.entrance ?? null,
+      floor: a.floor ?? null,
+      apartment: a.apartment ?? null,
+      intercom: a.intercom ?? null,
+      delivery_lat: a.delivery_lat ?? null,
+      delivery_lng: a.delivery_lng ?? null,
+      is_default: a.is_default,
+    })) ?? []
 
   useEffect(() => {
     setCourierContactWarnings([])
@@ -1363,9 +1380,8 @@ export function OrderForm({
     setPosBonusBalance(null)
     setPosCustomerLoading(false)
     setPosCustomerLookupDone(false)
-    setAddressBookMode("saved")
-    setSelectedSavedAddressId(null)
-    setSaveNewAddressOnSubmit(false)
+    setSelectedAddressId(null)
+    setShowNewAddressForm(false)
     setLinkedProfileId(undefined)
     setBonusRedeemFieldError(null)
     setPosMaxRedemptionRate(null)
@@ -2540,23 +2556,78 @@ export function OrderForm({
     [posMaxRedemptionRate, posBonusMaxRedeemable, persistedOrderBonusPts],
   )
 
-  const applyAddressRowToForm = useCallback(
-    (row: CustomerAddressRow) => {
-      form.setValue("deliveryAddress", row.address)
-      form.setValue("addressEntrance", row.entrance ?? "")
-      form.setValue("addressFloor", row.floor ?? "")
-      form.setValue("addressApartment", row.apartment ?? "")
-      form.setValue("addressIntercom", row.intercom ?? "")
+  const handleSelectSavedAddress = useCallback(
+    async (address: CustomerAddress) => {
+      setSelectedAddressId(address.id)
+      setShowNewAddressForm(false)
+
+      form.setValue("deliveryAddress", address.address)
+      form.setValue("addressEntrance", address.entrance ?? "")
+      form.setValue("addressFloor", address.floor ?? "")
+      form.setValue("addressApartment", address.apartment ?? "")
+      form.setValue("addressIntercom", address.intercom ?? "")
       patchDetailsCardAndScheduleSave({
-        delivery_address: row.address,
-        address_entrance: row.entrance?.trim() || null,
-        address_floor: row.floor?.trim() || null,
-        address_apartment: row.apartment?.trim() || null,
-        address_intercom: row.intercom?.trim() || null,
+        delivery_address: address.address,
+        address_entrance: address.entrance?.trim() || null,
+        address_floor: address.floor?.trim() || null,
+        address_apartment: address.apartment?.trim() || null,
+        address_intercom: address.intercom?.trim() || null,
       })
+
+      const lat = address.delivery_lat
+      const lng = address.delivery_lng
+      const hasCoords =
+        lat != null &&
+        lng != null &&
+        Number.isFinite(Number(lat)) &&
+        Number.isFinite(Number(lng))
+      if (hasCoords) {
+        posDeliveryGeoRef.current = { lat: Number(lat), lng: Number(lng) }
+      } else {
+        posDeliveryGeoRef.current = null
+      }
+
+      if (selectedBrand && address.address.trim()) {
+        setZoneChecking(true)
+        try {
+          const result = await checkDeliveryZoneByAddress(
+            address.address.trim(),
+            selectedBrand.slug,
+          )
+          setZoneResult(result)
+        } finally {
+          setZoneChecking(false)
+        }
+      }
+
+      scheduleDebouncedDetailsSave()
     },
-    [form, patchDetailsCardAndScheduleSave],
+    [
+      form,
+      patchDetailsCardAndScheduleSave,
+      scheduleDebouncedDetailsSave,
+      selectedBrand,
+    ],
   )
+
+  const handleNewAddress = useCallback(() => {
+    setShowNewAddressForm(true)
+    setSelectedAddressId(null)
+    form.setValue("deliveryAddress", "")
+    form.setValue("addressEntrance", "")
+    form.setValue("addressFloor", "")
+    form.setValue("addressApartment", "")
+    form.setValue("addressIntercom", "")
+    patchDetailsCardAndScheduleSave({
+      delivery_address: null,
+      address_entrance: null,
+      address_floor: null,
+      address_apartment: null,
+      address_intercom: null,
+    })
+    setZoneResult(null)
+    posDeliveryGeoRef.current = null
+  }, [form, patchDetailsCardAndScheduleSave])
 
   const runPosCustomerLookup = useCallback(
     async (rawPhone: string) => {
@@ -2566,7 +2637,8 @@ export function OrderForm({
         setPosBonusBalance(null)
         setPosMaxRedemptionRate(null)
         setPosCustomerLookupDone(false)
-        setSelectedSavedAddressId(null)
+        setSelectedAddressId(null)
+        setShowNewAddressForm(false)
         setLinkedProfileId(undefined)
         return
       }
@@ -2583,8 +2655,8 @@ export function OrderForm({
           setPosBonusBalance(null)
           setPosMaxRedemptionRate(null)
           setLinkedProfileId(null)
-          setSelectedSavedAddressId(null)
-          setAddressBookMode("new")
+          setSelectedAddressId(null)
+          setShowNewAddressForm(true)
           window.setTimeout(() => scheduleDebouncedDetailsSave(), 0)
           return
         }
@@ -2597,10 +2669,10 @@ export function OrderForm({
           form.setValue("userName", nm)
           patchDetailsCardAndScheduleSave({ user_name: nm })
         }
-        const addrs = res.customer.addresses
+        const addrs = res.addresses
         if (addrs.length === 0) {
-          setAddressBookMode("new")
-          setSelectedSavedAddressId(null)
+          setShowNewAddressForm(true)
+          setSelectedAddressId(null)
           const legacy = res.customer.profile.address?.trim()
           if (legacy) {
             form.setValue("deliveryAddress", legacy)
@@ -2611,16 +2683,19 @@ export function OrderForm({
           window.setTimeout(() => scheduleDebouncedDetailsSave(), 0)
           return
         }
-        setAddressBookMode("saved")
-        const first = addrs[0]!
-        setSelectedSavedAddressId(first.id)
-        applyAddressRowToForm(first)
+        setShowNewAddressForm(false)
+        void handleSelectSavedAddress(addrs[0]!)
         window.setTimeout(() => scheduleDebouncedDetailsSave(), 0)
       } finally {
         setPosCustomerLoading(false)
       }
     },
-    [applyAddressRowToForm, form, patchDetailsCardAndScheduleSave, scheduleDebouncedDetailsSave],
+    [
+      form,
+      handleSelectSavedAddress,
+      patchDetailsCardAndScheduleSave,
+      scheduleDebouncedDetailsSave,
+    ],
   )
 
   const phoneLookupDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -2940,34 +3015,6 @@ export function OrderForm({
         return
       }
 
-      const profileForAddr = detailsPricingRef.current.linkedProfileId
-      if (
-        saveNewAddressOnSubmit &&
-        values.deliveryMode !== "pickup" &&
-        values.deliveryMode !== "aggregator" &&
-        profileForAddr &&
-        addressBookMode === "new" &&
-        values.deliveryAddress?.trim()
-      ) {
-        const geo = posDeliveryGeoRef.current
-        const addrRes = await posSaveCustomerAddress({
-          profileId: profileForAddr,
-          address: {
-            address: values.deliveryAddress.trim(),
-            entrance: values.addressEntrance?.trim() || null,
-            floor: values.addressFloor?.trim() || null,
-            apartment: values.addressApartment?.trim() || null,
-            intercom: values.addressIntercom?.trim() || null,
-            delivery_lat: geo?.lat ?? null,
-            delivery_lng: geo?.lng ?? null,
-          },
-          setAsDefault: false,
-        })
-        if (!addrRes.ok) {
-          toast.error(addrRes.error)
-        }
-      }
-
       const res = await sendPosDraftToKitchen({
         orderId: posOrderId,
         bonusesToRedeem: detailsPricingRef.current.bonusesToRedeem,
@@ -2980,6 +3027,36 @@ export function OrderForm({
       if (!res.success) {
         setSubmitError(res.error)
         return
+      }
+
+      const profileForAddr = detailsPricingRef.current.linkedProfileId
+      if (
+        showNewAddressForm &&
+        values.deliveryMode === "delivery" &&
+        typeof profileForAddr === "string" &&
+        values.deliveryAddress?.trim()
+      ) {
+        const geo = posDeliveryGeoRef.current
+        try {
+          const addrRes = await posSaveCustomerAddress({
+            profileId: profileForAddr,
+            address: {
+              address: values.deliveryAddress.trim(),
+              entrance: values.addressEntrance?.trim() || null,
+              floor: values.addressFloor?.trim() || null,
+              apartment: values.addressApartment?.trim() || null,
+              intercom: values.addressIntercom?.trim() || null,
+              delivery_lat: geo?.lat ?? null,
+              delivery_lng: geo?.lng ?? null,
+            },
+            setAsDefault: false,
+          })
+          if (!addrRes.ok) {
+            console.error("[posSaveCustomerAddress]", addrRes.error)
+          }
+        } catch (e) {
+          console.error("[posSaveCustomerAddress]", e)
+        }
       }
 
       setBonusesToRedeem(0)
@@ -3714,68 +3791,23 @@ export function OrderForm({
 
                   {deliveryMode !== "pickup" ? (
                     <>
-                      {posCustomerData &&
-                      posCustomerData.addresses.length > 1 &&
-                      addressBookMode === "saved" ? (
+                      {showSavedAddressCards ? (
                         <div className="mt-3 space-y-1.5">
                           <p className="text-xs text-muted-foreground">
                             Сохранённые адреса
                           </p>
-                          <Select
-                            value={selectedSavedAddressId ?? ""}
-                            onValueChange={(id) => {
-                              if (id === "__new__") {
-                                setAddressBookMode("new")
-                                setSelectedSavedAddressId(null)
-                                setSaveNewAddressOnSubmit(false)
-                                form.setValue("deliveryAddress", "")
-                                form.setValue("addressEntrance", "")
-                                form.setValue("addressFloor", "")
-                                form.setValue("addressApartment", "")
-                                form.setValue("addressIntercom", "")
-                                patchDetailsCardAndScheduleSave({
-                                  delivery_address: null,
-                                  address_entrance: null,
-                                  address_floor: null,
-                                  address_apartment: null,
-                                  address_intercom: null,
-                                })
-                                return
-                              }
-                              const row = posCustomerData.addresses.find(
-                                (a) => a.id === id,
-                              )
-                              if (row) {
-                                setSelectedSavedAddressId(id)
-                                setAddressBookMode("saved")
-                                setSaveNewAddressOnSubmit(false)
-                                applyAddressRowToForm(row)
-                              }
+                          <PosAddressCards
+                            addresses={savedCustomerAddresses}
+                            selectedAddressId={selectedAddressId}
+                            onSelect={(address) => {
+                              void handleSelectSavedAddress(address)
                             }}
-                          >
-                            <SelectTrigger className="h-9 w-full text-left text-sm">
-                              <SelectValue placeholder="Выберите адрес" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {posCustomerData.addresses.map((a) => (
-                                <SelectItem key={a.id} value={a.id}>
-                                  {a.label
-                                    ? `${a.label} — ${a.address}`
-                                    : a.address}
-                                </SelectItem>
-                              ))}
-                              <SelectItem value="__new__">+ Новый адрес</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            onNewAddress={handleNewAddress}
+                          />
                         </div>
                       ) : null}
-                      {posCustomerData &&
-                      posCustomerData.addresses.length === 1 &&
-                      addressBookMode === "saved" ? (
-                        <p className="mt-2 text-[11px] text-[#808080]">
-                          Адрес из профиля клиента (можно изменить)
-                        </p>
-                      ) : null}
+                      {!showSavedAddressCards ? (
+                        <>
                       <FormField
                         control={form.control}
                         name="deliveryAddress"
@@ -3903,23 +3935,7 @@ export function OrderForm({
                           )}
                         />
                       </div>
-                      {typeof linkedProfileId === "string" &&
-                      addressBookMode === "new" ? (
-                        <div className="mt-3 flex items-center gap-2">
-                          <Checkbox
-                            id="pos-save-new-address"
-                            checked={saveNewAddressOnSubmit}
-                            onCheckedChange={(c) =>
-                              setSaveNewAddressOnSubmit(c === true)
-                            }
-                          />
-                          <label
-                            htmlFor="pos-save-new-address"
-                            className="cursor-pointer text-xs text-[#808080]"
-                          >
-                            Сохранить адрес
-                          </label>
-                        </div>
+                        </>
                       ) : null}
                       <DeliveryZoneInfo
                         result={zoneResult}

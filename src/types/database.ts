@@ -550,3 +550,16 @@ export type StockAuditItem = {
   actual_qty: number | null
   diff: number | null
 }
+
+export interface CustomerAddress {
+  id: string
+  address: string
+  label: string | null
+  entrance: string | null
+  floor: string | null
+  apartment: string | null
+  intercom: string | null
+  delivery_lat: number | null
+  delivery_lng: number | null
+  is_default: boolean
+}

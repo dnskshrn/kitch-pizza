@@ -94,7 +94,7 @@ export default function BonusRedeemBlock({ orderTotalBani, onRedeemChange }: Pro
           <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 4 }}>
             {t.bonus.max}: {maxRedeemable}
           </div>
-          <div style={{ fontSize: 13, color: 'var(--color-accent)', marginTop: 4 }}>
+          <div style={{ fontSize: 13, color: 'var(--color-text)', fontWeight: 600, marginTop: 4 }}>
             {t.bonus.redeemSummary(redeemValue)}
           </div>
         </div>

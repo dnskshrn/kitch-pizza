@@ -88,6 +88,21 @@ async function resolveCoordsForCustomerAddress(
   return { lat: null, lng: null }
 }
 
+type ProfileWithAddressesRow = CustomerProfileRow & {
+  customer_addresses: Array<{
+    id: string
+    address: string
+    label: string | null
+    entrance: string | null
+    floor: string | null
+    apartment: string | null
+    intercom: string | null
+    delivery_lat: number | null
+    delivery_lng: number | null
+    is_default: boolean
+  }> | null
+}
+
 export async function getCustomerByPhone(
   phone: string,
 ): Promise<CustomerWithAddresses | null> {
@@ -95,29 +110,46 @@ export async function getCustomerByPhone(
   if (!normalized || !phoneHasEnoughDigitsForLookup(normalized)) return null
 
   const supabase = createServiceRoleClient()
-  const { data: profile, error: pErr } = await supabase
+  const { data: row, error: pErr } = await supabase
     .from("profiles")
-    .select("id, phone, name, address, created_at, updated_at")
+    .select(
+      `*, customer_addresses(id, address, label, entrance, floor, apartment, intercom, delivery_lat, delivery_lng, is_default)`,
+    )
     .eq("phone", normalized)
     .maybeSingle()
 
-  if (pErr || !profile) return null
+  if (pErr) throw new Error(pErr.message)
+  if (!row) return null
 
-  const { data: addresses, error: aErr } = await supabase
-    .from("customer_addresses")
-    .select(
-      "id, profile_id, label, address, entrance, floor, apartment, intercom, delivery_lat, delivery_lng, is_default, created_at",
-    )
-    .eq("profile_id", profile.id)
-    .order("is_default", { ascending: false })
-    .order("created_at", { ascending: false })
+  const typed = row as ProfileWithAddressesRow
+  const { customer_addresses: nestedAddresses, ...profileFields } = typed
+  const profile = profileFields as CustomerProfileRow
 
-  if (aErr) throw new Error(aErr.message)
+  const addresses: CustomerAddressRow[] = (nestedAddresses ?? [])
+    .slice()
+    .sort((a, b) => Number(b.is_default) - Number(a.is_default))
+    .map((a) => ({
+      id: a.id,
+      profile_id: profile.id,
+      label: a.label,
+      address: a.address,
+      entrance: a.entrance,
+      floor: a.floor,
+      apartment: a.apartment,
+      intercom: a.intercom,
+      delivery_lat:
+        a.delivery_lat != null && Number.isFinite(Number(a.delivery_lat))
+          ? Number(a.delivery_lat)
+          : null,
+      delivery_lng:
+        a.delivery_lng != null && Number.isFinite(Number(a.delivery_lng))
+          ? Number(a.delivery_lng)
+          : null,
+      is_default: a.is_default,
+      created_at: "",
+    }))
 
-  return {
-    profile: profile as CustomerProfileRow,
-    addresses: (addresses ?? []) as CustomerAddressRow[],
-  }
+  return { profile, addresses }
 }
 
 export async function saveCustomer(data: {

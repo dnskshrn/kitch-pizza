@@ -3,7 +3,8 @@
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { format, parseISO } from "date-fns"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronRight, Pencil } from "lucide-react"
+import { CashTransactionActions } from "@/components/admin/cash-sessions/cash-transaction-actions"
 import type {
   CashSessionDetail,
   CashSessionDetailTransaction,
@@ -24,9 +25,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const CASH_SESSIONS_PATH = "/admin/finance/cash-sessions"
+
+const ACTIONABLE_TX_TYPES = ["expense", "income", "encashment"] as const
 
 const TYPE_FILTERS = [
   { id: "order_payment", label: "Оплаты заказов" },
@@ -40,6 +48,7 @@ type TypeFilterId = (typeof TYPE_FILTERS)[number]["id"]
 
 type CashSessionDetailViewProps = {
   detail: CashSessionDetail
+  canEditTransactions: boolean
 }
 
 function formatDateTime(iso: string): string {
@@ -195,7 +204,10 @@ function transactionDescription(tx: CashSessionDetailTransaction): string {
   )
 }
 
-export function CashSessionDetailView({ detail }: CashSessionDetailViewProps) {
+export function CashSessionDetailView({
+  detail,
+  canEditTransactions,
+}: CashSessionDetailViewProps) {
   const { session, totals, by_brand, transactions, glovo_card_orders } = detail
 
   const [glovoOrdersExpanded, setGlovoOrdersExpanded] = useState(false)
@@ -637,11 +649,16 @@ export function CashSessionDetailView({ detail }: CashSessionDetailViewProps) {
                   <TableHead>Описание</TableHead>
                   <TableHead>Оператор</TableHead>
                   <TableHead>Статус</TableHead>
+                  <TableHead className="text-right">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredTransactions.map((tx) => (
-                  <TransactionRow key={tx.id} tx={tx} />
+                  <TransactionRow
+                    key={tx.id}
+                    tx={tx}
+                    canEdit={canEditTransactions}
+                  />
                 ))}
               </TableBody>
             </Table>
@@ -678,10 +695,20 @@ function FilterChip({
   )
 }
 
-function TransactionRow({ tx }: { tx: CashSessionDetailTransaction }) {
+function TransactionRow({
+  tx,
+  canEdit,
+}: {
+  tx: CashSessionDetailTransaction
+  canEdit: boolean
+}) {
   const isVoided = tx.voided_at != null
+  const isEdited = tx.edited_at != null
   const description = transactionDescription(tx)
   const channel = channelLabel(tx.order_delivery_mode)
+  const showActions = (ACTIONABLE_TX_TYPES as readonly string[]).includes(
+    tx.type,
+  )
 
   const voidTitle = isVoided
     ? `Причина: ${tx.void_reason ?? "—"} · ${tx.voided_by_name ?? "—"} · ${tx.voided_at ? formatTime(tx.voided_at) : "—"}`
@@ -715,19 +742,45 @@ function TransactionRow({ tx }: { tx: CashSessionDetailTransaction }) {
       </TableCell>
       <TableCell>{tx.order_brand_slug ?? "—"}</TableCell>
       <TableCell className="text-right">
-        <span
+        <div
           className={cn(
-            "tabular-nums",
-            isVoided && "text-muted-foreground line-through",
-            !isVoided &&
-              (tx.direction === "in"
-                ? "text-emerald-600"
-                : "text-red-600"),
+            "inline-flex flex-wrap items-center justify-end gap-1.5",
+            isVoided && "opacity-50",
           )}
         >
-          {tx.direction === "in" ? "+" : "−"}
-          {fmtMdl(tx.amount_bani)} MDL
-        </span>
+          <span
+            className={cn(
+              "tabular-nums",
+              isVoided && "line-through",
+              !isVoided &&
+                (tx.direction === "in"
+                  ? "text-emerald-600"
+                  : "text-red-600"),
+            )}
+          >
+            {tx.direction === "in" ? "+" : "−"}
+            {fmtMdl(tx.amount_bani)} MDL
+          </span>
+          {isEdited && !isVoided ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex shrink-0">
+                  <Pencil className="size-3 text-muted-foreground" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Отредактировано</TooltipContent>
+            </Tooltip>
+          ) : null}
+          {isVoided ? (
+            <Badge
+              variant="destructive"
+              className="text-xs"
+              title={voidTitle}
+            >
+              Аннулировано
+            </Badge>
+          ) : null}
+        </div>
       </TableCell>
       <TableCell
         className="max-w-[180px] truncate"
@@ -749,6 +802,21 @@ function TransactionRow({ tx }: { tx: CashSessionDetailTransaction }) {
           >
             Отменено
           </Badge>
+        ) : null}
+      </TableCell>
+      <TableCell className="text-right">
+        {showActions ? (
+          <CashTransactionActions
+            transaction={{
+              id: tx.id,
+              type: tx.type,
+              amount_bani: tx.amount_bani,
+              description: tx.description,
+              category: tx.category,
+              voided_at: tx.voided_at,
+            }}
+            canEdit={canEdit}
+          />
         ) : null}
       </TableCell>
     </TableRow>

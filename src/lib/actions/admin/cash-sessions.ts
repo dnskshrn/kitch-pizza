@@ -1,7 +1,24 @@
 "use server"
 
+import { revalidatePath } from "next/cache"
+import { getAdminSession } from "@/lib/admin-session"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { CashSession } from "@/types/database"
+
+const CASH_EDIT_ALLOWED_USER_IDS = [
+  "d38a6b2f-55f5-4877-a4d0-f17152b7a78d", // deniskosharny@gmail.com
+  "2d84ece2-2166-43b1-9df6-9a8a3e82434d", // kitchmoldova@gmail.com
+] as const
+
+async function assertCanEditCashTransactions(): Promise<void> {
+  const session = await getAdminSession()
+  if (
+    !session ||
+    !(CASH_EDIT_ALLOWED_USER_IDS as readonly string[]).includes(session.staffId)
+  ) {
+    throw new Error("Недостаточно прав для редактирования транзакций")
+  }
+}
 
 export type CashSessionListItem = {
   id: string
@@ -46,6 +63,7 @@ export type CashSessionDetailTransaction = {
   voided_by_staff_id: string | null
   voided_by_name: string | null
   void_reason: string | null
+  edited_at: string | null
 }
 
 export type CashSessionDetail = {
@@ -147,6 +165,7 @@ type RawDetailTransactionRow = {
   voided_at: string | null
   voided_by_staff_id: string | null
   void_reason: string | null
+  edited_at: string | null
   creator: StaffJoin
   voider: StaffJoin
   brand: { slug: string } | { slug: string }[] | null
@@ -517,6 +536,7 @@ export async function getCashSessionDetail(
         voided_at,
         voided_by_staff_id,
         void_reason,
+        edited_at,
         creator:created_by_staff_id(name),
         voider:voided_by_staff_id(name),
         brand:order_brand_id(slug)
@@ -649,6 +669,7 @@ export async function getCashSessionDetail(
       voided_by_staff_id: tx.voided_by_staff_id,
       void_reason: tx.void_reason,
       voided_by_name: staffNameFromJoin(tx.voider),
+      edited_at: tx.edited_at ?? null,
     }),
   )
 
@@ -698,4 +719,98 @@ export async function listStaffForFilter(): Promise<
   }
 
   return (data ?? []) as Array<{ id: string; name: string }>
+}
+
+export async function voidCashTransaction(
+  transactionId: string,
+  voidReason: string,
+): Promise<{ error?: string }> {
+  try {
+    await assertCanEditCashTransactions()
+    const supabase = createServiceRoleClient()
+
+    const { data: tx, error: fetchError } = await supabase
+      .from("cash_transactions")
+      .select("id, type, voided_at")
+      .eq("id", transactionId)
+      .single()
+
+    if (fetchError || !tx) return { error: "Транзакция не найдена" }
+    if (tx.voided_at) return { error: "Транзакция уже аннулирована" }
+    if (!["expense", "income", "encashment"].includes(tx.type)) {
+      return { error: "Этот тип транзакций нельзя аннулировать" }
+    }
+    if (!voidReason || voidReason.trim().length < 3) {
+      return { error: "Укажите причину аннулирования (минимум 3 символа)" }
+    }
+
+    const { error } = await (supabase.from("cash_transactions") as any)
+      .update({
+        voided_at: new Date().toISOString(),
+        voided_by_staff_id: null,
+        void_reason: voidReason.trim(),
+      })
+      .eq("id", transactionId)
+
+    if (error) return { error: error.message }
+
+    revalidatePath("/admin/finance/cash-sessions")
+    return {}
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Ошибка",
+    }
+  }
+}
+
+export async function editCashTransaction(
+  transactionId: string,
+  data: {
+    amount_bani: number
+    description?: string
+    category?: string
+  },
+): Promise<{ error?: string }> {
+  try {
+    await assertCanEditCashTransactions()
+    const session = await getAdminSession()
+    if (!session) {
+      return { error: "Недостаточно прав для редактирования транзакций" }
+    }
+    const supabase = createServiceRoleClient()
+
+    const { data: tx, error: fetchError } = await supabase
+      .from("cash_transactions")
+      .select("id, type, voided_at")
+      .eq("id", transactionId)
+      .single()
+
+    if (fetchError || !tx) return { error: "Транзакция не найдена" }
+    if (tx.voided_at) return { error: "Нельзя редактировать аннулированную транзакцию" }
+    if (!["expense", "income", "encashment"].includes(tx.type)) {
+      return { error: "Этот тип транзакций нельзя редактировать" }
+    }
+    if (!data.amount_bani || data.amount_bani <= 0) {
+      return { error: "Сумма должна быть больше нуля" }
+    }
+
+    const { error } = await (supabase.from("cash_transactions") as any)
+      .update({
+        amount_bani: data.amount_bani,
+        description: data.description?.trim() ?? null,
+        category: data.category ?? null,
+        edited_at: new Date().toISOString(),
+        edited_by_user_id: session.staffId,
+      })
+      .eq("id", transactionId)
+
+    if (error) return { error: error.message }
+
+    revalidatePath("/admin/finance/cash-sessions")
+    return {}
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Ошибка",
+    }
+  }
 }

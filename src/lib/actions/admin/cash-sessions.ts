@@ -727,6 +727,10 @@ export async function voidCashTransaction(
 ): Promise<{ error?: string }> {
   try {
     await assertCanEditCashTransactions()
+    const session = await getAdminSession()
+    if (!session) {
+      return { error: "Недостаточно прав для редактирования транзакций" }
+    }
     const supabase = createServiceRoleClient()
 
     const { data: tx, error: fetchError } = await supabase
@@ -748,6 +752,7 @@ export async function voidCashTransaction(
       .update({
         voided_at: new Date().toISOString(),
         voided_by_staff_id: null,
+        voided_by_user_id: session.staffId,
         void_reason: voidReason.trim(),
       })
       .eq("id", transactionId)

@@ -14,15 +14,58 @@ type CartItemCardProps = {
   cartItem: CartItem
   name: string
   lang: CartLang
+  /** Сколько единиц на этой строке бесплатны по акции (giftItems). */
+  giftFreeUnits?: number
   onEdit: () => void
   onRemove: () => void
   onQuantityChange: (delta: 1 | -1) => void
+}
+
+function CartLinePrice({
+  unitBani,
+  quantity,
+  giftFreeUnits,
+  lang,
+}: {
+  unitBani: number
+  quantity: number
+  giftFreeUnits: number
+  lang: CartLang
+}) {
+  const freeUnits = Math.min(Math.max(0, giftFreeUnits), quantity)
+  const paidUnits = quantity - freeUnits
+
+  if (freeUnits <= 0) {
+    return (
+      <p className="text-[16px] font-bold tabular-nums text-[#242424]">
+        {formatMoney(unitBani * quantity, lang)}
+      </p>
+    )
+  }
+
+  const freePartBani = unitBani * freeUnits
+  const paidPartBani = unitBani * paidUnits
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[16px] font-bold tabular-nums">
+      <span className="line-through text-muted-foreground font-normal">
+        {formatMoney(freePartBani, lang)}
+      </span>
+      <span className="storefront-modal-accent font-medium">
+        {formatMoney(0, lang)}
+      </span>
+      {paidUnits > 0 ? (
+        <span className="text-[#242424]">{formatMoney(paidPartBani, lang)}</span>
+      ) : null}
+    </div>
+  )
 }
 
 export function CartItemCard({
   cartItem,
   name,
   lang,
+  giftFreeUnits = 0,
   onEdit,
   onRemove,
   onQuantityChange,
@@ -30,7 +73,6 @@ export function CartItemCard({
   const { t } = useLanguage()
   const sizeLabel = getCartItemSizeLabel(cartItem, lang)
   const unitBani = getCartItemPrice(cartItem)
-  const formattedLine = formatMoney(unitBani * cartItem.quantity, lang)
 
   return (
     <div className="storefront-modal-surface storefront-modal-card-radius flex flex-col rounded-[16px] p-3">
@@ -71,9 +113,12 @@ export function CartItemCard({
       </div>
 
       <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
-        <p className="text-[16px] font-bold tabular-nums text-[#242424]">
-          {formattedLine}
-        </p>
+        <CartLinePrice
+          unitBani={unitBani}
+          quantity={cartItem.quantity}
+          giftFreeUnits={giftFreeUnits}
+          lang={lang}
+        />
         <button
           type="button"
           onClick={onEdit}

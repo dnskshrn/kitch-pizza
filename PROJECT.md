@@ -40,7 +40,7 @@ src/
 ├── brands/              # BrandConfig + host→brand
 ├── components/
 │   ├── client/          # витрина, корзина, checkout, auth
-│   ├── admin/           # AdminShell, sidebar, analytics, inventory, cash-sessions
+│   ├── admin/           # AdminShell, sidebar, analytics, inventory, customers/, cash-sessions/
 │   ├── pos/             # PosAppShell, OrderForm, KdsScreen; order-form/pos-address-cards.tsx
 │   ├── store-closed-modal.tsx  # оверлей «магазин закрыт» (витрина)
 │   ├── topping-stepper-card.tsx  # карточка топпинга со stepper (витрина + POS)
@@ -56,7 +56,9 @@ src/
 │   ├── store/           # Zustand stores (cart, delivery, store-closed, …)
 │   ├── i18n/, pos/, pbx/, seo/, telegram/, supabase/
 │   ├── admin/           # get-actual-balance, orders-url, cash-sessions-url, orders-today-metrics
+│   ├── actions/admin/customers-list.ts
 │   ├── bonus.ts, customers.ts, discount-engine.ts
+│   ├── actions/admin/customers-list.ts
 │   ├── store-hours.ts, cart-toppings.ts, cart-helpers.ts, topping-pricing.ts, topping-max-selection.ts
 │   ├── pos-cart-toppings.ts, pos-cart-helpers.ts
 │   ├── delivery-zone-schedule.ts  # слоты расписания зоны (Europe/Chisinau)
@@ -65,7 +67,7 @@ src/
 │   ├── product-recipe-cost.ts, semi-finished-cost.ts, ingredient-avg-cost.ts
 │   ├── order-recipe-stock-deduction.ts
 │   └── ...
-├── types/               # database, cart, pos, promotions
+├── types/               # database, cart, pos, promotions, customers
 ├── scripts/
 └── middleware.ts
 ```
@@ -216,7 +218,9 @@ Supabase Auth email/password. Layout делает `Promise.all` для `getBrand
 
 ### Касса
 
-Таблицы: `cash_sessions` (status `open`/`closed`, `opened_by_staff_id`, `closed_by_staff_id`, `discrepancy_reason`), `cash_transactions` (типы: `opening`, `order_payment`, `expense`, `income`, `encashment`; denormalized `order_delivery_mode`, `order_brand_id`, `encashment_destination`; voiding через `voided_at`, `voided_by_staff_id`, `void_reason`).
+Таблицы: `cash_sessions` (status `open`/`closed`, `opened_by_staff_id`, `closed_by_staff_id`, `discrepancy_reason`), `cash_transactions` (типы: `opening`, `order_payment`, `expense`, `income`, `encashment`; denormalized `order_delivery_mode`, `order_brand_id`, `encashment_destination`; voiding через `voided_at`, `voided_by_staff_id`, `void_reason`; редактирование — `edited_at`, `edited_by_user_id`).
+
+**Админка — правка/аннулирование ручных транзакций** (`lib/actions/admin/cash-sessions.ts`): `voidCashTransaction`, `editCashTransaction`. Доступ только для UUID из allowlist (`CASH_EDIT_ALLOWED_USER_IDS`); проверка через `getAdminSession().staffId`. Типы `expense` / `income` / `encashment`. UI: `components/admin/cash-sessions/cash-transaction-actions.tsx` (Dialog редактирования, Dialog аннулирования с причиной ≥3 символов); колонка «Действия» на `/admin/finance/cash-sessions/[id]` — `canEditTransactions` с сервера.
 
 Server actions — `src/lib/actions/pos/cash-session.ts`: `openCashSession`, `getCashSession`, `getExpectedInDrawerBani`, `getActiveOrdersCountForShift`, `createCashTransaction`, `closeCashSession`, `payOrder`.
 
@@ -232,7 +236,7 @@ Server actions — `src/lib/actions/pos/cash-session.ts`: `openCashSession`, `ge
 
 **Закрытие смены (`closeCashSession`):** обязательный `discrepancyReason` ≥3 непробельных символов при расхождении >50 MDL. Незавершённые заказы смены — предупреждение, не блок. Строки с `voided_at` исключены из агрегатов баланса.
 
-Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`).
+Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.ts` (`listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`, `voidCashTransaction`, `editCashTransaction`).
 
 ### KDS (/pos/kds)
 
@@ -351,7 +355,7 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 - Webhook: `POST /api/telegram` с заголовком `X-Telegram-Bot-Api-Secret-Token`. Команды: `/start` (привязка по токену), `/shift_start`, `/shift_end`; live location → `courier_locations`.
 - Исходящие — через `src/lib/telegram/bot.ts`: `sendMessage(chatId, text, replyMarkup?)` → `message_id`, `sendLocation(chatId, lat, lng, replyToMessageId?)`, `editMessageText(chatId, messageId, text, replyMarkup?)`.
 - При assign (`sendCourierAssignmentTelegram` в `courier-telegram-message.ts`):
-  1. `sendMessage` — карточка заказа (`buildCourierAssignmentMessage`): заголовок «🛵 Новый заказ #N», опционально 👤 имя, 📞 телефон, 📍 адрес (через `posCheckoutAddressFieldsFromOrder` / `split-composite-delivery-address`), блок «Состав заказа» (`• qty x name — price MDL` из `order_items.price` в bani), итоги: 🧾 сумма заказа = `total - delivery_fee`, 🚗 доставка («Бесплатно» или MDL), 💰 к оплате + способ (`Наличными` / `Картой` / `Смешанная оплата`). Select включает `delivery_fee`.
+  1. `sendMessage` — карточка заказа (`buildCourierAssignmentMessage`): заголовок «🛵 Новый заказ #N», опционально 👤 имя, 📞 телефон, 📍 адрес (через `posCheckoutAddressFieldsFromOrder` / `split-composite-delivery-address`), **🕐 Доставить до:** расчётное время = `created_at` + 1 ч (`Europe/Chisinau`, `estimatedDeliveryTime`), блок «Состав заказа» (`• qty x name — price MDL` из `order_items.price` в bani), итоги: 🧾 сумма заказа = `total - delivery_fee`, 🚗 доставка («Бесплатно» или MDL), 💰 к оплате + способ (`Наличными` / `Картой` / `Смешанная оплата`). Select (`COURIER_ORDER_ASSIGNMENT_SELECT`, `COURIER_ORDER_TELEGRAM_SELECT`) включает `created_at`, `delivery_fee`.
   2. `sendLocation` с `reply_to_message_id` к карточке, если есть координаты (иначе `withResolvedDeliveryCoords` + `checkDeliveryZoneByAddress`).
   3. В `orders` пишутся `courier_tg_chat_id`, `courier_tg_message_id` (**только текстовая карточка**, для `editMessageText`), `courier_tg_message_updated_at`.
 - При смене курьера: старая карточка правится через `editPreviousCourierAssignmentTelegram`, новому курьеру — новая пара.
@@ -366,6 +370,8 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 
 Типы эффектов (`src/types/promotions.ts`): `item_percent`, `order_percent`, `order_fixed`, `cheapest_item_free`, `free_delivery`, `bonus_multiplier`, подарки.
 
+**`cheapest_item_free`:** правило `free_every_n` + опциональный потолок **`max_free_items`** (ограничивает число бесплатных единиц за применение правила). Результат — `giftItems: GiftCartItem[]` (`menu_item_id`, `variant_id`, `quantity`, `rule_id`, `label_ru`).
+
 `DiscountEngineInput.excludedCategoryIds` — категории `menu_categories.exclude_from_discounts`. Не участвуют в `item_percent`, `order_percent`, `order_fixed`, `cheapest_item_free`. На `free_delivery`, `bonus_multiplier`, подарки — не влияют.
 
 Источники: таблица `discount_rules` (`trigger='auto'` или `promo`) + `promo_codes` (legacy, через синтетическое правило в `resolvePromoCode`).
@@ -374,7 +380,9 @@ Read-only админка: `src/lib/actions/admin/cash-sessions.ts` (`listCashSes
 
 Bootstrap для витрины — `getStorefrontCartPricingBootstrap` в `discounts.ts`: авто-правила, `excludedDiscountCategoryIds`, `storefrontExcludedDiscountCategories` (с именами категорий для подсказок).
 
-Сборка корзины витрины — `src/components/client/cart/storefront-cart-pricing.ts` (`CartItemForEngine` + `evaluateDiscounts`). Подсказки: `storefront-discount-excluded-notice.tsx`, `storefront-promo-excluded-warning.tsx`.
+Сборка корзины витрины — `src/components/client/cart/storefront-cart-pricing.ts` (`CartItemForEngine` + `evaluateStorefrontCartDiscount` → `evaluateDiscounts`; **`allocateGiftFreeUnitsByCartLineId`** — раздаёт `giftItems.quantity` по строкам корзины в порядке `items`). Подсказки: `storefront-discount-excluded-notice.tsx`, `storefront-promo-excluded-warning.tsx`.
+
+**Отображение бесплатных позиций в корзине витрины:** `CartContent` передаёт в `CartItemCard` `giftFreeUnits` (из allocation). На карточке — зачёркнутая сумма бесплатной части + зелёное «0 лей»; при частично платной строке — дополнительно сумма за платные единицы. Итоги корзины (`totalDiscountBani`) не меняются — только UI цены строки.
 
 В POS-мастере: `mergePersistedWebsitePromoDiscount` подмешивает сохранённое `listOrder.promo_code` / `discount` пока движок ещё не дал полный выход.
 
@@ -388,17 +396,13 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - **`getActualBalance(profileId)`** — `src/lib/admin/get-actual-balance.ts`: тот же алгоритм (последний `balance_after`); **админка** — заголовок `/admin/customers/[id]` и `POST /api/admin/bonus/adjust` (расчёт `balance_after` новой транзакции = текущий ± сумма).
 - `getBonusSettings()`, `manualAdjust`, `accrueBonus`, `redeemBonus`, `processBonusAccrualOnOrderDone(profileId, orderId, totalBani, multiplier?)`.
 
-**Список клиентов (RPC `admin_customers_list`):**
+**Список клиентов (RPC `get_customers_list`):**
 
-- Возвращает **JSON** `{ data: [...], total: N }` (не TABLE). В `page.tsx`: `listResult.data.data`, `listResult.data.total`.
-- Параметры (**snake_case**, имена должны совпадать с PostgreSQL — иначе PostgREST подставит дефолты и вернёт пустой результат):
-  - `search_q` — поиск по телефону (`ILIKE '%q%'`); при отсутствии поиска передавать `''`, не `null`
-  - `list_limit`, `list_offset` — пагинация (100 на страницу)
-  - `activity_segment`: `all` | `active_7` | `active_30` | `sleeping_30_90` | `sleeping_90`
-  - `orders_segment`: `all` | `one_time` | `returning` | `loyal`
-  - `sort_by`: `last_order` | `ltv` | `order_count`
-- Поле `bonus_balance` в строках = последний `balance_after` (миграция `*_admin_customers_list_bonus_balance.sql`), не `SUM(amount)`. `amount` в `bonus_transactions` всегда > 0; знак операции — поле `type` (`accrual`/`manual_add` vs `redemption`/`manual_deduct`).
-- Миграции в репозитории: `*_admin_customers_list.sql`, `*_admin_customers_list_bonus_balance.sql`, `*_admin_customers_list_pagination.sql`. На remote — актуальная версия с JSON-ответом и фильтрами.
+- Миграция `*_get_customers_list.sql`: агрегаты заказов с сайта (`status='done'`), Poster (`profiles.poster_orders_count`, `poster_last_order_at`), `bonus_balance` = последний `balance_after`, `total_count` на строке.
+- Server action `lib/actions/admin/customers-list.ts` → `getCustomersList(filters, page)` (service role, `CUSTOMERS_PAGE_SIZE = 50`).
+- Страница `/admin/customers`: RSC `page.tsx` читает `?search=`, `?page=`; клиент **`CustomersPageClient`** (`components/admin/customers/`): поиск (debounce), **Popover-фильтры** (`customers-filters.tsx`: сортировка, мин. заказов, только с бонусами, даты регистрации, активность 30/60/90/180 дней), таблица (`customers-table.tsx`), пагинация `« ‹ › »`.
+- Колонки таблицы: клиент (телефон + имя), регистрация, заказов (tooltip: сайт + Poster), потрачено (только site LTV), последний заказ, бонусы. Клик → `/admin/customers/[id]`.
+- Legacy RPC `admin_customers_list` (старые миграции) — заменён на `get_customers_list` в UI.
 
 **Начисление** (после успешного `payOrder`): `Math.round((totalBani / 100) × accrual_rate × bonus_multiplier)`. `totalBani` уже с учётом списанных бонусов. Ошибки логируются, оплату не блокируют.
 
@@ -498,6 +502,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 **Витрина — корзина / checkout** (`CartItemToppingDetails`, `CartItemCard`, `order-summary`):
 - Топпинги по группам: строки `«Название ×N — X лей»`; charge per topping — `calcToppingChargesById`.
 - Если вся группа бесплатна — зелёный бейдж «В комбо» у названия группы.
+- **`CartItemCard`:** при `giftFreeUnits > 0` (из `giftItems` движка) — зачёркнутая цена бесплатной части + «0 лей» зелёным; частично платные строки показывают и платную сумму.
 
 **Прочее:**
 - `topping-max-selection.ts` — legacy-хелпер `nextSelectedToppingIdsWithGroupCap` (витрина, flat ids); POS больше не использует `nextSelectedByGroupWithCap`.
@@ -614,7 +619,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 |---|---|
 | `/admin/analytics` | Дашборд KPI и графики: `getAnalyticsData` (`lib/actions/admin/analytics.ts`), `AnalyticsDashboard` (recharts). Фильтры: период 7/14/30 дней, бренд или все. Заказы `status=done`, выручка в MDL (bani/100). |
 | `/admin/orders` | Метрики за сутки UTC (`getAdminOrdersTodayMetrics`) + фильтры (`status_group`, `brand_id`, `order_src`, `search`, даты — дефолт сегодня UTC) + таблица. Клик по строке → `OrderDetailSheet` через `fetchAdminOrderDetail` (service role). |
-| `/admin/customers` | RSC `page.tsx`: RPC **`admin_customers_list`** (100 строк/стр., JSON `{ data, total }`). URL: `?q=` (телефон), `?page=`, `?activity_segment=`, `?orders_segment=`, `?sort_by=` — при смене фильтра/поиска сброс `page`. Клиентские части: `customers-search.tsx` (debounce 300 ms), `customers-filters.tsx` + `customers-filters-config.ts` (pill-кнопки, accent `#ccff00`), `customers-pagination.tsx` («← Назад / Вперёд →», «Страница X из Y»). Таблица `customers-table.tsx`: телефон, **адрес** (`hidden md:table-cell`, truncate), имя, заказы, LTV, **бонусы**, даты первого/последнего заказа; клик → `/admin/customers/[id]`. Счётчик «Клиентов: X из Y». |
+| `/admin/customers` | RSC `page.tsx` + **`CustomersPageClient`**: RPC **`get_customers_list`** (50/стр.), URL `?search=`, `?page=`. Фильтры в Popover (`components/admin/customers/customers-filters.tsx`). Таблица: клиент, регистрация, заказы (сайт+Poster), потрачено, последний заказ, бонусы → `/admin/customers/[id]`. |
 | `/admin/customers/[id]` | RSC: профиль, баланс через **`getActualBalance`**, до 50 транзакций, до 20 заказов. `BonusAdjustForm` → `POST /api/admin/bonus/adjust` (тоже `getActualBalance` для `balance_after`). |
 | `/admin/settings/bonus` | `bonus_settings` id=1; `updateBonusSettings` (`%` в UI → доли в БД). |
 | `/admin/categories` | `menu_categories`: RU/RO, slug, `image_url`, `show_in_upsell`, `exclude_from_discounts`, `workshop`. |
@@ -628,7 +633,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 | `/admin/staff/shifts` | `shift_logs` + join `staff` + подсчёт доставленных (`orders.status=done`, `courier_id`, `delivered_at` в интервале). |
 | `/admin/delivery-zones` | `delivery_zones` + nested `delivery_zone_schedules`: полигоны Leaflet Draw, color, базовая цена/минималка/время, слоты расписания в редакторе. Actions: `createDeliveryZone`, `updateDeliveryZone`, `deleteDeliveryZone`; слоты — `createSchedule`, `updateSchedule`, `deleteSchedule`. |
 | `/admin/finance/cash-sessions` | Список смен (фильтры даты/staff/status, до 200; агрегаты по `cash_transactions` + Glovo card из `orders`). |
-| `/admin/finance/cash-sessions/[id]` | Деталь — scaffold (данные через `getCashSessionDetail`). |
+| `/admin/finance/cash-sessions/[id]` | Деталь: `getCashSessionDetail` + `CashSessionDetailView`; таблица транзакций с void/edit для allowlist-пользователей (`cash-transaction-actions.tsx`); бейдж «Аннулировано», иконка редактирования при `edited_at`. |
 | `/admin/finance/ledger` | `stock_ledger`, до 200 последних; фильтр по `movement_type` на клиенте; service role. |
 | `/admin/inventory/stock` | Остатки (read-only); фильтр «Все/В наличии/Нет» на клиенте; единицы кг/л/шт. |
 | `/admin/inventory/suppliers` | Поставщики (CRUD без бренда; удаление с проверкой `supply_orders`). |
@@ -661,7 +666,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 - `delivery_zones` — `polygon` JSONB `[lat,lng][]`, `color` (TEXT, HEX), `delivery_price_bani`, `night_delivery_price_bani`, `active_from`, `active_to`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `is_active`, `sort_order`, `brand_id`.
 - `delivery_zone_schedules` — `zone_id`, `from_time`, `to_time`, `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `sort_order` (миграции `*_delivery_zone_schedules.sql`, `*_delivery_zones_night_and_window.sql` для legacy-колонок зоны).
 - `orders`, `order_items` — см. раздел Контракты.
-- `profiles`, `otp_codes`, `customer_addresses` (`profile_id`, `label`, `address`, `entrance/floor/apartment/intercom`, `delivery_lat/lng`, `is_default`).
+- `profiles`, `otp_codes`, `customer_addresses` (`profile_id`, `label`, `address`, `entrance/floor/apartment/intercom`, `delivery_lat/lng`, `is_default`). На `profiles`: **`poster_orders_count`**, **`poster_last_order_at`** (история Kitch/Poster для списка клиентов).
 - `bonus_settings`, `bonus_transactions`.
 - `staff`, `shift_logs`, `courier_locations`.
 - `cash_sessions`, `cash_transactions`.
@@ -671,6 +676,10 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 ### Типы
 
 `src/types/database.ts` — `OrderStatus`, `Order`, `OrderItem`, `OrderItemTopping` (`toppings` JSONB), `MenuItem` / `MenuItemVariant` / `Topping` (`aggregator_price_bani?`), `MenuItemToppingGroup` (`free_count`), **`CustomerAddress`** (сохранённые адреса клиента для POS/API), `CashSession`, …
+
+`src/types/customers.ts` — `CustomerRow`, `CustomerFilters`, `DEFAULT_CUSTOMER_FILTERS` (список клиентов админки).
+
+`src/types/promotions.ts` — `DiscountRule` incl. **`max_free_items?`**, `GiftCartItem`, `DiscountEngineOutput.giftItems`.
 
 `src/types/cart.ts` — `CartItem`, `CartTopping` (`quantity`, `topping_group_id`), `toppingGroupFreeCounts`, `toppingGroupLabels`.
 
@@ -736,7 +745,8 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `get-brands.ts`, `set-admin-brand.ts`.
 - `admin/analytics.ts` — `getAnalyticsData` (KPI, день/день, топ позиций; фильтр `brandId`, `days` 7|14|30).
 - `admin/bonus-settings-action.ts` — `updateBonusSettings`.
-- `admin/cash-sessions.ts` — `listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`.
+- `admin/cash-sessions.ts` — `listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`, `voidCashTransaction`, `editCashTransaction`.
+- `admin/customers-list.ts` — `getCustomersList`.
 - `inventory/ingredient-categories.ts` — CRUD категорий (service role).
 - `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive` (service role).
 - `(admin)/admin/menu/actions.ts` — CRUD позиций (`aggregator_price_bani`); `getMenuItemToppingGroups`, `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`).
@@ -786,6 +796,9 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/pos/menu-item-modal-row.ts` — `POS_MENU_ITEM_FOR_MODAL_SELECT` (вкл. `aggregator_price_bani`), `posMenuRowForModal`, `posVariantsFromMenuEmbed`.
 - `components/topping-stepper-card.tsx` — общая карточка топпинга (витрина + POS).
 - `components/pos/order-form/pos-address-cards.tsx` — карточки сохранённых адресов на шаге «Детали» POS.
+- `components/admin/customers/` — `customers-page-client.tsx`, `customers-filters.tsx`, `customers-table.tsx`.
+- `components/admin/cash-sessions/cash-transaction-actions.tsx` — void/edit кассовых транзакций в детали смены.
+- `components/client/cart/storefront-cart-pricing.ts` — `evaluateStorefrontCartDiscount`, `allocateGiftFreeUnitsByCartLineId`.
 - `lib/data/storefront-item-toppings.ts` — `fetchStorefrontMenuItemToppingGroups` (`free_count` с `menu_item_topping_groups`; select включает `aggregator_price_bani` у топпингов).
 - `lib/order-item-size-display.ts`.
 - `lib/storefront-delivery-display.ts`, `lib/storefront-pickup-location.ts`, `lib/storefront-account-path.ts`.
@@ -880,8 +893,6 @@ PBX_WEBHOOK_TOKEN=
 - Подключить `night_delivery_price_bani` / `active_from` / `active_to` зоны в `resolveZoneParams` (сейчас только слоты + базовые колонки; колонки в БД — миграция `*_delivery_zones_night_and_window.sql`, применить на remote Supabase).
 - Доработать gallery и lunch sets в админке.
 - Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types` (в т.ч. `semi_finished_items.semi_finished_ref_id`, RPC `apply_supply_order_stock_items`, `revert_supply_order_stock_items`, `replace_supply_order_stock_items`, `annul_supply_order_stock`).
-- Применить на remote Supabase миграции: **`admin_customers_list`** (JSON `{ data, total }`, фильтры `activity_segment` / `orders_segment` / `sort_by`, пагинация `list_limit` / `list_offset`; локально — `*_admin_customers_list_bonus_balance.sql`, `*_admin_customers_list_pagination.sql`); склад поставок — `*_apply_supply_stock_rpc.sql`, `*_revert_supply_stock_and_update.sql`, функцию **`annul_supply_order_stock`** (если `avg_cost` после поставки NULL, нет редактирования/аннулирования через RPC или падает `annulSupplyOrder`).
+- Применить на remote Supabase миграции: **`get_customers_list`** (`*_get_customers_list.sql`, колонки Poster на `profiles`); **`cash_transactions.edited_at`**, **`edited_by_user_id`** (если edit в админке падает); склад поставок — `*_apply_supply_stock_rpc.sql`, `*_revert_supply_stock_and_update.sql`, **`annul_supply_order_stock`**.
 - Подключить списание ингредиентов в `payOrder` через `computeIngredientTotalsForOrder`.
-- UI для детали `/admin/finance/cash-sessions/[id]` (сейчас scaffold).
-- Voiding кассовых транзакций в админке.
 - Подпись «Позвонить …» в `storefront.ts` под бренд (или оставить динамику в `aria-label` через `getBrandCallLabel`).

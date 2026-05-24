@@ -225,8 +225,11 @@ export function evaluateDiscounts(
     if (n == null || n <= 0) continue
 
     const units = expandUnitsFromMutable(workQty, rule, excludedSet)
-    const freeCount = Math.floor(units.length / n)
+    let freeCount = Math.floor(units.length / n)
     if (freeCount <= 0) continue
+    if (rule.max_free_items != null && rule.max_free_items > 0) {
+      freeCount = Math.min(freeCount, rule.max_free_items)
+    }
 
     const keysTaken = new Map<string, number>()
     let ruleDiscount = 0

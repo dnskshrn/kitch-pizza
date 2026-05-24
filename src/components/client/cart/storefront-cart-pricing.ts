@@ -7,7 +7,45 @@ import type {
   DeliveryZoneForEngine,
   DiscountEngineOutput,
   DiscountRule,
+  GiftCartItem,
 } from "@/types/promotions"
+
+function cartItemMatchesGift(gift: GiftCartItem, cartItem: CartItem): boolean {
+  if (gift.menu_item_id !== cartItem.menuItem.id) return false
+  const cartVariantId = cartItem.variantId ?? null
+  if (gift.variant_id != null && cartVariantId != null) {
+    return gift.variant_id === cartVariantId
+  }
+  return true
+}
+
+/** Сколько единиц на строке корзины покрыты giftItems (порядок строк = порядок в items). */
+export function allocateGiftFreeUnitsByCartLineId(
+  items: CartItem[],
+  giftItems: GiftCartItem[],
+): Map<string, number> {
+  const remaining = giftItems.map((g) => ({ ...g }))
+  const result = new Map<string, number>()
+
+  for (const item of items) {
+    let freeOnLine = 0
+    let need = item.quantity
+
+    for (const gift of remaining) {
+      if (gift.quantity <= 0) continue
+      if (!cartItemMatchesGift(gift, item)) continue
+      const take = Math.min(need, gift.quantity)
+      freeOnLine += take
+      gift.quantity -= take
+      need -= take
+      if (need <= 0) break
+    }
+
+    if (freeOnLine > 0) result.set(item.id, freeOnLine)
+  }
+
+  return result
+}
 
 export function cartItemsForDiscountEngine(items: CartItem[]): CartItemForEngine[] {
   return items.map((ci) => ({

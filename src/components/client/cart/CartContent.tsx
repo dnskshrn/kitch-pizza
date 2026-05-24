@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  allocateGiftFreeUnitsByCartLineId,
   evaluateStorefrontCartDiscount,
   getOrderedExcludedDiscountCategoriesInCart,
 } from "@/components/client/cart/storefront-cart-pricing"
@@ -34,6 +35,11 @@ import {
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { CartItemCard } from "./CartItemCard"
 import { StorefrontDiscountExcludedNotice } from "./storefront-discount-excluded-notice"
 import { StorefrontPromoExcludedWarning } from "./storefront-promo-excluded-warning"
@@ -195,6 +201,12 @@ export function CartContent({
     )
   }, [storefrontEngineOutput, subtotal, fallbackPromoDiscount])
 
+  const giftFreeUnitsByLineId = useMemo(() => {
+    const gifts = storefrontEngineOutput?.giftItems
+    if (!gifts?.length) return new Map<string, number>()
+    return allocateGiftFreeUnitsByCartLineId(items, gifts)
+  }, [items, storefrontEngineOutput?.giftItems])
+
   useEffect(() => {
     if (!isOpen) setUpsellCategory(null)
   }, [isOpen])
@@ -353,6 +365,7 @@ export function CartContent({
                 key={cartItem.id}
                 cartItem={cartItem}
                 lang={lang}
+                giftFreeUnits={giftFreeUnitsByLineId.get(cartItem.id) ?? 0}
                 name={
                   pickLocalizedName(cartItem.menuItem, lang)
                 }
@@ -447,7 +460,32 @@ export function CartContent({
               </div>
               {discount > 0 ? (
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-[rgba(36,36,36,0.55)]">{t.cart.discount}</span>
+                  <span className="inline-flex items-center text-[rgba(36,36,36,0.55)]">
+                    {t.cart.discount}
+                    {brandSlug === "kitch-pizza" ? (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="border-0 bg-transparent p-0"
+                            aria-label="Акция 3+1"
+                          >
+                            <Info
+                              size={14}
+                              className="ml-1 inline-block cursor-pointer align-middle text-muted-foreground"
+                              strokeWidth={2}
+                            />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start">
+                          <p className="max-w-[220px] text-sm">
+                            🍕 Акция 3+1: при заказе 4 пицц самая дешёвая — бесплатно.
+                            Максимум 2 бесплатные пиццы за заказ.
+                          </p>
+                        </PopoverContent>
+                      </Popover>
+                    ) : null}
+                  </span>
                   <span className="storefront-modal-accent font-medium tabular-nums">
                     −{discountLei}
                   </span>

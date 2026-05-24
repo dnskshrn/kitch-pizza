@@ -21,6 +21,7 @@ gift_item_variant_id: string | null
 target_item_ids: string[] | null
 target_category_ids: string[] | null
 free_every_n: number | null
+max_free_items?: number | null
 trigger_type: DiscountTrigger
 promo_code_id: string | null
 min_order_bani: number | null

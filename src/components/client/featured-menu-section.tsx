@@ -87,7 +87,7 @@ function FeaturedMenuCard({
       aria-label={ariaLabel}
       className="group flex h-full min-h-0 w-full items-stretch overflow-hidden rounded-[12px] bg-white text-left transition-transform duration-200 hover:-translate-y-0.5"
     >
-      <div className="relative w-[min(108px,34%)] shrink-0 self-stretch overflow-hidden bg-white md:w-[120px]">
+      <div className="relative w-[96px] shrink-0 self-stretch overflow-hidden bg-white sm:w-[104px] md:w-[120px]">
         {item.image_url ? (
           <Image
             src={item.image_url}
@@ -106,8 +106,8 @@ function FeaturedMenuCard({
         )}
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 px-3 py-4 md:gap-4 md:px-4 md:py-6">
-        <h3 className="break-words text-[16px] font-semibold leading-snug tracking-[-0.02em] text-[var(--color-text)] md:text-[18px] md:leading-snug">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 px-3 py-3.5 md:gap-4 md:px-4 md:py-6">
+        <h3 className="max-w-[180px] truncate text-[15px] font-semibold leading-snug tracking-[-0.02em] text-[var(--color-text)] sm:max-w-[210px] md:max-w-none md:text-[18px] md:leading-snug">
           {name}
         </h3>
         <div className="mt-auto flex items-center justify-between gap-3 md:gap-4">
@@ -164,9 +164,9 @@ export function FeaturedMenuSection({
       </div>
       <Swiper
         modules={[Navigation]}
-        slidesPerView={1.12}
-        spaceBetween={16}
-        slidesOffsetAfter={16}
+        slidesPerView={1.22}
+        spaceBetween={14}
+        slidesOffsetAfter={14}
         watchOverflow
         navigation={
           items.length > 1

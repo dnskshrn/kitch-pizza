@@ -33,6 +33,7 @@ import {
   FolderTree,
   Images,
   Coins,
+  TrendingUp,
 } from "lucide-react"
 import { brands } from "@/brands"
 import { BrandSwitcher } from "@/components/admin/brand-switcher"
@@ -140,13 +141,19 @@ const marketingNavGroup: NavGroup = {
     { href: "/admin/promotions", label: "Галерея", icon: Images },
     { href: "/admin/discount-rules", label: "Акции", icon: Tag },
     { href: "/admin/promo-codes", label: "Промокоды", icon: Ticket },
-    { href: "/admin/customers", label: "Клиенты", icon: Users },
     {
       href: "/admin/settings/bonus",
       label: "Программа лояльности",
       icon: Gift,
     },
   ],
+}
+
+const brandCustomersNavGroup: NavGroup = {
+  id: "customers",
+  label: "Клиенты",
+  icon: Users,
+  items: [{ href: "/admin/customers", label: "Клиенты", icon: Users }],
 }
 
 const generalNavGroups: NavGroup[] = [
@@ -197,9 +204,14 @@ const generalNavGroups: NavGroup[] = [
   },
   {
     id: "cash-sessions",
-    label: "Касса",
+    label: "Финансы",
     icon: Coins,
     items: [
+      {
+        href: "/admin/finances",
+        label: "P&L",
+        icon: TrendingUp,
+      },
       {
         href: "/admin/finance/cash-sessions",
         label: "Касса",
@@ -222,6 +234,7 @@ const allNavGroups: NavGroup[] = [
   ...topNavGroups,
   ...brandNavGroups,
   marketingNavGroup,
+  brandCustomersNavGroup,
   ...generalNavGroups,
 ]
 
@@ -379,21 +392,7 @@ export default function AdminSidebar({
           <SidebarGroupContent>
             <SidebarMenu>
               {renderSidebarNavGroups(
-                brandNavGroups,
-                pathname,
-                groupOpen,
-                setGroupOpen,
-              )}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarSeparator className="my-1" />
-        <SidebarGroup>
-          <SidebarGroupLabel>Маркетинг</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {renderSidebarNavGroups(
-                [marketingNavGroup],
+                [...brandNavGroups, marketingNavGroup, brandCustomersNavGroup],
                 pathname,
                 groupOpen,
                 setGroupOpen,

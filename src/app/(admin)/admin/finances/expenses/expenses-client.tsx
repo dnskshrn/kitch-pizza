@@ -88,7 +88,7 @@ const expenseFormSchema = z
   .object({
     expense_category_id: z.string().min(1, "Выберите категорию"),
     amount: z
-      .number({ invalid_type_error: "Введите сумму" })
+      .number()
       .refine((value) => Number.isFinite(value), "Введите сумму")
       .positive("Сумма > 0"),
     payment_source: z.enum(["bank_transfer", "card_online", "cash_manual"]),

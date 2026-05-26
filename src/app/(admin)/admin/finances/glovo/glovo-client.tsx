@@ -88,19 +88,19 @@ const glovoFormSchema = z
     period_start: z.string().min(1, "Укажите дату начала периода"),
     period_end: z.string().min(1, "Укажите дату окончания периода"),
     gross_amount: z
-      .number({ invalid_type_error: "Введите gross сумму" })
+      .number()
       .refine((value) => Number.isFinite(value), "Введите gross сумму")
       .positive("Сумма должна быть больше 0"),
     commission: z
-      .number({ invalid_type_error: "Введите комиссию" })
+      .number()
       .refine((value) => Number.isFinite(value), "Введите комиссию")
       .min(0, "Комиссия не может быть отрицательной"),
     vat: z
-      .number({ invalid_type_error: "Введите НДС" })
+      .number()
       .refine((value) => Number.isFinite(value), "Введите НДС")
       .min(0, "НДС не может быть отрицательным"),
     net_received: z
-      .number({ invalid_type_error: "Введите итог получено" })
+      .number()
       .refine((value) => Number.isFinite(value), "Введите итог получено")
       .min(0, "Сумма получено не может быть отрицательной"),
     received_at: z.string().optional(),

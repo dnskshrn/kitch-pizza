@@ -4,8 +4,11 @@ export async function printReceipt(node: HTMLElement): Promise<void> {
   try {
     await document.fonts?.ready
 
+    const height = node.scrollHeight
+
     const dataUrl = await toPng(node, {
       width: 576,
+      height,
       pixelRatio: 1,
       backgroundColor: "#ffffff",
       cacheBust: true,

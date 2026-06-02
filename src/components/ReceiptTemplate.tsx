@@ -79,15 +79,16 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
           fontSize: 22,
           lineHeight: 1.35,
           boxSizing: "border-box",
-          paddingTop: 8,
-          paddingBottom: 128,
+          margin: 0,
+          paddingTop: 0,
+          paddingBottom: 320,
         }}
       >
         {/* Шапка */}
         <div
           style={{
             color: "#000000",
-            padding: "8px 32px 24px",
+            padding: "0 32px 20px",
             textAlign: "center",
             borderBottom: "3px solid #000000",
           }}
@@ -99,7 +100,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
             width={360}
             height={88}
             style={{
-              display: "inline-block",
+              display: "block",
               height: 88,
               width: "auto",
               maxWidth: "100%",

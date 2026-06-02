@@ -3710,7 +3710,15 @@ export function OrderForm({
         {deliveryModeSwitchDialog}
         <div
           aria-hidden
-          style={{ position: "absolute", left: -9999, top: 0, pointerEvents: "none" }}
+          style={{
+            position: "fixed",
+            left: 0,
+            top: 0,
+            width: 576,
+            visibility: "hidden",
+            pointerEvents: "none",
+            zIndex: -1,
+          }}
         >
           <ReceiptTemplate ref={receiptRef} {...receiptProps} />
         </div>

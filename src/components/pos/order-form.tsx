@@ -1314,6 +1314,9 @@ export function OrderForm({
 
   const receiptProps = useMemo(
     () => ({
+      brandSlug: normalizePosBrandSlug(
+        selectedBrand?.slug ?? listOrder?.brand_slug ?? "losos",
+      ),
       orderNumber: String(orderNumber ?? ""),
       createdAt: new Date(listOrder?.created_at ?? Date.now()).toLocaleString(
         "ru-RU",
@@ -1350,11 +1353,13 @@ export function OrderForm({
       cart,
       deliveryMode,
       effectiveEngineOutput?.bonusMultiplier,
+      listOrder?.brand_slug,
       listOrder?.created_at,
       listOrder?.delivery_mode,
       orderNumber,
       payableAfterBonusBani,
       posBonusBalance,
+      selectedBrand?.slug,
     ],
   )
 

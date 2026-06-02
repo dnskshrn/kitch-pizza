@@ -4,6 +4,7 @@ import { brands } from "@/brands/index"
 import { forwardRef } from "react"
 
 export interface ReceiptProps {
+  brandSlug: string
   orderNumber: string
   createdAt: string
   items: { name: string; subtitle?: string; qty: number; price: number }[]
@@ -11,15 +12,6 @@ export interface ReceiptProps {
   bonusEarned: number
   bonusBalance: number
   channel: string
-}
-
-const LOSOS_LOGO = brands.find((b) => b.slug === "losos")?.logo ?? "/Losos_Logo.svg"
-const LOSOS_PHONE = brands.find((b) => b.slug === "losos")?.phone ?? "079 200 190"
-const LOSOS_HOURS = brands.find((b) => b.slug === "losos")?.hours ?? "15:00 – 03:00"
-
-function receiptLogoUrl(): string {
-  if (typeof window === "undefined") return LOSOS_LOGO
-  return `${window.location.origin}${LOSOS_LOGO}`
 }
 
 function formatMdl(amount: number): string {
@@ -32,6 +24,7 @@ function formatMdl(amount: number): string {
 export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
   function ReceiptTemplate(
     {
+      brandSlug,
       orderNumber,
       createdAt,
       items,
@@ -42,7 +35,15 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
     },
     ref,
   ) {
-    const qrPayload = `https://losos.md/?order=${encodeURIComponent(orderNumber)}`
+    const brand = brands.find((b) => b.slug === brandSlug)
+      ?? brands.find((b) => b.slug === "losos")!
+    const logoUrl = typeof window !== "undefined"
+      ? `${window.location.origin}${brand.logo}`
+      : brand.logo
+    const brandPhone = brand.phone ?? ""
+    const brandHours = brand.hours ?? ""
+    const brandDomain = brand.domain
+    const qrPayload = `https://${brandDomain}/?order=${encodeURIComponent(orderNumber)}`
     const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=10&color=000000&bgcolor=ffffff&data=${encodeURIComponent(qrPayload)}`
 
     return (
@@ -71,7 +72,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={receiptLogoUrl()}
+            src={logoUrl}
             alt="LOSOS"
             width={248}
             height={56}
@@ -325,7 +326,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
               letterSpacing: "0.04em",
             }}
           >
-            losos.md
+            {brandDomain}
           </div>
         </div>
 
@@ -338,9 +339,9 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
             textAlign: "center",
           }}
         >
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{LOSOS_PHONE}</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{brandPhone}</div>
           <div style={{ marginTop: 6, fontSize: 18, fontWeight: 400 }}>
-            {LOSOS_HOURS}
+            {brandHours}
           </div>
           <div
             style={{

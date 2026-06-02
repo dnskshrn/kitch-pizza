@@ -9,7 +9,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import type { OrderStatus } from "@/types/database"
 import type { PosOrder, PosOrderStatus } from "@/types/pos"
 import { MapPin, Phone, Store, Truck, Tag, User, CircleUser, Bike } from "lucide-react"
 import { useEffect, useState } from "react"

@@ -1222,7 +1222,16 @@ export function OrderForm({
       .map((c) => ({ id: c.id, name_ru: c.name_ru, name_ro: "" }))
   }, [effectiveEngineOutput, cartForEngine, posMenuCategories])
 
-  const totalBani = effectiveEngineOutput.totalBani ?? 0
+  const isAggregator = deliveryMode === "aggregator"
+  const cartItemsTotalBani = cart.reduce(
+    (sum, item) =>
+      sum + getPosCartItemUnitPriceBani(item, isAggregator) * item.qty,
+    0,
+  )
+  const totalBani =
+    effectiveEngineOutput.totalBani && effectiveEngineOutput.totalBani > 0
+      ? effectiveEngineOutput.totalBani
+      : cartItemsTotalBani
   const runnerHasPricedItems = effectiveEngineOutput.itemSubtotalBani > 0
 
   const skipWebsitePromoSeedResolve = Boolean(
@@ -1393,6 +1402,10 @@ export function OrderForm({
   const handlePrintPrecheck = useCallback(async () => {
     const node = receiptRef.current
     if (!node || orderNumber == null || cart.length === 0) return
+    // Sync cart before printing to ensure engine has latest state
+    await persistCartToServer().catch(() => {})
+    // Small delay to allow effectiveEngineOutput to recompute
+    await new Promise((resolve) => setTimeout(resolve, 150))
     setReceiptPrinting(true)
     try {
       await printReceipt(node)

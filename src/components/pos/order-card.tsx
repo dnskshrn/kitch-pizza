@@ -58,16 +58,19 @@ export function compactCardDeliveryAddress(order: PosOrder): string {
 }
 
 function StatusBadge({ status }: { status: PosOrderStatus }) {
-  const map: Record<PosOrderStatus, { bg: string; text: string; label: string }> = {
-    draft:     { bg: "#F4F4F5", text: "#52525B", label: "Черновик" },
-    new:       { bg: "#FFF9E6", text: "#B38600", label: "Новый" },
-    confirmed: { bg: "#E0F2FE", text: "#0369A1", label: "Подтверждён" },
-    cooking:   { bg: "#EFF6FF", text: "#1D4ED8", label: "Готовится" },
-    ready:     { bg: "#FEF3C7", text: "#B45309", label: "Готов" },
-    delivery:  { bg: "#FFF5EB", text: "#C2410C", label: "Доставляется" },
-    done:      { bg: "#E5FF66", text: "#3D5A00", label: "Выдан" },
-    cancelled: { bg: "#FEF2F2", text: "#B91C1C", label: "Отменён" },
-    rejected:  { bg: "#FEF2F2", text: "#991B1B", label: "Отклонён" },
+  const map: Record<
+    PosOrderStatus,
+    { bg: string; text: string; border: string; label: string }
+  > = {
+    draft:     { bg: "#F4F4F5", text: "#52525B", border: "#52525B", label: "Черновик" },
+    new:       { bg: "#FFF9E6", text: "#B38600", border: "#B38600", label: "Новый" },
+    confirmed: { bg: "#E0F2FE", text: "#0369A1", border: "#0369A1", label: "Подтверждён" },
+    cooking:   { bg: "#EFF6FF", text: "#1D4ED8", border: "#1D4ED8", label: "Готовится" },
+    ready:     { bg: "#F0FDF4", text: "#15803D", border: "#15803D", label: "Готов" },
+    delivery:  { bg: "#FFF5EB", text: "#C2410C", border: "#C2410C", label: "Доставляется" },
+    done:      { bg: "#E5FF66", text: "#3D5A00", border: "#3D5A00", label: "Выдан" },
+    cancelled: { bg: "#FEF2F2", text: "#B91C1C", border: "#B91C1C", label: "Отменён" },
+    rejected:  { bg: "#FEF2F2", text: "#991B1B", border: "#991B1B", label: "Отклонён" },
   }
   const s = map[status]
   if (!s) return null
@@ -79,6 +82,21 @@ function StatusBadge({ status }: { status: PosOrderStatus }) {
       {s.label}
     </span>
   )
+}
+
+export function getStatusBorderColor(status: PosOrderStatus): string {
+  const map: Record<PosOrderStatus, string> = {
+    draft:     "#52525B",
+    new:       "#B38600",
+    confirmed: "#0369A1",
+    cooking:   "#1D4ED8",
+    ready:     "#15803D",
+    delivery:  "#C2410C",
+    done:      "#3D5A00",
+    cancelled: "#B91C1C",
+    rejected:  "#991B1B",
+  }
+  return map[status] ?? "#E4E4E7"
 }
 
 const WEBSITE_REJECT_PRESETS = [
@@ -217,12 +235,6 @@ export function WebsiteNewActions({
 
 export type OrderWithBrand = PosOrder
 
-const HIGHLIGHT_CARD_STATUSES: OrderStatus[] = ["new", "confirmed"]
-
-function isHighlightOrderStatus(status: PosOrderStatus): boolean {
-  return HIGHLIGHT_CARD_STATUSES.includes(status as OrderStatus)
-}
-
 type OrderCardProps = {
   order: OrderWithBrand
   isSelected: boolean
@@ -242,15 +254,12 @@ export function OrderCard({
   return (
     <div
       className={cn(
-        "flex flex-col gap-0 rounded-lg border-0 bg-white px-4 py-4 shadow-none transition-colors",
+        "flex flex-col gap-0 rounded-lg border-2 bg-white px-4 py-4 shadow-none transition-colors",
         isSelected
           ? "ring-2 ring-inset ring-[#242424]"
-          : cn(
-              "cursor-pointer hover:bg-[#fafafa]",
-              isHighlightOrderStatus(order.status) &&
-                "ring-2 ring-inset ring-orange-400",
-            ),
+          : "cursor-pointer hover:bg-[#fafafa]",
       )}
+      style={{ borderColor: getStatusBorderColor(order.status) }}
     >
       <div
         role="button"

@@ -1,9 +1,6 @@
 import { toPng } from "html-to-image"
 
-export async function printReceipt(
-  node: HTMLElement,
-  orderNumber: string,
-): Promise<void> {
+export async function printReceipt(node: HTMLElement): Promise<void> {
   try {
     await document.fonts?.ready
 

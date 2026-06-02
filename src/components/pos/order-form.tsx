@@ -1363,7 +1363,7 @@ export function OrderForm({
     if (!node || orderNumber == null || cart.length === 0) return
     setReceiptPrinting(true)
     try {
-      await printReceipt(node, String(orderNumber))
+      await printReceipt(node)
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Не удалось напечатать предчек",

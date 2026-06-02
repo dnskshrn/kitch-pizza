@@ -24,7 +24,6 @@ import type {
   PosWizardBrandOption,
 } from "@/types/pos"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { rawbtOpenDrawer, rawbtPrintText } from "@/lib/rawbt"
 import { toast } from "sonner"
 
 export type RightPanelState =
@@ -186,39 +185,8 @@ export default function PosHomePage() {
 
   const noopDetailAction = useCallback(() => {}, [])
 
-  const handleRawBtTestPrint = useCallback(() => {
-    rawbtPrintText(
-      "-------------------------------\n" +
-        "ТЕСТ ПЕЧАТИ\n" +
-        "Кириллица: Лосось запеченный\n" +
-        "Romana: Sarmalute in foi de vita\n" +
-        "Diacritice: aaist -> ăâîșț\n" +
-        "-------------------------------\n\n\n",
-    )
-  }, [])
-
-  const handleRawBtOpenDrawer = useCallback(() => {
-    rawbtOpenDrawer()
-  }, [])
-
   return (
-    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-white p-5">
-      <div className="absolute right-5 top-5 z-50 flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={handleRawBtTestPrint}
-          className="rounded-lg border-2 border-dashed border-[#242424] bg-[#ccff00] px-4 py-2 text-sm font-bold uppercase tracking-wide text-[#242424] shadow-lg hover:brightness-95"
-        >
-          ТЕСТ ПЕЧАТИ RawBT
-        </button>
-        <button
-          type="button"
-          onClick={handleRawBtOpenDrawer}
-          className="rounded-lg border-2 border-dashed border-[#242424] bg-[#ccff00] px-4 py-2 text-sm font-bold uppercase tracking-wide text-[#242424] shadow-lg hover:brightness-95"
-        >
-          ТЕСТ: ОТКРЫТЬ ЯЩИК
-        </button>
-      </div>
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-white p-5">
       <div className="grid min-h-0 flex-1 grid-cols-12 grid-rows-[minmax(0,1fr)] gap-5 overflow-hidden">
         <div className="col-span-3 flex h-full min-h-0 flex-col overflow-hidden rounded-xl bg-[#f2f2f2]">
           <OrdersPanel

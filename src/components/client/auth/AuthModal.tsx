@@ -53,6 +53,7 @@ export function AuthModal() {
   const closeAuth = useAuthStore((s) => s.closeAuth)
   const dismissAuth = useAuthStore((s) => s.dismissAuth)
   const fetchMe = useAuthStore((s) => s.fetchMe)
+  const setWelcomeBonusPending = useAuthStore((s) => s.setWelcomeBonusPending)
 
   const isDrawer = useIsDrawerLayout()
 
@@ -151,9 +152,12 @@ export function AuthModal() {
           window.requestAnimationFrame(() => otpRefs.current[0]?.focus())
           return
         }
-        // TODO: handle welcomeBonus
+        const data = await response.json()
         await fetchMe()
         closeAuth()
+        if (data.welcomeBonus === true) {
+          setWelcomeBonusPending(true)
+        }
       } catch {
         setOtp(Array(OTP_LEN).fill(""))
         setError(t.auth.modal.errorWrongCode)
@@ -163,7 +167,7 @@ export function AuthModal() {
         verifyLock.current = false
       }
     },
-    [closeAuth, fetchMe, submittedPhone, t.auth.modal.errorWrongCode],
+    [closeAuth, fetchMe, setWelcomeBonusPending, submittedPhone, t.auth.modal.errorWrongCode],
   )
 
   function setOtpDigit(index: number, value: string) {

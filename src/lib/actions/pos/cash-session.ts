@@ -26,6 +26,7 @@ type CashTransactionRow = {
   amount_bani: number
   payment_method: string
   category: string | null
+  expense_category_id?: string | null
   description: string | null
   order_id: string | null
   order_delivery_mode?: string | null
@@ -567,6 +568,7 @@ export type CreateCashTransactionInput = {
   direction: "in" | "out"
   amountBani: number
   category?: "ingredients" | "salary" | "utilities" | "other" | null
+  expense_category_id?: string
   description?: string | null
   createdByStaffId?: string | null
   encashment_destination?: string | null
@@ -628,6 +630,7 @@ export async function createCashTransaction(
       amount_bani: input.amountBani,
       payment_method: "cash",
       category: input.category ?? null,
+      expense_category_id: input.expense_category_id?.trim() || null,
       description: input.description ?? null,
       order_id: null,
       created_by_staff_id: input.createdByStaffId ?? null,

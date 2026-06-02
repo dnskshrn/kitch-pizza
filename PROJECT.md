@@ -21,6 +21,7 @@ Multi-brand витрина доставки еды, админка и POS в о�
 | Forms | React Hook Form + Zod |
 | Maps | Leaflet, Leaflet Draw, react-leaflet, Nominatim |
 | POS Auth | Supabase Auth + `jose` JWT + `bcryptjs` PIN |
+| POS печать (Android) | RawBT intent (`ru.a402d.rawbtprinter`); предчек — `html-to-image` → PNG inline |
 | UI extras | Sonner, Vaul, Swiper, cmdk, recharts, DiceBear (`@dicebear/core`, `@dicebear/thumbs`) |
 
 ESLint: `next/core-web-vitals`, `next/typescript`; `@typescript-eslint/no-explicit-any: warn`.
@@ -40,8 +41,9 @@ src/
 ├── brands/              # BrandConfig + host→brand
 ├── components/
 │   ├── client/          # витрина, корзина, checkout, auth
-│   ├── admin/           # AdminShell, sidebar, analytics, inventory, customers/, cash-sessions/
+│   ├── admin/           # AdminShell, sidebar, finances/, analytics, inventory, customers/, cash-sessions/
 │   ├── pos/             # PosAppShell, OrderForm, KdsScreen; order-form/pos-address-cards.tsx
+│   ├── ReceiptTemplate.tsx  # offscreen-шаблон термочека 576px (RawBT)
 │   ├── store-closed-modal.tsx  # оверлей «магазин закрыт» (витрина)
 │   ├── topping-stepper-card.tsx  # карточка топпинга со stepper (витрина + POS)
 │   ├── seo/JsonLd.tsx
@@ -56,13 +58,12 @@ src/
 │   ├── store/           # Zustand stores (cart, delivery, store-closed, …)
 │   ├── i18n/, pos/, pbx/, seo/, telegram/, supabase/
 │   ├── admin/           # get-actual-balance, orders-url, cash-sessions-url, orders-today-metrics
-│   ├── actions/admin/customers-list.ts
+│   ├── actions/admin/customers-list.ts, analytics.ts, delivery-zone-schedules.ts
 │   ├── bonus.ts, customers.ts, discount-engine.ts
-│   ├── actions/admin/customers-list.ts
+│   ├── rawbt.ts, receipt-print.ts  # Android RawBT: текст, ящик, предчек PNG
 │   ├── store-hours.ts, cart-toppings.ts, cart-helpers.ts, topping-pricing.ts, topping-max-selection.ts
 │   ├── pos-cart-toppings.ts, pos-cart-helpers.ts
 │   ├── delivery-zone-schedule.ts  # слоты расписания зоны (Europe/Chisinau)
-│   ├── actions/admin/analytics.ts, delivery-zone-schedules.ts
 │   ├── inventory-units.ts, recipe-*.ts
 │   ├── product-recipe-cost.ts, semi-finished-cost.ts, ingredient-avg-cost.ts
 │   ├── order-recipe-stock-deduction.ts
@@ -123,7 +124,7 @@ src/
 
 **Брендовое** (фильтр по `brand_id`, для админки — через `getAdminBrandId()` из cookie `admin-brand-slug`): `menu_categories`, `menu_items`, `menu_item_variants`, `topping_groups`, `toppings`, `menu_item_topping_groups`, `promotions`, `featured_menu_items`, `promo_codes`, `discount_rules`, `delivery_zones`, `orders` (на витрине). На витрине бренд резолвится через `getBrand()` / `getBrandId()`; на админке через cookie.
 
-**Общее для всех брендов** (без фильтра по `getAdminBrandId()`): `staff`, `shift_logs`, `cash_sessions`, `cash_transactions`, склад целиком (`ingredients`, `ingredient_categories`, `ingredient_stock`, `semi_finished`, `semi_finished_items`, `product_recipes`, `suppliers`, `supply_orders` (+ `annulled_at`), `supply_order_items`, `stock_writeoffs`, `stock_audits`, `stock_ledger`), `profiles`, `customer_addresses`, `bonus_settings`, `bonus_transactions`.
+**Общее для всех брендов** (без фильтра по `getAdminBrandId()`): `staff`, `shift_logs`, `cash_sessions`, `cash_transactions`, финансовый модуль (`expense_categories`, `expenses`, `glovo_settlements`, `finance_settings`), склад целиком (`ingredients`, `ingredient_categories`, `ingredient_stock`, `semi_finished`, `semi_finished_items`, `product_recipes`, `suppliers`, `supply_orders` (+ `annulled_at`), `supply_order_items`, `stock_writeoffs`, `stock_audits`, `stock_ledger`), `profiles`, `customer_addresses`, `bonus_settings`, `bonus_transactions`.
 
 **Исключения:**
 - `/admin/orders` — фильтр по бренду только если в URL задан `brand_id` (не принудительно из cookie).
@@ -218,11 +219,13 @@ Supabase Auth email/password. Layout делает `Promise.all` для `getBrand
 
 ### Касса
 
-Таблицы: `cash_sessions` (status `open`/`closed`, `opened_by_staff_id`, `closed_by_staff_id`, `discrepancy_reason`), `cash_transactions` (типы: `opening`, `order_payment`, `expense`, `income`, `encashment`; denormalized `order_delivery_mode`, `order_brand_id`, `encashment_destination`; voiding через `voided_at`, `voided_by_staff_id`, `void_reason`; редактирование — `edited_at`, `edited_by_user_id`).
+Таблицы: `cash_sessions` (status `open`/`closed`, `opened_by_staff_id`, `closed_by_staff_id`, `discrepancy_reason`), `cash_transactions` (типы: `opening`, `order_payment`, `expense`, `income`, `encashment`; denormalized `order_delivery_mode`, `order_brand_id`, `encashment_destination`; `expense_category_id` nullable FK → `expense_categories` для `type='expense'`; legacy `category` пока сохраняется для совместимости; voiding через `voided_at`, `voided_by_staff_id`, `void_reason`; редактирование — `edited_at`, `edited_by_user_id`).
 
 **Админка — правка/аннулирование ручных транзакций** (`lib/actions/admin/cash-sessions.ts`): `voidCashTransaction`, `editCashTransaction`. Доступ только для UUID из allowlist (`CASH_EDIT_ALLOWED_USER_IDS`); проверка через `getAdminSession().staffId`. Типы `expense` / `income` / `encashment`. UI: `components/admin/cash-sessions/cash-transaction-actions.tsx` (Dialog редактирования, Dialog аннулирования с причиной ≥3 символов); колонка «Действия» на `/admin/finance/cash-sessions/[id]` — `canEditTransactions` с сервера.
 
 Server actions — `src/lib/actions/pos/cash-session.ts`: `openCashSession`, `getCashSession`, `getExpectedInDrawerBani`, `getActiveOrdersCountForShift`, `createCashTransaction`, `closeCashSession`, `payOrder`.
+
+**POS ручные транзакции (`CreateTransactionModal`):** для `type='expense'` обязательна категория из `expense_categories`; категории грузятся через `getExpenseCategories` из `lib/actions/admin/finance.ts`. `createCashTransaction` пишет и legacy `category`, и новый `expense_category_id`. Для зарплатных категорий в UI есть поле сотрудника (локально в форме, без записи в `cash_transactions`).
 
 **Инварианты `payOrder`:**
 
@@ -250,6 +253,7 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 ### POS (главная страница и Realtime)
 
 - `src/app/pos/page.tsx`: слева `OrdersPanel` (24 ч активных + 50 «Выданных»; `ORDERS_POS_SELECT` в `src/lib/pos/fetch-orders.ts`); справа — `idle` (выбор типа: доставка / навынос / Glovo), `wizard` (мастер `OrderForm`) или `detail` (только `done`).
+- **Временные кнопки RawBT** (правый верхний угол, только для отладки на Android): «ТЕСТ ПЕЧАТИ RawBT» (`rawbtPrintText`), «ТЕСТ: ОТКРЫТЬ ЯЩИК» (`rawbtOpenDrawer`).
 - При монтировании страница один раз грузит `brands(id, name, slug)`, склеивает с `BrandConfig` в `wizardBrands` (`PosWizardBrandOption`), затем предзагружает меню всех брендов в `usePosMenuCache`.
 - **Realtime POS:** два канала в `orders-panel.tsx` на anon-клиенте — `pos-orders` и `pos-order-items`, `postgres_changes`, `event:*`. На каждое событие — `reloadOrders()` → `fetchPosOrders` / `fetchCompletedPosOrders` + `mergeOrdersPreserveBrandSlug` (сохраняет `brand_slug` если ответ пришёл с пустым slug при том же `brand_id`). При `INSERT` в `orders` — `playPosNewOrderSound()`.
 - Левая `OrderCard` (`components/pos/order-card.tsx`) — **только просмотр**: статус и курьер read-only. Все переходы статусов делаются из мастера/деталки (`update-order-status-kds`, `assign-courier-pos`, `payOrder`). Карточки со статусом **`new`** или **`confirmed`** — оранжевая внутренняя обводка `ring-2 ring-inset ring-orange-400` (при выборе — чёрная `ring-[#242424]`).
@@ -265,6 +269,9 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 - Из входящего звонка: `createDraftOrderPos({brandSlug, userPhone, profileId, userName})` — резолв `brand_id`, открытие мастера на шаге 2.
 
 **Меню в мастере:** `usePosMenuCache` (на время браузерной POS-сессии: категории, items с вариантами и группами топпингов, индексы). Выборка `POS_MENU_ITEM_FOR_MODAL_SELECT` (`lib/pos/menu-item-modal-row.ts`) включает `aggregator_price_bani` для `menu_items`, `menu_item_variants` и nested `toppings`. Fallback — Supabase запрос с той же константой. Cookie `pos-brand-slug` обновляется при выборе бренда (синхронизация с KDS).
+
+**Шаг «Оформление» (меню + корзина):**
+- Кнопка **«Печать предчека»** в `CartPanel` (шаг 2): offscreen `<ReceiptTemplate ref={receiptRef} {...receiptProps} />` (`position:absolute; left:-9999px`) → `printReceipt(node, orderNumber)` из `lib/receipt-print.ts`. Данные чека: номер заказа, дата, позиции корзины (имя, размер, топпинги), итог после списания бонусов, расчёт начисляемых бонусов (`accrual_rate` 5% × `bonusMultiplier`), баланс клиента, канал (`delivery` / `pickup` / Glovo). Disabled при пустой корзине.
 
 **Корзина — optimistic:**
 - `PosCartItem` / `PosCartTopping` (`src/types/pos.ts`): quantity-aware топпинги + `toppingGroupFreeCounts` (snapshot `free_count` из `menu_item_topping_groups`). Опционально `PosCartItem.aggregatorUnitPriceBani` (база позиции без топпингов) и `PosCartTopping.aggregator_price_bani` — заполняются из каталога при добавлении в модалке.
@@ -340,6 +347,20 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 
 - **Высота:** `PosAppShell` — `h-screen` + `overflow-hidden`; scrolls только внутри панелей.
 - **Cмены курьеров:** через **отдельного** Telegram-бота. `POST /api/telegram`, таблица `courier_locations`, команды `/shift_start`, `/shift_end`, привязка по deep-link из `/admin/staff` (`generateTelegramLink`, `TELEGRAM_COURIER_BOT_USERNAME` без `@`).
+
+### Печать чека (RawBT, Android)
+
+Только **клиент** в браузере POS на Android с приложением RawBT (`package=ru.a402d.rawbtprinter`). На десктопе intent не срабатывает.
+
+| Файл | Назначение |
+|---|---|
+| `src/lib/rawbt.ts` | `rawbtPrintText(text)` — печать текста через intent; `rawbtOpenDrawer()` — команда ESC p, pin 2 (`\x1B\x70\x00\x19\xFA`) |
+| `src/lib/receipt-print.ts` | `printReceipt(node, orderNumber)` — `html-to-image` `toPng` (576px, `pixelRatio:1`, `#fff`) → payload `rawbt:data:image/png;base64,...` → `encodeURIComponent` + intent RawBT |
+| `src/components/ReceiptTemplate.tsx` | Шаблон предчека: 576px (лента 80 мм), только `#000`/`#fff`, логотип LOSOS, инверсная шапка/ИТОГО, позиции, бонусы, QR, футер с телефоном; RU/RO подписи |
+
+**Поток предчека:** рендер offscreen DOM → snapshot PNG → inline intent (без Supabase Storage и без `PrintDownloadActivity`). Перед snapshot — `document.fonts.ready`. Временный diagnostic `alert` с длиной data URL и номером заказа (лимит длины Android intent).
+
+**Тестовые кнопки** на главной POS (`page.tsx`) — см. раздел «POS (главная страница)».
 
 ## Telegram
 
@@ -632,6 +653,9 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 | `/admin/staff` | `staff` + PIN (`bcryptjs`); deep-link Telegram для курьеров. Service role. |
 | `/admin/staff/shifts` | `shift_logs` + join `staff` + подсчёт доставленных (`orders.status=done`, `courier_id`, `delivered_at` в интервале). |
 | `/admin/delivery-zones` | `delivery_zones` + nested `delivery_zone_schedules`: полигоны Leaflet Draw, color, базовая цена/минималка/время, слоты расписания в редакторе. Actions: `createDeliveryZone`, `updateDeliveryZone`, `deleteDeliveryZone`; слоты — `createSchedule`, `updateSchedule`, `deleteSchedule`. |
+| `/admin/finances` | Главный P&L-дэшборд: Server Component `page.tsx` + client `PnLDashboard`; gross/net revenue, каналы выручки, комиссии, P&L breakdown, предупреждения по отсутствующему факту Glovo/банка. Период через общий `PeriodFilter` (Popover). |
+| `/admin/finances/glovo` | Журнал выплат Glovo: Server Component `page.tsx` + client `GlovoClient`; summary-карточки gross / расчётной комиссии / факта / расхождения, таблица settlements, Sheet-форма добавления и удаление через `deleteGlovoSettlement`. Период через общий `PeriodFilter` (Popover). |
+| `/admin/finances/expenses` | Журнал внекассовых расходов: Server Component `page.tsx` + client `ExpensesClient`; summary-карточки по группам, таблица и удаление, Sheet-форма добавления через `createExpense`; суммы в UI — MDL, в БД — bani. Период через общий `PeriodFilter` (Popover). |
 | `/admin/finance/cash-sessions` | Список смен (фильтры даты/staff/status, до 200; агрегаты по `cash_transactions` + Glovo card из `orders`). |
 | `/admin/finance/cash-sessions/[id]` | Деталь: `getCashSessionDetail` + `CashSessionDetailView`; таблица транзакций с void/edit для allowlist-пользователей (`cash-transaction-actions.tsx`); бейдж «Аннулировано», иконка редактирования при `edited_at`. |
 | `/admin/finance/ledger` | `stock_ledger`, до 200 последних; фильтр по `movement_type` на клиенте; service role. |
@@ -669,7 +693,8 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 - `profiles`, `otp_codes`, `customer_addresses` (`profile_id`, `label`, `address`, `entrance/floor/apartment/intercom`, `delivery_lat/lng`, `is_default`). На `profiles`: **`poster_orders_count`**, **`poster_last_order_at`** (история Kitch/Poster для списка клиентов).
 - `bonus_settings`, `bonus_transactions`.
 - `staff`, `shift_logs`, `courier_locations`.
-- `cash_sessions`, `cash_transactions`.
+- `cash_sessions`, `cash_transactions` (`expense_category_id` → `expense_categories`, legacy `category` остаётся для совместимости).
+- Финансы: `expense_categories` (`variable` / `fixed` / `operational` / `commission`), `expenses` (внекассовые расходы, суммы в bani), `glovo_settlements`, `finance_settings` (single-row id=1).
 - `pbx_calls` (ОАТС), `incoming_calls` (legacy MoldCell).
 - Склад: `ingredient_categories`, `ingredients`, `ingredient_stock`, `stock_ledger`, `semi_finished`, `semi_finished_items` (`ingredient_id` **или** `semi_finished_ref_id` на строку состава), `product_recipes`, `product_recipe_meta`, `suppliers`, `supply_orders` (`annulled_at`), `supply_order_items`, `stock_writeoffs`, `stock_writeoff_items`, `stock_audits`, `stock_audit_items`.
 
@@ -684,6 +709,8 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 `src/types/cart.ts` — `CartItem`, `CartTopping` (`quantity`, `topping_group_id`), `toppingGroupFreeCounts`, `toppingGroupLabels`.
 
 `src/types/pos.ts` — `PosCartItem` (`aggregatorUnitPriceBani?`), `PosCartTopping` (`aggregator_price_bani?`, та же форма что `CartTopping` + `toppingGroupFreeCounts` на строке корзины POS).
+
+`src/types/finance.ts` — `ExpenseCategory`, `Expense`, `GlovoSettlement`, `FinanceSettings`, `PnLData`.
 
 `src/lib/supabase/types.ts` — частично генерированный Database (минимальные наброски). Перегенерировать через `supabase gen types` при появлении новых миграций.
 
@@ -746,6 +773,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `admin/analytics.ts` — `getAnalyticsData` (KPI, день/день, топ позиций; фильтр `brandId`, `days` 7|14|30).
 - `admin/bonus-settings-action.ts` — `updateBonusSettings`.
 - `admin/cash-sessions.ts` — `listCashSessions`, `getCashSessionDetail`, `listStaffForFilter`, `voidCashTransaction`, `editCashTransaction`.
+- `admin/finance.ts` — `getExpenseCategories`, `getFinanceSettings`, `getExpenses`, `createExpense`, `deleteExpense`, `getGlovoSettlements`, `createGlovoSettlement`, `deleteGlovoSettlement`, `computePnL`.
 - `admin/customers-list.ts` — `getCustomersList`.
 - `inventory/ingredient-categories.ts` — CRUD категорий (service role).
 - `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive` (service role).
@@ -790,6 +818,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/product-recipe-cost.ts` — `buildProductRecipeCostContext`, `enrichProductRecipeCostContext`, `productRecipeLineCostMdl`, `computeMaterialRecipeCostMdl`, `computeReferencedMenuItemRecipeCostMdl`, `buildMenuItemRecipeCostMap`, `resolveMenuRefRecipeVariantFilter` (себестоимость техкарт: ингредиент + п/ф + комбо).
 - `lib/recipe-editor-qty.ts`, `lib/recipe-composition-row-updates.ts`, `lib/recipe-composition-waste.ts`, `lib/product-recipe-ingredient-qty.ts`, `lib/recipe-composition-types.ts` (`RecipeCompositionSemi.cost_per_storage_unit`).
 - `lib/topping-pricing.ts` — `calcToppingGroupCharge`, `calcToppingChargesById`, `getFreeUnitsRemaining`, `formatStorefrontToppingGroupHeader`.
+- `lib/format-mdl.ts` — `formatMdl` для UI сумм в MDL по значениям в bani.
 - `lib/topping-max-selection.ts`, `lib/cart-toppings.ts`, `lib/cart-helpers.ts` (`getCartItemToppingDisplayGroups`, `getCartItemSizeLabel`).
 - `lib/pos-cart-toppings.ts` — `posAddTopping`, `posRemoveTopping`, `migratePosCartToppingsFromLegacy`, `posCartToppingsConfigKey`.
 - `lib/pos-cart-helpers.ts` — `calcPosToppingsCharge(..., isAggregator)`, `getPosCartItemUnitPriceBani(item, isAggregator)`, `posLinePayloadFromCartItem(item, isAggregator)`, `posToppingsPayloadForDb(..., isAggregator)`, `getPosCartItemToppingDisplayLines`.
@@ -798,6 +827,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `components/pos/order-form/pos-address-cards.tsx` — карточки сохранённых адресов на шаге «Детали» POS.
 - `components/admin/customers/` — `customers-page-client.tsx`, `customers-filters.tsx`, `customers-table.tsx`.
 - `components/admin/cash-sessions/cash-transaction-actions.tsx` — void/edit кассовых транзакций в детали смены.
+- `components/admin/finances/period-filter.tsx` — общий compact Popover-фильтр периода для `/admin/finances`, `/admin/finances/expenses`, `/admin/finances/glovo`.
 - `components/client/cart/storefront-cart-pricing.ts` — `evaluateStorefrontCartDiscount`, `allocateGiftFreeUnitsByCartLineId`.
 - `lib/data/storefront-item-toppings.ts` — `fetchStorefrontMenuItemToppingGroups` (`free_count` с `menu_item_topping_groups`; select включает `aggregator_price_bani` у топпингов).
 - `lib/order-item-size-display.ts`.
@@ -806,6 +836,9 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/seo/brand-seo.ts`, `lib/seo/menu-item-image-alt.ts`.
 - `lib/pbx/diversion-brand-slug.ts`.
 - `lib/pos/alert-sound.ts`, `kds-wakeup.ts`, `scheduled-slots.ts`, `split-composite-delivery-address.ts`, `pos-brand-slug-cookie.ts`, `menu-item-modal-row.ts`, `use-incoming-call.ts`.
+- `lib/rawbt.ts` — RawBT intent: текст, открытие денежного ящика.
+- `lib/receipt-print.ts` — snapshot offscreen-чека и inline-печать PNG через RawBT.
+- `components/ReceiptTemplate.tsx` — React-шаблон термочека для `printReceipt`.
 - `hooks/use-store-open.ts`, `hooks/use-persist-store-hydration.ts`, `lib/store-hours.ts` — часы витрины по `BrandConfig` (Chisinau).
 - `lib/store/cart-store`, `store-closed-store`, `auth-store`, `pos-order-from-call-bridge`, `pos-menu-cache`, `language-store`, `delivery-store` (fee через `resolvedParams.delivery_price_bani`).
 - `lib/supabase/server.ts`, `client.ts`, `service-role.ts`.
@@ -883,6 +916,7 @@ PBX_WEBHOOK_TOKEN=
 - Не запускать два `next dev` параллельно (второй уйдёт на :3001).
 - `/etc/hosts` для локальных доменов: `127.0.0.1 losos.md www.losos.md thespot.md www.thespot.md`.
 - Тест с телефона в одной Wi-Fi: `npm run dev -- -H 192.168.50.137`, открыть `http://192.168.50.137:3000/`.
+- **POS + RawBT:** печать и ящик работают только на Android-терминале с установленным RawBT; предчек — кнопка «Печать предчека» в мастере (шаг 2) или временные test-кнопки на `/pos`.
 - При проблемах с Turbopack: `npm run dev:webpack`.
 
 ## TODO
@@ -895,4 +929,5 @@ PBX_WEBHOOK_TOKEN=
 - Перегенерировать `src/lib/supabase/types.ts` через `supabase gen types` (в т.ч. `semi_finished_items.semi_finished_ref_id`, RPC `apply_supply_order_stock_items`, `revert_supply_order_stock_items`, `replace_supply_order_stock_items`, `annul_supply_order_stock`).
 - Применить на remote Supabase миграции: **`get_customers_list`** (`*_get_customers_list.sql`, колонки Poster на `profiles`); **`cash_transactions.edited_at`**, **`edited_by_user_id`** (если edit в админке падает); склад поставок — `*_apply_supply_stock_rpc.sql`, `*_revert_supply_stock_and_update.sql`, **`annul_supply_order_stock`**.
 - Подключить списание ингредиентов в `payOrder` через `computeIngredientTotalsForOrder`.
+- Убрать временные RawBT test-кнопки с `/pos` и diagnostic `alert` из `printReceipt` после стабилизации печати на терминале.
 - Подпись «Позвонить …» в `storefront.ts` под бренд (или оставить динамику в `aria-label` через `getBrandCallLabel`).

@@ -6,7 +6,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { getExpenseCategories } from "@/lib/actions/admin/finance"
 import { createCashTransaction } from "@/lib/actions/pos/cash-session"
+import type { ExpenseCategory as FinanceExpenseCategory } from "@/types/finance"
 import { useEffect, useState } from "react"
 
 type CreateTransactionModalProps = {
@@ -27,11 +38,46 @@ const KIND_MAP: Record<
   encashment: { type: "encashment", direction: "out" },
 }
 
-type ExpenseCategory =
+type LegacyExpenseCategory =
   | "ingredients"
   | "salary"
   | "utilities"
   | "other"
+
+const SALARY_ADVANCE_EXPENSE_CATEGORY_ID =
+  "ec000001-0000-0000-0000-000000000004"
+const SALARY_SETTLEMENT_EXPENSE_CATEGORY_ID =
+  "ec000001-0000-0000-0000-000000000005"
+const OTHER_EXPENSE_CATEGORY_ID = "ec000001-0000-0000-0000-000000000015"
+
+function isSalaryExpenseCategoryId(expenseCategoryId: string): boolean {
+  return (
+    expenseCategoryId === SALARY_ADVANCE_EXPENSE_CATEGORY_ID ||
+    expenseCategoryId === SALARY_SETTLEMENT_EXPENSE_CATEGORY_ID
+  )
+}
+
+function toLegacyExpenseCategory(
+  category: FinanceExpenseCategory | undefined,
+): LegacyExpenseCategory | null {
+  if (!category) return null
+
+  const normalizedName = category.name.trim().toLowerCase()
+
+  if (normalizedName.includes("зарплат")) {
+    return "salary"
+  }
+
+  if (normalizedName.includes("коммун")) {
+    return "utilities"
+  }
+
+  if (category.type === "variable") {
+    return "ingredients"
+  }
+
+  return "other"
+}
 
 function formatCreateError(error: string): string {
   switch (error) {
@@ -56,24 +102,111 @@ export function CreateTransactionModal({
 }: CreateTransactionModalProps) {
   const [kind, setKind] = useState<TxKind>("expense")
   const [amount, setAmount] = useState("")
-  const [category, setCategory] = useState<ExpenseCategory>("ingredients")
+  const [expenseCategories, setExpenseCategories] = useState<
+    FinanceExpenseCategory[]
+  >([])
+  const [expenseCategoryId, setExpenseCategoryId] = useState("")
+  const [staffRecipient, setStaffRecipient] = useState("")
   const [description, setDescription] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [categoriesError, setCategoriesError] = useState<string | null>(null)
+  const [isCategoriesLoading, setIsCategoriesLoading] = useState(true)
   const [isPending, setIsPending] = useState(false)
+
+  const isExpense = kind === "expense"
+  const selectedExpenseCategory = expenseCategories.find(
+    (category) => category.id === expenseCategoryId,
+  )
+  const isSalaryCategory = isSalaryExpenseCategoryId(expenseCategoryId)
+  const isDescriptionRequired =
+    expenseCategoryId === OTHER_EXPENSE_CATEGORY_ID ||
+    selectedExpenseCategory?.requires_description === true
+  const expenseVariableCategories = expenseCategories.filter(
+    (category) => category.type === "variable",
+  )
+  const expenseFixedCategories = expenseCategories.filter(
+    (category) => category.type === "fixed",
+  )
+  const expenseOperationalCategories = expenseCategories.filter(
+    (category) =>
+      category.type === "operational" || category.type === "commission",
+  )
+  const isSubmitDisabled =
+    isPending ||
+    (isExpense &&
+      (isCategoriesLoading ||
+        !expenseCategoryId ||
+        (isDescriptionRequired && !description.trim())))
+
+  useEffect(() => {
+    let isActive = true
+
+    async function loadExpenseCategories(): Promise<void> {
+      setIsCategoriesLoading(true)
+      setCategoriesError(null)
+
+      try {
+        const categories = await getExpenseCategories()
+        if (!isActive) return
+        setExpenseCategories(categories)
+      } catch (loadError) {
+        if (!isActive) return
+        setCategoriesError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Не удалось загрузить категории расходов.",
+        )
+      } finally {
+        if (isActive) {
+          setIsCategoriesLoading(false)
+        }
+      }
+    }
+
+    void loadExpenseCategories()
+
+    return () => {
+      isActive = false
+    }
+  }, [])
 
   useEffect(() => {
     if (open) {
       setKind("expense")
       setAmount("")
-      setCategory("ingredients")
+      setExpenseCategoryId("")
+      setStaffRecipient("")
       setDescription("")
       setError(null)
     }
   }, [open])
 
+  useEffect(() => {
+    if (kind !== "expense") {
+      setExpenseCategoryId("")
+      setStaffRecipient("")
+    }
+  }, [kind])
+
+  useEffect(() => {
+    if (!isSalaryCategory && staffRecipient) {
+      setStaffRecipient("")
+    }
+  }, [isSalaryCategory, staffRecipient])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+
+    if (isExpense && !expenseCategoryId) {
+      setError("Выберите категорию расхода.")
+      return
+    }
+
+    if (isExpense && isDescriptionRequired && !description.trim()) {
+      setError("Добавьте описание для категории «Прочее».")
+      return
+    }
 
     const value = Number(amount.replace(",", "."))
     if (!Number.isFinite(value) || value <= 0) {
@@ -96,7 +229,11 @@ export function CreateTransactionModal({
         type,
         direction,
         amountBani,
-        category: type === "expense" ? category : null,
+        category:
+          type === "expense"
+            ? toLegacyExpenseCategory(selectedExpenseCategory)
+            : null,
+        expense_category_id: type === "expense" ? expenseCategoryId : undefined,
         description: description.trim() || null,
         createdByStaffId: staffId,
       })
@@ -108,7 +245,8 @@ export function CreateTransactionModal({
 
       setKind("expense")
       setAmount("")
-      setCategory("ingredients")
+      setExpenseCategoryId("")
+      setStaffRecipient("")
       setDescription("")
       onClose()
     } finally {
@@ -186,47 +324,167 @@ export function CreateTransactionModal({
             />
           </div>
 
-          {kind === "expense" ? (
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="tx-category"
-                className="text-sm font-medium text-[#242424]"
-              >
-                Категория
-              </label>
-              <select
-                id="tx-category"
-                value={category}
-                onChange={(e) =>
-                  setCategory(e.target.value as ExpenseCategory)
-                }
-                disabled={isPending}
-                className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base font-medium text-[#242424] outline-none ring-[#ccff00] focus-visible:ring-2 disabled:opacity-60"
-              >
-                <option value="ingredients">Ингредиенты</option>
-                <option value="salary">Зарплата</option>
-                <option value="utilities">Коммунальные</option>
-                <option value="other">Прочее</option>
-              </select>
+          <div
+            className={`grid overflow-hidden transition-all duration-200 ease-out ${
+              isExpense
+                ? "grid-rows-[1fr] opacity-100 translate-y-0"
+                : "grid-rows-[0fr] opacity-0 -translate-y-2"
+            }`}
+            aria-hidden={!isExpense}
+          >
+            <div className="overflow-hidden">
+              <div className="flex flex-col gap-1.5 pb-0.5">
+                <label
+                  htmlFor="tx-expense-category"
+                  className="text-sm font-medium text-[#242424]"
+                >
+                  Категория расхода
+                </label>
+                <Select
+                  value={expenseCategoryId || undefined}
+                  onValueChange={setExpenseCategoryId}
+                  disabled={isPending || isCategoriesLoading}
+                >
+                  <SelectTrigger
+                    id="tx-expense-category"
+                    className="h-[50px] w-full rounded-xl border-black/10 bg-white px-4 text-base font-medium text-[#242424]"
+                  >
+                    <SelectValue
+                      placeholder={
+                        isCategoriesLoading
+                          ? "Загружаем категории…"
+                          : "Выберите категорию"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {expenseVariableCategories.length > 0 ? (
+                      <SelectGroup>
+                        <SelectLabel>Переменные</SelectLabel>
+                        {expenseVariableCategories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ) : null}
+
+                    {expenseFixedCategories.length > 0 ? (
+                      <SelectGroup>
+                        <SelectLabel>Постоянные</SelectLabel>
+                        {expenseFixedCategories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ) : null}
+
+                    {expenseOperationalCategories.length > 0 ? (
+                      <SelectGroup>
+                        <SelectLabel>Операционные</SelectLabel>
+                        {expenseOperationalCategories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+
+                {categoriesError ? (
+                  <p className="text-sm font-medium text-red-600" role="alert">
+                    {categoriesError}
+                  </p>
+                ) : null}
+
+                {!isCategoriesLoading && !expenseCategoryId ? (
+                  <p className="text-sm font-medium text-red-600">
+                    Выберите категорию
+                  </p>
+                ) : null}
+              </div>
             </div>
-          ) : null}
+          </div>
+
+          <div
+            className={`grid overflow-hidden transition-all duration-200 ease-out ${
+              isExpense && isSalaryCategory
+                ? "grid-rows-[1fr] opacity-100 translate-y-0"
+                : "grid-rows-[0fr] opacity-0 -translate-y-2"
+            }`}
+            aria-hidden={!(isExpense && isSalaryCategory)}
+          >
+            <div className="overflow-hidden">
+              <div className="flex flex-col gap-1.5 pb-0.5">
+                <label
+                  htmlFor="tx-staff-recipient"
+                  className="text-sm font-medium text-[#242424]"
+                >
+                  Сотрудник
+                </label>
+                <input
+                  id="tx-staff-recipient"
+                  type="text"
+                  placeholder="Имя сотрудника"
+                  value={staffRecipient}
+                  onChange={(ev) => setStaffRecipient(ev.target.value)}
+                  disabled={isPending}
+                  className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base font-medium text-[#242424] outline-none ring-[#ccff00] transition-[box-shadow] focus-visible:ring-2 disabled:opacity-60"
+                />
+              </div>
+            </div>
+          </div>
 
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="tx-desc"
               className="text-sm font-medium text-[#242424]"
             >
-              Комментарий (необязательно)
+              {isExpense ? "Описание" : "Комментарий (необязательно)"}
             </label>
             <input
               id="tx-desc"
               type="text"
-              placeholder="Комментарий"
+              placeholder={isExpense ? "Описание расхода" : "Комментарий"}
               value={description}
               onChange={(ev) => setDescription(ev.target.value)}
               disabled={isPending}
               className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base font-medium text-[#242424] outline-none ring-[#ccff00] transition-[box-shadow] focus-visible:ring-2 disabled:opacity-60"
             />
+            {isExpense && isDescriptionRequired && !description.trim() ? (
+              <p className="text-sm font-medium text-red-600">
+                Опишите расход для категории «Прочее»
+              </p>
+            ) : null}
+          </div>
+
+          <div
+            className={`grid overflow-hidden transition-all duration-200 ease-out ${
+              isExpense
+                ? "grid-rows-[1fr] opacity-100 translate-y-0"
+                : "grid-rows-[0fr] opacity-0 -translate-y-2"
+            }`}
+            aria-hidden={!isExpense}
+          >
+            <div className="overflow-hidden">
+              <div className="flex flex-col gap-1.5 pb-0.5">
+                <label
+                  htmlFor="tx-payment-method"
+                  className="text-sm font-medium text-[#242424]"
+                >
+                  Способ оплаты
+                </label>
+                <input
+                  id="tx-payment-method"
+                  type="text"
+                  value="Наличные"
+                  disabled
+                  className="w-full rounded-xl border border-black/10 bg-zinc-50 px-4 py-3 text-base font-medium text-[#242424] outline-none disabled:opacity-100"
+                />
+              </div>
+            </div>
           </div>
 
           {error ? (
@@ -237,7 +495,7 @@ export function CreateTransactionModal({
 
           <button
             type="submit"
-            disabled={isPending}
+            disabled={isSubmitDisabled}
             className="flex w-full items-center justify-center rounded-xl bg-[#ccff00] px-4 py-3 text-sm font-semibold text-[#242424] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isPending ? "Создаём…" : "Создать"}

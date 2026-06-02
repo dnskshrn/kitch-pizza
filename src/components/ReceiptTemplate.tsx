@@ -70,7 +70,6 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
     return (
       <div
         ref={ref}
-        className="pb-32"
         style={{
           width: 576,
           backgroundColor: "#ffffff",
@@ -80,13 +79,15 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
           fontSize: 22,
           lineHeight: 1.35,
           boxSizing: "border-box",
+          paddingTop: 8,
+          paddingBottom: 128,
         }}
       >
         {/* Шапка */}
         <div
           style={{
             color: "#000000",
-            padding: "28px 32px 24px",
+            padding: "8px 32px 24px",
             textAlign: "center",
             borderBottom: "3px solid #000000",
           }}

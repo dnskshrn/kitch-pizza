@@ -26,7 +26,7 @@ export const brands: BrandConfig[] = [
   {
     slug: 'kitch-pizza',
     name: 'Kitch! Pizza',
-    domain: 'kitch-pizza.md',
+    domain: 'kitch.md',
     devDomain: 'localhost:3000',
     logo: '/kitch-pizza-logo.svg',
     phone: '079 700 290',

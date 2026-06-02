@@ -16,6 +16,8 @@ const COPY = {
     "Добро пожаловать в LOSOS! Вам начислено 100 приветственных бонусов — используйте их при следующем заказе.",
   subtitleRo:
     "Bun venit la LOSOS! Ți-am acordat 100 de bonusuri de bun venit — folosește-le la următoarea comandă.",
+  promoExpiryRu: "Акция действует до 10 июня включительно",
+  promoExpiryRo: "Promoția este valabilă până pe 10 iunie inclusiv",
   buttonRu: "Отлично!",
   buttonRo: "Super!",
   a11yTitle: "Приветственный бонус",
@@ -43,6 +45,7 @@ export function WelcomeBonusModal() {
   const isDrawer = useIsDrawerLayout()
 
   const subtitle = lang === "RO" ? COPY.subtitleRo : COPY.subtitleRu
+  const promoExpiry = lang === "RO" ? COPY.promoExpiryRo : COPY.promoExpiryRu
   const buttonLabel = lang === "RO" ? COPY.buttonRo : COPY.buttonRu
 
   const close = () => setWelcomeBonusPending(false)
@@ -54,6 +57,9 @@ export function WelcomeBonusModal() {
       </h2>
       <p className="mt-3 text-center text-base text-[var(--color-muted)]">
         {subtitle}
+      </p>
+      <p className="mt-2 text-center text-sm text-[var(--color-muted)] opacity-60">
+        {promoExpiry}
       </p>
       <button
         type="button"

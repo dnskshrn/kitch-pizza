@@ -1346,10 +1346,12 @@ export function OrderForm({
           name: line.name,
           subtitle: subtitleParts.length > 0 ? subtitleParts.join(" · ") : undefined,
           qty: line.qty,
-          price: (line.price * line.qty) / 100,
+          price:
+            (getPosCartItemUnitPriceBani(line, isAggregator) * line.qty) / 100,
         }
       }),
       total: payableAfterBonusBani / 100,
+      bonusRedeemed: redeemBaniApplied > 0 ? redeemBaniApplied / 100 : undefined,
       bonusEarned: Math.floor(
         (payableAfterBonusBani / 100) *
           0.05 *
@@ -1376,7 +1378,10 @@ export function OrderForm({
       discount:
         listOrder?.discount != null && listOrder.discount > 0
           ? listOrder.discount / 100
-          : undefined,
+          : effectiveEngineOutput?.totalDiscountBani != null &&
+              effectiveEngineOutput.totalDiscountBani > 0
+            ? effectiveEngineOutput.totalDiscountBani / 100
+            : undefined,
       discountLabel:
         listOrder?.promo_code
           ? `Промокод ${listOrder.promo_code}`
@@ -1389,12 +1394,15 @@ export function OrderForm({
       cart,
       deliveryMode,
       effectiveEngineOutput?.bonusMultiplier,
+      effectiveEngineOutput?.totalDiscountBani,
       listOrder?.brand_slug,
       listOrder?.created_at,
       listOrder?.delivery_mode,
+      listOrder?.discount,
       orderNumber,
       payableAfterBonusBani,
       posBonusBalance,
+      redeemBaniApplied,
       selectedBrand?.slug,
     ],
   )

@@ -18,6 +18,7 @@ export interface ReceiptProps {
   deliveryFee?: number
   discount?: number
   discountLabel?: string
+  bonusRedeemed?: number
 }
 
 function formatMdl(amount: number): string {
@@ -44,6 +45,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
       deliveryFee,
       discount,
       discountLabel,
+      bonusRedeemed,
     },
     ref,
   ) {
@@ -65,7 +67,9 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
       trimmedDeliveryAddress.length > 0 ||
       trimmedCourierName.length > 0
     const showPricingBreakdown =
-      deliveryFee !== undefined || (discount != null && discount > 0)
+      deliveryFee !== undefined ||
+      (discount != null && discount > 0) ||
+      (bonusRedeemed != null && bonusRedeemed > 0)
 
     return (
       <div
@@ -332,6 +336,20 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
               >
                 <span>{discountLabel ?? "Reducere / Скидка"}</span>
                 <span>−{formatMdl(discount)} MDL</span>
+              </div>
+            ) : null}
+            {bonusRedeemed != null && bonusRedeemed > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                  color: "#c00000",
+                  padding: "2px 0",
+                }}
+              >
+                <span>Bonusuri / Бонусы</span>
+                <span>−{formatMdl(bonusRedeemed)} MDL</span>
               </div>
             ) : null}
           </div>

@@ -1348,6 +1348,33 @@ export function OrderForm({
       ),
       bonusBalance: posBonusBalance ?? 0,
       channel: posReceiptChannelLabel(listOrder?.delivery_mode ?? deliveryMode),
+      customerName:
+        (listOrder?.user_name?.trim() || form.getValues("userName").trim()) ||
+        undefined,
+      deliveryAddress:
+        listOrder?.delivery_mode === "delivery"
+          ? listOrder?.delivery_address?.trim() || undefined
+          : undefined,
+      courierName:
+        listOrder?.delivery_mode === "delivery" && !listOrder?.aggregator
+          ? listOrder?.courier_name?.trim() || undefined
+          : undefined,
+      deliveryFee:
+        listOrder?.delivery_mode === "delivery" &&
+        listOrder?.delivery_fee != null
+          ? listOrder.delivery_fee / 100
+          : undefined,
+      discount:
+        listOrder?.discount != null && listOrder.discount > 0
+          ? listOrder.discount / 100
+          : undefined,
+      discountLabel:
+        listOrder?.promo_code
+          ? `Промокод ${listOrder.promo_code}`
+          : Array.isArray((listOrder as { discount_rules_applied?: unknown })?.discount_rules_applied) &&
+              ((listOrder as { discount_rules_applied?: unknown }).discount_rules_applied as unknown[]).length > 0
+            ? "Акция"
+            : undefined,
     }),
     [
       cart,

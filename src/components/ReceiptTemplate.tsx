@@ -12,6 +12,12 @@ export interface ReceiptProps {
   bonusEarned: number
   bonusBalance: number
   channel: string
+  customerName?: string
+  deliveryAddress?: string
+  courierName?: string
+  deliveryFee?: number
+  discount?: number
+  discountLabel?: string
 }
 
 function formatMdl(amount: number): string {
@@ -32,6 +38,12 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
       bonusEarned,
       bonusBalance,
       channel,
+      customerName,
+      deliveryAddress,
+      courierName,
+      deliveryFee,
+      discount,
+      discountLabel,
     },
     ref,
   ) {
@@ -45,6 +57,15 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
     const brandDomain = brand.domain
     const qrPayload = `https://${brandDomain}/?order=${encodeURIComponent(orderNumber)}`
     const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=10&color=000000&bgcolor=ffffff&data=${encodeURIComponent(qrPayload)}`
+    const trimmedCustomerName = customerName?.trim() ?? ""
+    const trimmedDeliveryAddress = deliveryAddress?.trim() ?? ""
+    const trimmedCourierName = courierName?.trim() ?? ""
+    const showCustomerBlock =
+      trimmedCustomerName.length > 0 ||
+      trimmedDeliveryAddress.length > 0 ||
+      trimmedCourierName.length > 0
+    const showPricingBreakdown =
+      deliveryFee !== undefined || (discount != null && discount > 0)
 
     return (
       <div
@@ -61,27 +82,26 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
           boxSizing: "border-box",
         }}
       >
-        {/* Инверсная шапка */}
+        {/* Шапка */}
         <div
           style={{
-            backgroundColor: "#000000",
-            color: "#ffffff",
+            color: "#000000",
             padding: "28px 32px 24px",
             textAlign: "center",
+            borderBottom: "3px solid #000000",
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={logoUrl}
             alt="LOSOS"
-            width={248}
-            height={56}
+            width={360}
+            height={88}
             style={{
               display: "inline-block",
-              height: 56,
+              height: 88,
               width: "auto",
               maxWidth: "100%",
-              filter: "brightness(0) invert(1)",
             }}
           />
           <div
@@ -91,11 +111,14 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
               fontWeight: 700,
               letterSpacing: "0.06em",
               textTransform: "uppercase",
+              color: "#000000",
             }}
           >
             Predcheck / Pre-check
           </div>
-          <div style={{ marginTop: 8, fontSize: 18, fontWeight: 400 }}>
+          <div
+            style={{ marginTop: 8, fontSize: 18, fontWeight: 400, color: "#000000" }}
+          >
             {createdAt}
           </div>
           <div
@@ -104,6 +127,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
               fontSize: 18,
               fontWeight: 700,
               textTransform: "uppercase",
+              color: "#000000",
             }}
           >
             {channel}
@@ -115,6 +139,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
           <div
             style={{
               border: "4px solid #000000",
+              borderRadius: 16,
               padding: "18px 16px",
               textAlign: "center",
             }}
@@ -142,6 +167,63 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
             </div>
           </div>
         </div>
+
+        {showCustomerBlock ? (
+          <div
+            style={{
+              border: "3px solid #000000",
+              borderRadius: 16,
+              padding: "16px 18px",
+              margin: "8px 32px 0",
+            }}
+          >
+            {trimmedCustomerName.length > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  fontSize: 19,
+                }}
+              >
+                <span>Клиент / Client</span>
+                <span>{trimmedCustomerName}</span>
+              </div>
+            ) : null}
+            {trimmedDeliveryAddress.length > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  fontSize: 19,
+                  marginTop: trimmedCustomerName.length > 0 ? 10 : 0,
+                }}
+              >
+                <span>Adresă / Адрес</span>
+                <span>{trimmedDeliveryAddress}</span>
+              </div>
+            ) : null}
+            {trimmedCourierName.length > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  fontSize: 19,
+                  marginTop:
+                    trimmedCustomerName.length > 0 ||
+                    trimmedDeliveryAddress.length > 0
+                      ? 10
+                      : 0,
+                }}
+              >
+                <span>Curier / Курьер</span>
+                <span>{trimmedCourierName}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div
           style={{
@@ -204,6 +286,55 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
           ))}
         </div>
 
+        {showPricingBreakdown ? (
+          <div style={{ padding: "8px 32px 0" }}>
+            {deliveryFee !== undefined && deliveryFee >= 1 ? (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  fontSize: 19,
+                  fontWeight: 400,
+                }}
+              >
+                <span>Livrare / Доставка</span>
+                <span>{formatMdl(deliveryFee)} MDL</span>
+              </div>
+            ) : null}
+            {deliveryFee === 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  fontSize: 19,
+                  fontWeight: 400,
+                }}
+              >
+                <span>Livrare / Доставка</span>
+                <span>Gratuit / Бесплатно</span>
+              </div>
+            ) : null}
+            {discount != null && discount > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  fontSize: 19,
+                  fontWeight: 400,
+                  marginTop: deliveryFee !== undefined ? 8 : 0,
+                  color: "#c00000",
+                }}
+              >
+                <span>{discountLabel ?? "Reducere / Скидка"}</span>
+                <span>−{formatMdl(discount)} MDL</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <div
           style={{
             margin: "12px 32px 0",
@@ -222,6 +353,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
               alignItems: "center",
               justifyContent: "space-between",
               gap: 16,
+              borderRadius: 16,
             }}
           >
             <span
@@ -252,6 +384,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
           <div
             style={{
               border: "3px solid #000000",
+              borderRadius: 16,
               padding: "16px 18px",
             }}
           >
@@ -315,6 +448,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
               width: 280,
               height: 280,
               border: "4px solid #000000",
+              borderRadius: 16,
               imageRendering: "pixelated",
             }}
           />

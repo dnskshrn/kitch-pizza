@@ -6,7 +6,7 @@ export async function printReceipt(
   orderNumber: string,
 ): Promise<void> {
   try {
-    await (document as any).fonts?.ready
+    await document.fonts?.ready
 
     const dataUrl = await toPng(node, {
       width: 576,
@@ -14,7 +14,7 @@ export async function printReceipt(
       backgroundColor: "#ffffff",
       cacheBust: true,
     })
-    alert("PNG длина URL=" + dataUrl.length)
+    alert(`PNG длина URL=${dataUrl.length}, заказ #${orderNumber}`)
 
     const payload = "rawbt:" + dataUrl
     const intent =
@@ -22,7 +22,7 @@ export async function printReceipt(
       encodeURIComponent(payload) +
       "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;"
     window.location.href = intent
-  } catch (e: any) {
-    alert("УПАЛО: " + (e?.message || e))
+  } catch (e: unknown) {
+    alert("УПАЛО: " + (e instanceof Error ? e.message : String(e)))
   }
 }

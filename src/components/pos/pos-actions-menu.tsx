@@ -8,6 +8,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { rawbtOpenDrawer } from "@/lib/rawbt"
 import { MoreVertical } from "lucide-react"
 import { useState } from "react"
 
@@ -70,6 +71,17 @@ export function PosActionsMenu({
             className="w-full rounded-md px-3 py-2 text-left text-sm text-[#242424] hover:bg-[#f2f2f2]"
           >
             Закрыть смену
+          </button>
+          <div className="mx-1 my-1 h-px bg-[#f2f2f2]" />
+          <button
+            type="button"
+            onClick={() => {
+              setPopoverOpen(false)
+              rawbtOpenDrawer()
+            }}
+            className="w-full rounded-md px-3 py-2 text-left text-sm text-[#808080] hover:bg-[#f2f2f2]"
+          >
+            Открыть денежный ящик
           </button>
         </PopoverContent>
       </Popover>

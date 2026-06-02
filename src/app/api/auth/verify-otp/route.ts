@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { awardWelcomeBonus } from "@/lib/bonus"
 import {
   setStorefrontSessionCookie,
   signStorefrontSession,
@@ -81,7 +82,18 @@ export async function POST(req: NextRequest) {
     })
     await setStorefrontSessionCookie(token)
 
-    return NextResponse.json({ success: true, profile })
+    const brandSlug = req.headers.get("x-brand-slug")
+    let welcomeBonus = false
+
+    if (brandSlug === "losos" && profile.id) {
+      try {
+        welcomeBonus = await awardWelcomeBonus(profile.id)
+      } catch (err) {
+        console.error("awardWelcomeBonus error:", err)
+      }
+    }
+
+    return NextResponse.json({ success: true, profile, welcomeBonus })
   } catch (err) {
     console.error("verify-otp error:", err)
     return NextResponse.json({ error: "Server error" }, { status: 500 })

@@ -39,12 +39,14 @@ type AuthState = {
   profile: AuthProfile | null
   isAuthOpen: boolean
   isLoading: boolean
+  welcomeBonusPending: boolean
   onAuthSuccess: (() => void) | null
   openAuth: () => void
   closeAuth: () => void
   dismissAuth: () => void
   setOnAuthSuccess: (cb: (() => void) | null) => void
   setProfile: (profile: AuthProfile | null) => void
+  setWelcomeBonusPending: (pending: boolean) => void
   clearProfile: () => void
   fetchMe: () => Promise<void>
 }
@@ -53,6 +55,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   profile: null,
   isAuthOpen: false,
   isLoading: false,
+  welcomeBonusPending: false,
   onAuthSuccess: null,
   openAuth: () => set({ isAuthOpen: true }),
   closeAuth: () =>
@@ -64,6 +67,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   dismissAuth: () => set({ isAuthOpen: false, onAuthSuccess: null }),
   setOnAuthSuccess: (cb) => set({ onAuthSuccess: cb }),
   setProfile: (profile) => set({ profile }),
+  setWelcomeBonusPending: (pending) => set({ welcomeBonusPending: pending }),
   clearProfile: () => set({ profile: null }),
   fetchMe: async () => {
     set({ isLoading: true })

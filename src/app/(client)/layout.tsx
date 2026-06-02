@@ -3,6 +3,7 @@ import { AuthInitializer } from "@/components/client/auth/auth-initializer"
 import { MaintenanceScreen } from "@/components/client/maintenance-screen"
 import { ClientChrome } from "@/components/client/client-chrome"
 import StoreClosedModal from "@/components/store-closed-modal"
+import { WelcomeBonusModal } from "@/components/client/welcome-bonus-modal"
 import { StorefrontTopBar } from "@/components/client/storefront-top-bar"
 import { BrandJsonLd } from "@/components/seo/JsonLd"
 import { MetaPixel } from "@/components/MetaPixel"
@@ -67,6 +68,7 @@ export default async function ClientLayout({
         className="flex min-h-screen flex-col bg-[var(--color-bg)] text-foreground"
       >
         <StoreClosedModal brandSlug={brandSlug} />
+        <WelcomeBonusModal />
         <BrandJsonLd brandSlug={brandSlug} />
         <MetaPixel pixelId={brand.metaPixelId} />
         <AuthInitializer />
@@ -83,6 +85,7 @@ export default async function ClientLayout({
       className="flex min-h-screen flex-col bg-[var(--color-bg)] text-foreground"
     >
       <StoreClosedModal brandSlug={brandSlug} />
+      <WelcomeBonusModal />
       <BrandJsonLd brandSlug={brandSlug} />
       <MetaPixel pixelId={brand.metaPixelId} />
       <StorefrontTopBar brandSlug={brandSlug} />

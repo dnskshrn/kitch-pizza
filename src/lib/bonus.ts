@@ -19,6 +19,42 @@ export async function getUserBalance(profileId: string): Promise<number> {
   return Number(data.balance_after)
 }
 
+export async function awardWelcomeBonus(profileId: string): Promise<boolean> {
+  const supabase = createServiceSupabaseClient()
+
+  const { data: existing, error: checkError } = await supabase
+    .from('bonus_transactions')
+    .select('id')
+    .eq('profile_id', profileId)
+    .eq('type', 'welcome')
+    .maybeSingle()
+
+  if (checkError) {
+    console.error('[bonus] awardWelcomeBonus check', checkError.message)
+    return false
+  }
+
+  if (existing) return false
+
+  const currentBalance = await getUserBalance(profileId)
+
+  const { error: insertError } = await supabase.from('bonus_transactions').insert({
+    profile_id: profileId,
+    amount: 100,
+    balance_after: currentBalance + 100,
+    type: 'welcome',
+    note: 'Приветственный бонус LOSOS',
+    created_by: null,
+  })
+
+  if (insertError) {
+    console.error('[bonus] awardWelcomeBonus insert', insertError.message)
+    return false
+  }
+
+  return true
+}
+
 export async function getBonusSettings(): Promise<{
   accrualRate: number
   maxRedemptionRate: number

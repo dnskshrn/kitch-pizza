@@ -151,6 +151,7 @@ export function AuthModal() {
           window.requestAnimationFrame(() => otpRefs.current[0]?.focus())
           return
         }
+        // TODO: handle welcomeBonus
         await fetchMe()
         closeAuth()
       } catch {

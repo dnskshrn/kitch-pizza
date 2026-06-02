@@ -24,6 +24,13 @@ export async function printReceipt(
     const base64 = dataUrl.split(",")[1]
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
     const fileName = `receipt-${orderNumber}-${Date.now()}.png`
+    const { data: sess } = await supabase.auth.getSession()
+    alert(
+      "РОЛЬ: " +
+        (sess?.session
+          ? "authenticated " + sess.session.user.email
+          : "АНОН — нет сессии"),
+    )
     const { error } = await supabase.storage
       .from("receipts")
       .upload(fileName, bytes, { contentType: "image/png", upsert: true })

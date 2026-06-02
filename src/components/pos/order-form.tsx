@@ -2,6 +2,7 @@
 
 import { normalizePosBrandSlug, type BrandConfig } from "@/brands/index"
 import { DiscountBreakdown } from "@/components/pos/discount-breakdown"
+import { ReceiptTemplate } from "@/components/ReceiptTemplate"
 import type { OrdersPanelHandle } from "@/components/pos/orders-panel"
 import { AssignCourierModal } from "@/components/pos/AssignCourierModal"
 import { PayOrderModal } from "@/components/pos/pay-order-modal"
@@ -80,10 +81,12 @@ import {
   posMenuRowForModal,
   posVariantsFromMenuEmbed,
 } from "@/lib/pos/menu-item-modal-row"
+import { printReceipt } from "@/lib/receipt-print"
 import { writePosBrandSlugCookie } from "@/lib/pos/pos-brand-slug-cookie"
 import {
   getPosCartItemToppingDisplayLines,
   getPosCartItemUnitPriceBani,
+  posCartItemToppingsSummary,
 } from "@/lib/pos-cart-helpers"
 import {
   migratePosCartToppingsFromLegacy,
@@ -119,6 +122,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { z } from "zod"
+
+function posReceiptChannelLabel(
+  mode: "delivery" | "pickup" | "aggregator" | undefined,
+): string {
+  switch (mode) {
+    case "pickup":
+      return "Самовывоз / Ridicare"
+    case "aggregator":
+      return "Glovo / Агрегатор"
+    case "delivery":
+    default:
+      return "Доставка / Livrare"
+  }
+}
 
 /** Добавляет скидку с витрины, если движок её ещё не учёл полностью. */
 function mergePersistedWebsitePromoDiscount(
@@ -552,6 +569,9 @@ function CartPanel({
   onRunnerSend,
   onCourierAssign,
   onPayOrder,
+  onPrintPrecheck,
+  printPrecheckDisabled,
+  printPrecheckBusy,
   payOrderDisabled,
   runnerDisabled,
   runnerBusy,
@@ -575,6 +595,9 @@ function CartPanel({
   onRunnerSend?: () => void | Promise<void>
   onCourierAssign?: () => void
   onPayOrder?: () => void
+  onPrintPrecheck?: () => void | Promise<void>
+  printPrecheckDisabled?: boolean
+  printPrecheckBusy?: boolean
   payOrderDisabled?: boolean
   runnerDisabled?: boolean
   runnerBusy?: boolean
@@ -689,6 +712,25 @@ function CartPanel({
                 </div>
               ) : null}
             </div>
+          ) : null}
+          {onPrintPrecheck ? (
+            <button
+              type="button"
+              disabled={printPrecheckDisabled || printPrecheckBusy}
+              onClick={() => void onPrintPrecheck()}
+              className={cn(
+                "mt-3 flex w-full items-center justify-center rounded-lg border-2 border-dashed border-[#242424] bg-white px-5 py-3 text-[14px] font-bold text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40",
+              )}
+            >
+              {printPrecheckBusy ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="size-4 shrink-0 animate-spin" />
+                  Печать…
+                </span>
+              ) : (
+                "Печать предчека"
+              )}
+            </button>
           ) : null}
           {onCourierAssign ? (
             <div className="mt-3">
@@ -961,6 +1003,8 @@ export function OrderForm({
   >([])
   const cashSession = useCashSession()
   const [payModalOpen, setPayModalOpen] = useState(false)
+  const [receiptPrinting, setReceiptPrinting] = useState(false)
+  const receiptRef = useRef<HTMLDivElement>(null)
   const runnerAlreadySent = listOrder?.status === "cooking"
   const readyForCourierAssign =
     listOrder?.status === "ready" && listOrder?.delivery_mode === "delivery"
@@ -1267,6 +1311,67 @@ export function OrderForm({
 
   const redeemBaniApplied = effectiveBonusPoints * 100
   const payableAfterBonusBani = Math.max(0, totalBani - redeemBaniApplied)
+
+  const receiptProps = useMemo(
+    () => ({
+      orderNumber: String(orderNumber ?? ""),
+      createdAt: new Date(listOrder?.created_at ?? Date.now()).toLocaleString(
+        "ru-RU",
+        {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        },
+      ),
+      items: cart.map((line) => {
+        const subtitleParts = [
+          orderItemSizeDisplayLabel(line.size),
+          posCartItemToppingsSummary(line.toppings),
+        ].filter(Boolean)
+        return {
+          name: line.name,
+          subtitle: subtitleParts.length > 0 ? subtitleParts.join(" · ") : undefined,
+          qty: line.qty,
+          price: (line.price * line.qty) / 100,
+        }
+      }),
+      total: payableAfterBonusBani / 100,
+      bonusEarned: Math.floor(
+        (payableAfterBonusBani / 100) *
+          0.05 *
+          (effectiveEngineOutput?.bonusMultiplier ?? 1),
+      ),
+      bonusBalance: posBonusBalance ?? 0,
+      channel: posReceiptChannelLabel(listOrder?.delivery_mode ?? deliveryMode),
+    }),
+    [
+      cart,
+      deliveryMode,
+      effectiveEngineOutput?.bonusMultiplier,
+      listOrder?.created_at,
+      listOrder?.delivery_mode,
+      orderNumber,
+      payableAfterBonusBani,
+      posBonusBalance,
+    ],
+  )
+
+  const handlePrintPrecheck = useCallback(async () => {
+    const node = receiptRef.current
+    if (!node || orderNumber == null || cart.length === 0) return
+    setReceiptPrinting(true)
+    try {
+      await printReceipt(node, String(orderNumber))
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Не удалось напечатать предчек",
+      )
+    } finally {
+      setReceiptPrinting(false)
+    }
+  }, [cart.length, orderNumber])
 
   const optimisticCartOrderPatch = useCallback(
     (lines: PosCartItem[]): Partial<PosOrder> => {
@@ -3450,6 +3555,9 @@ export function OrderForm({
               onPayOrder={
                 showPayOrderCta ? () => setPayModalOpen(true) : undefined
               }
+              onPrintPrecheck={handlePrintPrecheck}
+              printPrecheckDisabled={cart.length === 0 || orderNumber == null}
+              printPrecheckBusy={receiptPrinting}
               payOrderDisabled={!cashSession}
               assignedCourierId={
                 showPayOrderCta &&
@@ -3568,6 +3676,12 @@ export function OrderForm({
         ) : null}
         {closeOrderDialog}
         {deliveryModeSwitchDialog}
+        <div
+          aria-hidden
+          style={{ position: "absolute", left: -9999, top: 0, pointerEvents: "none" }}
+        >
+          <ReceiptTemplate ref={receiptRef} {...receiptProps} />
+        </div>
       </>
     )
   }

@@ -6,7 +6,7 @@ export async function printReceipt(node: HTMLElement): Promise<void> {
 
     const dataUrl = await toPng(node, {
       width: 576,
-      pixelRatio: 0.75,          // было 1 → PNG ~40% легче, на термоленте разницы нет
+      pixelRatio: 1,
       backgroundColor: "#ffffff",
       cacheBust: true,
     })

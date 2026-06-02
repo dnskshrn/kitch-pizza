@@ -48,6 +48,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
     return (
       <div
         ref={ref}
+        className="pb-16"
         style={{
           width: 576,
           backgroundColor: "#ffffff",

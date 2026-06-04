@@ -19,7 +19,11 @@ import {
 import { Camera, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { toStoragePrice, toStorageQty } from "@/lib/inventory-units"
+import {
+  toStoragePrice,
+  toStorageQty,
+  type StorageUnit,
+} from "@/lib/inventory-units"
 import { createSupplyOrder } from "./actions"
 import {
   InvoiceOcrModal,
@@ -143,13 +147,15 @@ export function SuppliesTable({
       const ing = ingredients.find((i) => i.id === item.matched_ingredient_id)
       if (!ing) continue
       if (item.display_quantity <= 0) continue
+      const unit = item.matched_ingredient_unit as StorageUnit | null
+      if (unit !== "g" && unit !== "ml" && unit !== "pcs") continue
 
       const priceExDisplay =
         item.unit_price / (1 + OCR_SUPPLY_VAT_RATE / 100)
       payloadItems.push({
         ingredient_id: item.matched_ingredient_id,
-        quantity: toStorageQty(item.display_quantity, ing.unit),
-        price_per_unit: toStoragePrice(priceExDisplay, ing.unit),
+        quantity: toStorageQty(item.display_quantity, unit),
+        price_per_unit: toStoragePrice(priceExDisplay, unit),
         vat_rate: OCR_SUPPLY_VAT_RATE,
       })
     }

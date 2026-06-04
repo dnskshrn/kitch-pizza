@@ -593,7 +593,11 @@ export function InvoiceOcrModal({
                               }}
                             />
                             <span className="shrink-0 text-sm text-muted-foreground">
-                              {unitLabel(item.matched_ingredient_unit)}
+                              {item.matched_ingredient_unit === "g"
+                                ? "кг"
+                                : item.matched_ingredient_unit === "ml"
+                                  ? "л"
+                                  : "шт"}
                             </span>
                           </div>
                         </div>

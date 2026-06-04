@@ -166,7 +166,7 @@ Rules:
 - "medium": likely match but uncertain  
 - "low": possible match, significant difference
 - "none": no reasonable match found
-- For display_quantity: if ingredient.unit is 'g' and invoice qty is in kg, multiply by 1000. If 'ml' and invoice is in liters, multiply by 1000. If 'pcs' keep as is.
+- For display_quantity: keep the quantity in the SAME display units as the invoice (kg stays kg, liters stay liters, pieces stay pieces). Do NOT multiply by 1000. Just normalize the value as a decimal number (e.g. '0.518 kg' → display_quantity: 0.518, matched_ingredient_unit: 'g').
 - Match supplier by company name similarity
 
 Return ONLY valid JSON:

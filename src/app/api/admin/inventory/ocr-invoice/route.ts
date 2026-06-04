@@ -80,12 +80,10 @@ async function callOpenAI(
   return content
 }
 
-function parseJsonResponse<T>(text: string): T | null {
-  try {
-    return JSON.parse(text) as T
-  } catch {
-    return null
-  }
+function extractJson(text: string): string {
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fenceMatch) return fenceMatch[1].trim()
+  return text.trim()
 }
 
 export async function POST(request: Request) {
@@ -119,8 +117,18 @@ export async function POST(request: Request) {
       2000
     )
 
-    const extracted = parseJsonResponse<OcrExtractedData>(step1Text)
-    if (!extracted || !Array.isArray(extracted.items)) {
+    let extracted: OcrExtractedData
+    try {
+      extracted = JSON.parse(extractJson(step1Text)) as OcrExtractedData
+    } catch {
+      console.error("JSON parse failed. Raw response:", step1Text)
+      return NextResponse.json(
+        { error: "ocr_parse_failed", raw: step1Text },
+        { status: 500 }
+      )
+    }
+    if (!Array.isArray(extracted.items)) {
+      console.error("JSON parse failed. Raw response:", step1Text)
       return NextResponse.json(
         { error: "ocr_parse_failed", raw: step1Text },
         { status: 500 }
@@ -185,12 +193,21 @@ Return ONLY valid JSON:
       2000
     )
 
-    const matched = parseJsonResponse<{
+    let matched: {
       matched_supplier_id: string | null
       items: OcrMatchedItem[]
-    }>(step2Text)
-
-    if (!matched || !Array.isArray(matched.items)) {
+    }
+    try {
+      matched = JSON.parse(extractJson(step2Text)) as typeof matched
+    } catch {
+      console.error("JSON parse failed. Raw response:", step2Text)
+      return NextResponse.json(
+        { error: "match_parse_failed", raw: step2Text },
+        { status: 500 }
+      )
+    }
+    if (!Array.isArray(matched.items)) {
+      console.error("JSON parse failed. Raw response:", step2Text)
       return NextResponse.json(
         { error: "match_parse_failed", raw: step2Text },
         { status: 500 }

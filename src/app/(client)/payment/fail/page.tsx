@@ -1,11 +1,7 @@
 import { XCircle } from "lucide-react"
 import Link from "next/link"
 
-type PaymentFailPageProps = {
-  searchParams: { orderId?: string; payId?: string }
-}
-
-export default function PaymentFailPage(_props: PaymentFailPageProps) {
+export default function PaymentFailPage() {
   return (
     <main className="flex min-h-[calc(100vh-120px)] flex-1 items-center justify-center px-4 py-12">
       <div className="flex w-full max-w-md flex-col items-center text-center text-[var(--color-text)]">

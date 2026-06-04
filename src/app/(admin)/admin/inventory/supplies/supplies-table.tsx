@@ -152,14 +152,11 @@ export function SuppliesTable({
         Number.isFinite(Number(item.vat_rate)) && Number(item.vat_rate) >= 0
           ? Number(item.vat_rate)
           : DEFAULT_OCR_VAT_RATE
-      const priceWithVat = item.unit_price
-      const priceWithoutVat =
-        Math.round((priceWithVat / (1 + vatRate / 100)) * 100) / 100
 
       payloadItems.push({
         ingredient_id: item.matched_ingredient_id,
         quantity: toStorageQty(item.display_quantity, unit),
-        price_per_unit: toStoragePrice(priceWithoutVat, unit),
+        price_per_unit: toStoragePrice(item.unit_price, unit),
         vat_rate: vatRate,
       })
     }

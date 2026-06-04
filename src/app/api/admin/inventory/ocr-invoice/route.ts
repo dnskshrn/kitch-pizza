@@ -16,7 +16,6 @@ const STEP1_PROMPT = `You are an invoice OCR assistant. Extract all line items f
 The document may be in Romanian, Russian, or mixed with English brand names.
 
 IMPORTANT for Moldovan fiscal invoices (FACTURA FISCALA):
-- Use the price WITH VAT (last price column, "cu TVA" / "с НДС")
 - Units: "buc" = pieces, "kg" = kilograms, "l" = liters, "шт" = pieces
 
 For supermarket receipts (format: "ProductName\\n qty x price = total"):
@@ -26,22 +25,13 @@ For supermarket receipts (format: "ProductName\\n qty x price = total"):
    - In supermarket receipts: letter at end of line means: A = 20, B = 8, C = 0
    - In FACTURA FISCALA: read the 'Cota TVA %' column value directly (20 or 8)
    - Default to 20 if unclear
-- unit_price should be the price WITH VAT (consumer price)
-
-IMPORTANT - Package size multiplication:
-If a product name contains a weight or volume (e.g. '5kg', '500ml', '2L', '1kg'),
-AND the quantity is in pieces (buc, шт, pcs, bucati):
-→ multiply: quantity = package_count × package_size
-→ set raw_unit to the weight/volume unit (kg, ml, l, g)
-→ do NOT return quantity in pieces
-
-Examples:
-- 'Faina de grau 5kg Bunetto, 2 buc x 51.99' → quantity: 10, raw_unit: 'kg'
-- 'Monster Mango Loco 500ml, 3 buc x 22.99' → quantity: 1500, raw_unit: 'ml'
-- 'Zahar 1kg Domnita, 3 buc x 16.99' → quantity: 3, raw_unit: 'kg'
-- 'Castraveti marinati 720ml/650g, 2 buc' → quantity: 1440, raw_unit: 'ml'
-
-If no weight/volume in name → keep original quantity and unit as-is.
+- unit_price must ALWAYS be the price WITHOUT VAT (excl. VAT):
+   - In FACTURA FISCALA: read the 'Pret fara TVA' / 'Цена без НДС' column directly
+     (do NOT calculate, do NOT add VAT — take the number as written)
+   - In supermarket receipts: the shelf price includes VAT, so divide:
+     unit_price = shelf_price / (1 + vat_rate/100)
+     Example: price 22.99 with VAT A(20%) → unit_price = 22.99 / 1.20 = 19.16
+   - total_price: also without VAT (quantity × unit_price)
 
 Return ONLY valid JSON, no markdown, no explanation:
 {

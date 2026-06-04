@@ -390,12 +390,24 @@ export function InvoiceOcrModal({
     [editedItems, skippedItemIds, confirmedIndices]
   )
 
-  const confirmTotalMdl = useMemo(() => {
-    return editedItems.reduce((sum, item, i) => {
-      if (skippedItemIds.has(i) || !item.matched_ingredient_id) return sum
-      return sum + item.display_quantity * item.unit_price
-    }, 0)
+  const reviewGrandTotalIncVat = useMemo(() => {
+    return editedItems
+      .filter(
+        (item, i) => !skippedItemIds.has(i) && item.matched_ingredient_id
+      )
+      .reduce(
+        (sum, item) =>
+          sum +
+          item.display_quantity *
+            item.unit_price *
+            (1 + (item.vat_rate ?? 20) / 100),
+        0
+      )
   }, [editedItems, skippedItemIds])
+
+  const confirmTotalMdl = useMemo(() => {
+    return reviewGrandTotalIncVat
+  }, [reviewGrandTotalIncVat])
 
   const confirmSummaryItems = useMemo(
     () =>
@@ -480,12 +492,9 @@ export function InvoiceOcrModal({
 
   const inner = (
     <div className="flex min-h-0 flex-1 flex-col">
-      {step !== "processing" && step !== "confirm" ? (
+      {step !== "processing" && step !== "confirm" && step !== "review" ? (
         <div className="mb-4 flex shrink-0 items-center justify-between gap-2">
           <h2 className="text-lg font-semibold leading-tight">{stepTitle}</h2>
-          {step === "review" ? (
-            <Badge variant="secondary">{reviewBadgeCount} позиций</Badge>
-          ) : null}
         </div>
       ) : null}
 
@@ -578,8 +587,15 @@ export function InvoiceOcrModal({
       ) : null}
 
       {step === "review" ? (
-        <>
-          <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 pb-4">
+        <div className="flex h-full min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between px-4 pt-4 pb-2">
+            <h2 className="text-lg font-semibold leading-tight">
+              Проверьте позиции
+            </h2>
+            <Badge variant="secondary">{reviewBadgeCount} позиций</Badge>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 pb-2">
             {editedItems.map((item, index) => {
               const skipped = skippedItemIds.has(index)
               return (
@@ -687,6 +703,22 @@ export function InvoiceOcrModal({
                           <option value={0}>0%</option>
                         </select>
                       </div>
+
+                      {item.matched_ingredient_id ? (
+                        <div className="mt-1 flex items-center justify-between border-t border-border/50 pt-2">
+                          <span className="text-xs text-muted-foreground">
+                            Итого с НДС
+                          </span>
+                          <span className="text-sm font-semibold">
+                            {(
+                              item.display_quantity *
+                              item.unit_price *
+                              (1 + (item.vat_rate ?? 20) / 100)
+                            ).toFixed(2)}{" "}
+                            MDL
+                          </span>
+                        </div>
+                      ) : null}
                     </>
                   ) : null}
                 </div>
@@ -694,7 +726,13 @@ export function InvoiceOcrModal({
             })}
           </div>
 
-          <div className="sticky bottom-0 -mx-1 shrink-0 border-t bg-background px-1 pt-3 pb-1">
+          <div className="shrink-0 border-t border-border bg-background px-4 pt-2 pb-4">
+            <div className="mb-3 text-sm text-muted-foreground">
+              Итого по поставке:{" "}
+              <span className="font-semibold text-foreground">
+                {reviewGrandTotalIncVat.toFixed(2)} MDL
+              </span>
+            </div>
             <div className="flex flex-col gap-2">
               {hasUnconfirmedHigh ? (
                 <Button
@@ -716,7 +754,7 @@ export function InvoiceOcrModal({
               </Button>
             </div>
           </div>
-        </>
+        </div>
       ) : null}
 
       {step === "confirm" ? (

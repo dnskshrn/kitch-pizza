@@ -1,5 +1,12 @@
 import type { Ingredient } from "@/types/database"
 
+export type SupplyPeriodTotals = {
+  orderCount: number
+  annulledCount: number
+  totalExVat: number
+  totalIncVat: number
+}
+
 export type SupplyOrderViewModel = {
   id: string
   supplier_id: string

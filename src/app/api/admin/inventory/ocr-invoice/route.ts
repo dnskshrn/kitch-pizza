@@ -10,7 +10,7 @@ import { NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-const MODEL = "gpt-4o"
+const MODEL = "gpt-5.5-2026-04-23"
 
 const STEP1_PROMPT = `You are an invoice OCR assistant. Extract all line items from this Moldovan invoice or receipt.
 The document may be in Romanian, Russian, or mixed with English brand names.
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
         {
           role: "user",
           content: [
-            { type: "image_url", image_url: { url: dataUrl } },
+            { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
             { type: "text", text: STEP1_PROMPT },
           ],
         },

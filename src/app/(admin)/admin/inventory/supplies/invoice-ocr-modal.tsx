@@ -81,11 +81,72 @@ function formatMdl(value: number): string {
   })
 }
 
-function parsePositiveNumber(s: string): number | null {
-  const t = s.trim().replace(",", ".")
-  if (t === "") return null
-  const n = Number(t)
-  return Number.isFinite(n) && n >= 0 ? n : null
+async function prepareImageForUpload(file: File): Promise<File> {
+  if (file.size <= 8 * 1024 * 1024) {
+    return file
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const MAX = 2400
+      const ratio = Math.min(MAX / img.width, MAX / img.height, 1)
+      const canvas = document.createElement("canvas")
+      canvas.width = Math.round(img.width * ratio)
+      canvas.height = Math.round(img.height * ratio)
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      canvas.toBlob(
+        (blob) =>
+          resolve(new File([blob!], file.name, { type: "image/jpeg" })),
+        "image/jpeg",
+        0.92
+      )
+    }
+    img.src = url
+  })
+}
+
+function InvoiceNumberInput({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (val: number) => void
+}) {
+  const [localValue, setLocalValue] = useState(String(value))
+
+  useEffect(() => {
+    setLocalValue(String(value))
+  }, [value])
+
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      pattern="[0-9]*[.,]?[0-9]*"
+      value={localValue}
+      className="h-10 min-h-10"
+      onChange={(e) => {
+        const raw = e.target.value.replace(",", ".")
+        setLocalValue(e.target.value)
+        const parsed = parseFloat(raw)
+        if (!Number.isNaN(parsed) && parsed >= 0) {
+          onChange(parsed)
+        }
+      }}
+      onBlur={() => {
+        const parsed = parseFloat(localValue.replace(",", "."))
+        if (Number.isNaN(parsed) || parsed < 0) {
+          setLocalValue(String(value))
+        } else {
+          setLocalValue(String(parsed))
+          onChange(parsed)
+        }
+      }}
+    />
+  )
 }
 
 function confidenceCardClass(
@@ -254,8 +315,9 @@ export function InvoiceOcrModal({
 
     ;(async () => {
       try {
+        const uploadFile = await prepareImageForUpload(imageFile)
         const formData = new FormData()
-        formData.append("image", imageFile)
+        formData.append("image", uploadFile)
         const res = await fetch("/api/admin/inventory/ocr-invoice", {
           method: "POST",
           body: formData,
@@ -578,19 +640,11 @@ export function InvoiceOcrModal({
                             Кол-во
                           </Label>
                           <div className="flex items-center gap-2">
-                            <Input
-                              type="number"
-                              inputMode="decimal"
-                              min={0}
-                              step="any"
-                              className="h-10 min-h-10"
+                            <InvoiceNumberInput
                               value={item.display_quantity}
-                              onChange={(e) => {
-                                const n = parsePositiveNumber(e.target.value)
-                                if (n != null) {
-                                  patchItem(index, { display_quantity: n })
-                                }
-                              }}
+                              onChange={(n) =>
+                                patchItem(index, { display_quantity: n })
+                              }
                             />
                             <span className="shrink-0 text-sm text-muted-foreground">
                               {item.matched_ingredient_unit === "g"
@@ -606,19 +660,11 @@ export function InvoiceOcrModal({
                             Цена/ед
                           </Label>
                           <div className="flex items-center gap-2">
-                            <Input
-                              type="number"
-                              inputMode="decimal"
-                              min={0}
-                              step="any"
-                              className="h-10 min-h-10"
+                            <InvoiceNumberInput
                               value={item.unit_price}
-                              onChange={(e) => {
-                                const n = parsePositiveNumber(e.target.value)
-                                if (n != null) {
-                                  patchItem(index, { unit_price: n })
-                                }
-                              }}
+                              onChange={(n) =>
+                                patchItem(index, { unit_price: n })
+                              }
                             />
                             <span className="shrink-0 text-sm text-muted-foreground">
                               MDL

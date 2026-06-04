@@ -570,3 +570,24 @@ export interface CustomerAddress {
   delivery_lng: number | null
   is_default: boolean
 }
+
+export type OrderFeedback = {
+  id: string
+  order_id: string
+  brand_id: string
+  token: string
+  short_code: string | null
+  token_expires_at: string
+  sms_sent_at: string | null
+  food_rating: number | null
+  service_rating: number | null
+  comment: string | null
+  photo_urls: string[] | null
+  submitted_at: string | null
+  resolution_note: string | null
+  resolved_by: string | null
+  resolved_at: string | null
+  tg_message_id: number | null
+  tg_notified: boolean
+  created_at: string
+}

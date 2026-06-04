@@ -220,7 +220,11 @@ export function parseOrderItemToppings(
       const q = (x as { quantity?: unknown }).quantity
       const quantity =
         typeof q === "number" && Number.isInteger(q) && q >= 1 ? q : 1
+      const rawId = (x as { id?: unknown }).id
+      const id =
+        typeof rawId === "string" && rawId.trim() ? rawId.trim() : undefined
       out.push({
+        ...(id ? { id } : {}),
         name: (x as { name: string }).name,
         price: (x as { price: number }).price,
         quantity,

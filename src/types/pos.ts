@@ -74,6 +74,12 @@ export type PosOrder = {
   total: number
   delivery_fee: number
   discount: number
+  /** Сумма товаров до скидок, bani. */
+  subtotal?: number
+  /** Скидка на товары, bani. */
+  item_discount?: number
+  /** Скидка промокода, bani. */
+  promo_discount?: number
   /** Пункты лояльности (1 п. ≈ 1 MDL списано с суммы перед сохранением `total`). */
   bonuses_redeemed: number
   comment: string | null

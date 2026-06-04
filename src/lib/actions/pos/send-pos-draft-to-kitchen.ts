@@ -101,6 +101,44 @@ export async function sendPosDraftToKitchen(
 
   const nowIso = new Date().toISOString()
 
+  if (redeemPoints > 0) {
+    if (profileIdForRedeem) {
+      const { data: freshOrder } = await supabase
+        .from("orders")
+        .select("status, bonuses_redeemed, profile_id")
+        .eq("id", input.orderId)
+        .maybeSingle()
+
+      const freshStatus = freshOrder
+        ? String((freshOrder as { status: string }).status)
+        : orderStatus
+
+      if (
+        !SENDABLE_POS_STATUSES.includes(
+          freshStatus as (typeof SENDABLE_POS_STATUSES)[number],
+        )
+      ) {
+        console.warn(
+          `[sendPosDraftToKitchen] Order ${input.orderId} is ${freshStatus}, skipping redeem`,
+        )
+      } else {
+        try {
+          await redeemBonus(profileIdForRedeem, input.orderId, redeemPoints)
+        } catch (e) {
+          console.error(
+            "[sendPosDraftToKitchen] redeemBonus",
+            e instanceof Error ? e.message : e,
+          )
+        }
+      }
+    } else {
+      console.error(
+        "[sendPosDraftToKitchen] redeemBonus skipped: no profile_id for order",
+        input.orderId,
+      )
+    }
+  }
+
   const { data: updated, error: updateError } = await supabase
     .from("orders")
     .update({
@@ -139,24 +177,6 @@ export async function sendPosDraftToKitchen(
   }
 
   const orderNumber = Number((updated as { order_number: number }).order_number)
-
-  if (redeemPoints > 0) {
-    if (profileIdForRedeem) {
-      try {
-        await redeemBonus(profileIdForRedeem, input.orderId, redeemPoints)
-      } catch (e) {
-        console.error(
-          "[sendPosDraftToKitchen] redeemBonus",
-          e instanceof Error ? e.message : e,
-        )
-      }
-    } else {
-      console.error(
-        "[sendPosDraftToKitchen] redeemBonus skipped: no profile_id for order",
-        input.orderId,
-      )
-    }
-  }
 
   return { success: true, orderNumber }
 }

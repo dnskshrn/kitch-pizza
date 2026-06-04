@@ -1,7 +1,10 @@
 "use client"
 
 import { brands } from "@/brands/index"
+import type { ReceiptPricingBreakdown } from "@/lib/receipt-pricing-breakdown"
 import { forwardRef } from "react"
+
+export type { ReceiptPricingBreakdown } from "@/lib/receipt-pricing-breakdown"
 
 export interface ReceiptProps {
   brandSlug: string
@@ -15,6 +18,9 @@ export interface ReceiptProps {
   customerName?: string
   deliveryAddress?: string
   courierName?: string
+  /** Детализация скидок и доставки (предпочтительно). */
+  pricing?: ReceiptPricingBreakdown
+  /** Legacy fallback, если `pricing` не передан. */
   deliveryFee?: number
   discount?: number
   discountLabel?: string
@@ -42,6 +48,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
       customerName,
       deliveryAddress,
       courierName,
+      pricing,
       deliveryFee,
       discount,
       discountLabel,
@@ -66,10 +73,26 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
       trimmedCustomerName.length > 0 ||
       trimmedDeliveryAddress.length > 0 ||
       trimmedCourierName.length > 0
+
+    const breakdown = pricing ?? null
     const showPricingBreakdown =
+      breakdown != null ||
       deliveryFee !== undefined ||
       (discount != null && discount > 0) ||
       (bonusRedeemed != null && bonusRedeemed > 0)
+
+    const receiptRowStyle = {
+      display: "flex" as const,
+      justifyContent: "space-between" as const,
+      gap: 12,
+      fontSize: 19,
+      fontWeight: 400 as const,
+    }
+
+    const receiptDiscountRowStyle = {
+      ...receiptRowStyle,
+      color: "#c00000",
+    }
 
     return (
       <div
@@ -294,64 +317,78 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
 
         {showPricingBreakdown ? (
           <div style={{ padding: "8px 32px 0" }}>
-            {deliveryFee !== undefined && deliveryFee >= 1 ? (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  fontSize: 19,
-                  fontWeight: 400,
-                }}
-              >
-                <span>Livrare / Доставка</span>
-                <span>{formatMdl(deliveryFee)} MDL</span>
-              </div>
-            ) : null}
-            {deliveryFee === 0 ? (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  fontSize: 19,
-                  fontWeight: 400,
-                }}
-              >
-                <span>Livrare / Доставка</span>
-                <span>Gratuit / Бесплатно</span>
-              </div>
-            ) : null}
-            {discount != null && discount > 0 ? (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  fontSize: 19,
-                  fontWeight: 400,
-                  marginTop: deliveryFee !== undefined ? 8 : 0,
-                  color: "#c00000",
-                }}
-              >
-                <span>{discountLabel ?? "Reducere / Скидка"}</span>
-                <span>−{formatMdl(discount)} MDL</span>
-              </div>
-            ) : null}
-            {bonusRedeemed != null && bonusRedeemed > 0 ? (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 13,
-                  color: "#c00000",
-                  padding: "2px 0",
-                }}
-              >
-                <span>Bonusuri / Бонусы</span>
-                <span>−{formatMdl(bonusRedeemed)} MDL</span>
-              </div>
-            ) : null}
+            {breakdown ? (
+              <>
+                <div style={receiptRowStyle}>
+                  <span>Sumă fără reduceri / Сумма без скидок</span>
+                  <span>{formatMdl(breakdown.subtotalMdl)} MDL</span>
+                </div>
+                {breakdown.itemDiscountMdl > 0 ? (
+                  <div style={{ ...receiptDiscountRowStyle, marginTop: 8 }}>
+                    <span>Reducere seturi / Скидка на сеты</span>
+                    <span>−{formatMdl(breakdown.itemDiscountMdl)} MDL</span>
+                  </div>
+                ) : null}
+                {breakdown.promoDiscountMdl > 0 ? (
+                  <div style={{ ...receiptDiscountRowStyle, marginTop: 8 }}>
+                    <span>
+                      {breakdown.promoCode
+                        ? `Promocod ${breakdown.promoCode} / Промокод ${breakdown.promoCode}`
+                        : "Promocod / Промокод"}
+                    </span>
+                    <span>−{formatMdl(breakdown.promoDiscountMdl)} MDL</span>
+                  </div>
+                ) : null}
+                {breakdown.bonusRedeemedMdl > 0 ? (
+                  <div style={{ ...receiptDiscountRowStyle, marginTop: 8 }}>
+                    <span>Bonusuri / Бонусы</span>
+                    <span>−{formatMdl(breakdown.bonusRedeemedMdl)} MDL</span>
+                  </div>
+                ) : null}
+                {breakdown.showDelivery ? (
+                  <div style={{ ...receiptRowStyle, marginTop: 8 }}>
+                    <span>Livrare / Доставка</span>
+                    <span>
+                      {breakdown.deliveryFeeMdl >= 0.01
+                        ? `${formatMdl(breakdown.deliveryFeeMdl)} MDL`
+                        : "Gratuit / Бесплатно"}
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {deliveryFee !== undefined && deliveryFee >= 1 ? (
+                  <div style={receiptRowStyle}>
+                    <span>Livrare / Доставка</span>
+                    <span>{formatMdl(deliveryFee)} MDL</span>
+                  </div>
+                ) : null}
+                {deliveryFee === 0 ? (
+                  <div style={receiptRowStyle}>
+                    <span>Livrare / Доставка</span>
+                    <span>Gratuit / Бесплатно</span>
+                  </div>
+                ) : null}
+                {discount != null && discount > 0 ? (
+                  <div
+                    style={{
+                      ...receiptDiscountRowStyle,
+                      marginTop: deliveryFee !== undefined ? 8 : 0,
+                    }}
+                  >
+                    <span>{discountLabel ?? "Reducere / Скидка"}</span>
+                    <span>−{formatMdl(discount)} MDL</span>
+                  </div>
+                ) : null}
+                {bonusRedeemed != null && bonusRedeemed > 0 ? (
+                  <div style={{ ...receiptDiscountRowStyle, marginTop: 8 }}>
+                    <span>Bonusuri / Бонусы</span>
+                    <span>−{formatMdl(bonusRedeemed)} MDL</span>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
         ) : null}
 
@@ -394,7 +431,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
                   "var(--font-mono), Roboto Mono, ui-monospace, monospace",
               }}
             >
-              {formatMdl(total)} MDL
+              {formatMdl(breakdown?.totalMdl ?? total)} MDL
             </span>
           </div>
         </div>

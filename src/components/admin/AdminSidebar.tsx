@@ -25,6 +25,7 @@ import {
   Warehouse,
   ChevronRight,
   Users,
+  MessageSquare,
   Clock,
   ArrowLeftRight,
   Trash2,
@@ -153,7 +154,10 @@ const brandCustomersNavGroup: NavGroup = {
   id: "customers",
   label: "Клиенты",
   icon: Users,
-  items: [{ href: "/admin/customers", label: "Клиенты", icon: Users }],
+  items: [
+    { href: "/admin/customers", label: "Клиенты", icon: Users },
+    { href: "/admin/feedback", label: "Отзывы", icon: MessageSquare },
+  ],
 }
 
 const generalNavGroups: NavGroup[] = [

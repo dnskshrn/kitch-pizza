@@ -4,7 +4,7 @@ import type { PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 
 /** Колонки `orders` + вложения для списка/карточек POS (без несуществующих полей). */
 const ORDERS_POS_SELECT =
-  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, kitchen_note, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, ready_at, cash_session_id, brands(slug), order_items(count)"
+  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, kitchen_note, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, subtotal, item_discount, promo_discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, ready_at, cash_session_id, brands(slug), order_items(count)"
 
 /** Активные заказы левой колонки POS (без завершённых, отмен и отказов сайта). */
 export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
@@ -39,6 +39,9 @@ export type OrderRow = {
   total: number
   delivery_fee: number
   discount: number
+  subtotal?: number | null
+  item_discount?: number | null
+  promo_discount?: number | null
   bonuses_redeemed: number
   comment: string | null
   kitchen_note?: string | null
@@ -209,6 +212,18 @@ export function mapOrderRowToPosOrder(
       typeof row.discount === "number" && Number.isFinite(row.discount)
         ? Math.max(0, Math.round(row.discount))
         : 0,
+    subtotal:
+      typeof row.subtotal === "number" && Number.isFinite(row.subtotal)
+        ? Math.max(0, Math.round(row.subtotal))
+        : undefined,
+    item_discount:
+      typeof row.item_discount === "number" && Number.isFinite(row.item_discount)
+        ? Math.max(0, Math.round(row.item_discount))
+        : undefined,
+    promo_discount:
+      typeof row.promo_discount === "number" && Number.isFinite(row.promo_discount)
+        ? Math.max(0, Math.round(row.promo_discount))
+        : undefined,
     bonuses_redeemed: Math.max(
       0,
       typeof row.bonuses_redeemed === "number" && Number.isFinite(row.bonuses_redeemed)

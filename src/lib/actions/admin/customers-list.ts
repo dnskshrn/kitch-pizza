@@ -7,38 +7,33 @@ import {
   type CustomerRow,
 } from "@/types/customers"
 
-type RpcRow = {
+/** Сырой ответ RPC `get_customers_list` (bigint → string в JS). */
+type CustomerListRpcRow = {
   id: string
   phone: string
   name: string | null
   created_at: string
-  site_orders_count: number
-  site_total_spend: number
-  site_last_order_at: string | null
+  orders_count: string
+  total_spent_bani: string
+  last_order_at: string | null
   poster_orders_count: number | null
   poster_last_order_at: string | null
-  total_orders_count: number
-  last_order_at: string | null
   bonus_balance: number
-  total_count: number
+  total_count: string
 }
 
-function mapRow(r: RpcRow): CustomerRow {
+function mapRow(r: CustomerListRpcRow): CustomerRow {
   return {
     id: r.id,
     phone: r.phone,
     name: r.name,
     created_at: r.created_at,
-    site_orders_count: Number(r.site_orders_count ?? 0),
-    site_total_spend: Number(r.site_total_spend ?? 0),
-    site_last_order_at: r.site_last_order_at,
-    poster_orders_count:
-      r.poster_orders_count != null ? Number(r.poster_orders_count) : null,
-    poster_last_order_at: r.poster_last_order_at,
-    total_orders_count: Number(r.total_orders_count ?? 0),
+    orders_count: r.orders_count ?? "0",
+    total_spent_bani: r.total_spent_bani ?? "0",
     last_order_at: r.last_order_at,
-    bonus_balance: Number(r.bonus_balance ?? 0),
-    total_count: Number(r.total_count ?? 0),
+    poster_orders_count: r.poster_orders_count,
+    poster_last_order_at: r.poster_last_order_at,
+    bonus_balance: r.bonus_balance ?? 0,
   }
 }
 
@@ -92,12 +87,12 @@ export async function getCustomersList(
     return { data: [], totalCount: 0, error: error.message }
   }
 
-  const rows = (data ?? []) as RpcRow[]
+  const rows = (data ?? []) as CustomerListRpcRow[]
   if (rows.length === 0) {
     return { data: [], totalCount: 0 }
   }
 
-  const totalCount = rows[0]?.total_count ?? 0
+  const totalCount = Number(rows[0]?.total_count ?? 0)
   return {
     data: rows.map(mapRow),
     totalCount,

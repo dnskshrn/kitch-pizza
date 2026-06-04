@@ -31,9 +31,11 @@ type CustomersFiltersProps = {
 
 const SORT_OPTIONS: { value: CustomerFilters["sortBy"]; label: string }[] = [
   { value: "created_at", label: "Дата регистрации" },
-  { value: "last_order", label: "Последний заказ" },
-  { value: "total_spend", label: "Сумма заказов" },
+  { value: "last_order_at", label: "Последний заказ" },
+  { value: "total_spent", label: "Сумма заказов" },
   { value: "orders_count", label: "Кол-во заказов" },
+  { value: "bonus_balance", label: "Бонусы" },
+  { value: "name", label: "Имя" },
 ]
 
 const SORT_DIR_OPTIONS: { value: CustomerFilters["sortDir"]; label: string }[] =

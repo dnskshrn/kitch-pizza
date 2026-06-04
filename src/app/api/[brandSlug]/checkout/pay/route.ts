@@ -27,6 +27,10 @@ export async function POST(
   request: Request,
   context: { params: { brandSlug: string } },
 ) {
+  if (process.env.CARD_PAYMENT_ENABLED !== "true") {
+    return NextResponse.json({ error: "Not available" }, { status: 503 })
+  }
+
   let body: unknown
   try {
     body = await request.json()

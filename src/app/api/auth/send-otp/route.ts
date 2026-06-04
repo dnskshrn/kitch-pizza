@@ -1,5 +1,7 @@
 import { randomInt } from "crypto"
 import { NextRequest, NextResponse } from "next/server"
+import { BRANDS, getBrandByHost } from "@/brands"
+import { sendSms } from "@/lib/sms"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
 function normalizePhone(phone: string) {
@@ -59,22 +61,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Server error" }, { status: 500 })
     }
 
-    const smsUrl = new URL("https://api.sms.md/v1/send")
-    smsUrl.searchParams.set("from", process.env.SMS_MD_SENDER!)
-    smsUrl.searchParams.set("to", normalized)
-    smsUrl.searchParams.set(
-      "message",
-      `Ваш код: ${code}. Действителен 10 минут.`,
+    const host =
+      req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ??
+      req.headers.get("host") ??
+      ""
+    const hostname = (host.split(":")[0] ?? host).replace(/^www\./, "")
+    const brandSlug = BRANDS.some(
+      (b) => b.domain === hostname || b.devDomain === hostname,
     )
-    smsUrl.searchParams.set("token", process.env.SMS_MD_API_KEY!)
+      ? getBrandByHost(host).slug
+      : undefined
 
-    const smsRes = await fetch(smsUrl.toString(), {
-      method: "GET",
-      headers: { accept: "application/json" },
-    })
-
-    if (!smsRes.ok) {
-      console.error("SMS.md error:", await smsRes.text())
+    try {
+      await sendSms({
+        to: normalized,
+        text: `Ваш код: ${code}. Действителен 10 минут.`,
+        brandSlug,
+      })
+    } catch (err) {
+      console.error("send-otp SMS error:", err)
       return NextResponse.json({ error: "Ошибка отправки SMS" }, { status: 500 })
     }
 

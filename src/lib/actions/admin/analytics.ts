@@ -4,6 +4,10 @@ import { createClient } from "@/lib/supabase/server"
 import { format, subDays, eachDayOfInterval, parseISO } from "date-fns"
 import { ru } from "date-fns/locale"
 
+const PAGE = 1000
+/** PostgREST ограничивает длину `.in()` — батчим id заказов для популярных позиций. */
+const ORDER_ID_BATCH = 300
+
 export type DayStats = {
   date: string
   dateKey: string
@@ -66,18 +70,101 @@ function buildOrdersQuery(
   end: Date,
   brandId?: string
 ) {
-  let query = supabase
-    .from("orders")
-    .select("id, created_at, total, brand_id, profile_id")
-    .eq("status", "done")
-    .gte("created_at", start.toISOString())
-    .lte("created_at", end.toISOString())
+  return () => {
+    let query = supabase
+      .from("orders")
+      .select("id, created_at, total, brand_id, profile_id")
+      .eq("status", "done")
+      .gte("created_at", start.toISOString())
+      .lte("created_at", end.toISOString())
+      .order("created_at", { ascending: true })
 
-  if (brandId) {
-    query = query.eq("brand_id", brandId)
+    if (brandId) {
+      query = query.eq("brand_id", brandId)
+    }
+
+    return query
+  }
+}
+
+function buildProfilesQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  start: Date,
+  end: Date
+) {
+  return () =>
+    supabase
+      .from("profiles")
+      .select("id, created_at")
+      .gte("created_at", start.toISOString())
+      .lte("created_at", end.toISOString())
+      .order("created_at", { ascending: true })
+}
+
+async function fetchAllRows<T>(
+  buildQuery: () => {
+    range: (
+      from: number,
+      to: number
+    ) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>
+  }
+): Promise<T[]> {
+  const rows: T[] = []
+  let from = 0
+
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + PAGE - 1)
+    if (error) {
+      throw new Error(error.message)
+    }
+    const batch = (data ?? []) as T[]
+    rows.push(...batch)
+    if (batch.length < PAGE) break
+    from += PAGE
   }
 
-  return query
+  return rows
+}
+
+async function fetchOrderItemsForOrders(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orderIds: string[]
+): Promise<OrderItemRow[]> {
+  if (orderIds.length === 0) return []
+
+  const rows: OrderItemRow[] = []
+
+  for (let i = 0; i < orderIds.length; i += ORDER_ID_BATCH) {
+    const batchIds = orderIds.slice(i, i + ORDER_ID_BATCH)
+    const { data, error } = await supabase
+      .from("order_items")
+      .select("menu_item_id, quantity, menu_items!inner(name_ru, brand_id)")
+      .in("order_id", batchIds)
+
+    if (error) {
+      throw new Error(error.message)
+    }
+
+    rows.push(...((data ?? []) as OrderItemRow[]))
+  }
+
+  return rows
+}
+
+function groupByDayKey<T extends { created_at: string }>(
+  rows: T[]
+): Map<string, T[]> {
+  const map = new Map<string, T[]>()
+  for (const row of rows) {
+    const dayKey = format(parseISO(row.created_at), "yyyy-MM-dd")
+    const bucket = map.get(dayKey)
+    if (bucket) {
+      bucket.push(row)
+    } else {
+      map.set(dayKey, [row])
+    }
+  }
+  return map
 }
 
 export async function getAnalyticsData(
@@ -95,42 +182,29 @@ export async function getAnalyticsData(
   const prevEnd = subDays(startDate, 1)
   prevEnd.setHours(23, 59, 59, 999)
 
-  const [{ data: ordersData }, { data: prevOrdersData }, { data: profilesData }, { data: prevProfilesData }] =
-    await Promise.all([
-      buildOrdersQuery(supabase, startDate, endDate, filters.brandId),
-      buildOrdersQuery(supabase, prevStart, prevEnd, filters.brandId),
-      supabase
-        .from("profiles")
-        .select("id, created_at")
-        .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString()),
-      supabase
-        .from("profiles")
-        .select("id, created_at")
-        .gte("created_at", prevStart.toISOString())
-        .lte("created_at", prevEnd.toISOString()),
-    ])
-
-  const orders = (ordersData ?? []) as OrderRow[]
-  const prevOrders = (prevOrdersData ?? []) as OrderRow[]
-  const profiles = (profilesData ?? []) as ProfileRow[]
-  const prevProfiles = (prevProfilesData ?? []) as ProfileRow[]
+  const [orders, prevOrders, profiles, prevProfiles] = await Promise.all([
+    fetchAllRows<OrderRow>(
+      buildOrdersQuery(supabase, startDate, endDate, filters.brandId)
+    ),
+    fetchAllRows<OrderRow>(
+      buildOrdersQuery(supabase, prevStart, prevEnd, filters.brandId)
+    ),
+    fetchAllRows<ProfileRow>(buildProfilesQuery(supabase, startDate, endDate)),
+    fetchAllRows<ProfileRow>(buildProfilesQuery(supabase, prevStart, prevEnd)),
+  ])
 
   let popularItems: PopularItem[] = []
 
   if (orders.length > 0) {
     const orderIds = orders.map((o) => o.id)
-    const { data: orderItemsData } = await supabase
-      .from("order_items")
-      .select("menu_item_id, quantity, menu_items!inner(name_ru, brand_id)")
-      .in("order_id", orderIds)
+    const orderItemsData = await fetchOrderItemsForOrders(supabase, orderIds)
 
     const itemsMap = new Map<
       string,
       { name: string; brand_id: string; totalQty: number }
     >()
 
-    for (const row of (orderItemsData ?? []) as OrderItemRow[]) {
+    for (const row of orderItemsData) {
       if (!row.menu_item_id) continue
       const menuItem = Array.isArray(row.menu_items)
         ? row.menu_items[0]
@@ -160,15 +234,14 @@ export async function getAnalyticsData(
       .slice(0, 15)
   }
 
+  const ordersByDay = groupByDayKey(orders)
+  const profilesByDay = groupByDayKey(profiles)
+
   const allDays = eachDayOfInterval({ start: startDate, end: endDate })
   const dayStats: DayStats[] = allDays.map((day) => {
     const dayKey = format(day, "yyyy-MM-dd")
-    const dayOrders = orders.filter(
-      (o) => format(parseISO(o.created_at), "yyyy-MM-dd") === dayKey
-    )
-    const dayProfiles = profiles.filter(
-      (p) => format(parseISO(p.created_at), "yyyy-MM-dd") === dayKey
-    )
+    const dayOrders = ordersByDay.get(dayKey) ?? []
+    const dayProfiles = profilesByDay.get(dayKey) ?? []
     const revenue = dayOrders.reduce((s, o) => s + (o.total ?? 0), 0) / 100
     const ordersCount = dayOrders.length
 

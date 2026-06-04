@@ -48,6 +48,9 @@ import {
   Zap,
 } from "lucide-react"
 import Image from "next/image"
+
+const CARD_PAYMENT_ENABLED =
+  process.env.NEXT_PUBLIC_CARD_PAYMENT_ENABLED === "true"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -190,6 +193,9 @@ const checkoutActiveToggle = `${btnMotion} hover:brightness-95 active:scale-[0.9
 const checkoutGrayToggle = `${btnMotion} hover:bg-[#e8e8e8] active:scale-[0.98]`
 /** Неактивные сегменты (оплата, время и т.д.): фон из токена бренда */
 const checkoutToggleInactive = `bg-[var(--color-selector-item-bg)] text-[var(--color-text)] ${checkoutGrayToggle}`
+/** Способы оплаты: неактивные — белый фон; активные — accent + --color-accent-text (чёрный на Kitch, белый на Losos) */
+const checkoutPaymentInactive = `bg-white text-[var(--color-text)] border border-[#ebebeb] ${checkoutGrayToggle}`
+const checkoutPaymentActive = `bg-[var(--color-accent)] text-[var(--color-accent-text)] border border-transparent ${checkoutActiveToggle}`
 const checkoutIconCircle = `${btnMotion} hover:bg-[#e8e8e8] active:scale-[0.96]`
 const checkoutWhiteMini = `${btnMotion} hover:bg-[#f5f5f5] active:scale-[0.98]`
 const checkoutDarkSolid = `${btnMotion} hover:opacity-90 active:scale-[0.98]`
@@ -287,6 +293,15 @@ export function CheckoutView({
 
   const quickTimeSlots = useMemo(() => buildQuickDeliveryTimeSlots(), [])
   const timeSlots = useMemo(() => buildDeliveryTimeSlots(), [])
+
+  useEffect(() => {
+    if (
+      !CARD_PAYMENT_ENABLED &&
+      (payment === "card" || payment === "online_card")
+    ) {
+      setPayment("cash")
+    }
+  }, [payment])
 
   useEffect(() => {
     if (!hydrated) return
@@ -1188,50 +1203,68 @@ export function CheckoutView({
                       type="button"
                       onClick={() => setPayment("cash")}
                       className={cn(
-                        "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
+                        "flex min-h-[48px] min-w-0 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
+                        CARD_PAYMENT_ENABLED ? "flex-1" : "w-full",
                         payment === "cash"
-                          ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
-                          : checkoutToggleInactive,
+                          ? checkoutPaymentActive
+                          : checkoutPaymentInactive,
                       )}
                     >
                       <Banknote className="size-[14px] shrink-0" strokeWidth={2} />
                       <span className="text-center leading-tight">{t.checkout.cash}</span>
                     </button>
+                    {CARD_PAYMENT_ENABLED ? (
+                      <button
+                        type="button"
+                        onClick={() => setPayment("card")}
+                        className={cn(
+                          "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
+                          payment === "card"
+                            ? checkoutPaymentActive
+                            : checkoutPaymentInactive,
+                        )}
+                      >
+                        <CreditCard
+                          className="size-[14px] shrink-0"
+                          strokeWidth={2}
+                        />
+                        <span className="text-center leading-tight">
+                          {t.checkout.card}
+                        </span>
+                      </button>
+                    ) : null}
+                  </div>
+                  {CARD_PAYMENT_ENABLED ? (
                     <button
                       type="button"
-                      onClick={() => setPayment("card")}
+                      onClick={() => setPayment("online_card")}
                       className={cn(
-                        "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
-                        payment === "card"
-                          ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
-                          : checkoutToggleInactive,
+                        "flex w-full flex-col items-start gap-1 rounded-[12px] px-4 py-3 text-left",
+                        payment === "online_card"
+                          ? checkoutPaymentActive
+                          : checkoutPaymentInactive,
                       )}
                     >
-                      <CreditCard className="size-[14px] shrink-0" strokeWidth={2} />
-                      <span className="text-center leading-tight">
-                        {t.checkout.card}
+                      <span className="flex items-center gap-2 text-[14px] font-bold">
+                        <CreditCard
+                          className="size-[14px] shrink-0"
+                          strokeWidth={2}
+                        />
+                        Card online / Apple Pay / Google Pay
+                      </span>
+                      <span
+                        className={cn(
+                          "text-[12px] font-normal leading-snug",
+                          payment === "online_card"
+                            ? "text-[var(--color-accent-text)] opacity-80"
+                            : "text-[#808080]",
+                        )}
+                      >
+                        Vei fi redirecționat la pagina de plată MAIB / Вы будете
+                        перенаправлены на страницу оплаты MAIB
                       </span>
                     </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setPayment("online_card")}
-                    className={cn(
-                      "flex w-full flex-col items-start gap-1 rounded-[12px] px-4 py-3 text-left",
-                      payment === "online_card"
-                        ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
-                        : checkoutToggleInactive,
-                    )}
-                  >
-                    <span className="flex items-center gap-2 text-[14px] font-bold text-[#242424]">
-                      <CreditCard className="size-[14px] shrink-0" strokeWidth={2} />
-                      Card online / Apple Pay / Google Pay
-                    </span>
-                    <span className="text-[12px] font-normal leading-snug text-[#808080]">
-                      Vei fi redirecționat la pagina de plată MAIB / Вы будете
-                      перенаправлены на страницу оплаты MAIB
-                    </span>
-                  </button>
+                  ) : null}
                   {payment === "cash" ? (
                     <div>
                       <p className="text-[16px] font-bold text-[#242424]">

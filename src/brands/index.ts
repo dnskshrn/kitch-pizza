@@ -14,6 +14,8 @@ export type BrandConfig = {
   deliveryKey: string // localStorage key for delivery
   /** Meta (Facebook) Pixel; пиксель не подключается, если null или пустая строка. */
   metaPixelId: string | null
+  /** Имя отправителя SMS.md для этого бренда. */
+  smsSender: string
   colors: {
     accent: string
     accentBg: string
@@ -36,6 +38,7 @@ export const brands: BrandConfig[] = [
     cartKey: 'kitch-pizza-cart',
     deliveryKey: 'kitch-pizza-delivery',
     metaPixelId: '342890895314551',
+    smsSender: 'Kitch!',
     colors: {
       accent: '#5F7600',
       accentBg: '#ECFFA1',
@@ -56,6 +59,7 @@ export const brands: BrandConfig[] = [
     cartKey: 'losos-cart',
     deliveryKey: 'losos-delivery',
     metaPixelId: '2033954120857667',
+    smsSender: 'LOSOS',
     colors: {
       accent: '#f25130',
       accentBg: '#ffe2dc',
@@ -76,6 +80,7 @@ export const brands: BrandConfig[] = [
     cartKey: 'kitch-pizza-cart', // TODO
     deliveryKey: 'kitch-pizza-delivery', // TODO
     metaPixelId: '910661225331040',
+    smsSender: 'TheSpot',
     colors: {
       accent: '#f25130',
       accentBg: '#ffebe7',
@@ -84,6 +89,8 @@ export const brands: BrandConfig[] = [
     },
   },
 ]
+
+export const BRANDS = brands
 
 export function getBrandByHost(host: string): BrandConfig {
   const hostname = (host.split(":")[0] ?? host).replace(/^www\./, '')

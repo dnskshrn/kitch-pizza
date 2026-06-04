@@ -82,6 +82,7 @@ import {
   posVariantsFromMenuEmbed,
 } from "@/lib/pos/menu-item-modal-row"
 import { printReceipt } from "@/lib/receipt-print"
+import { buildReceiptPricingBreakdown } from "@/lib/receipt-pricing-breakdown"
 import { writePosBrandSlugCookie } from "@/lib/pos/pos-brand-slug-cookie"
 import {
   getPosCartItemToppingDisplayLines,
@@ -1321,6 +1322,42 @@ export function OrderForm({
   const redeemBaniApplied = effectiveBonusPoints * 100
   const payableAfterBonusBani = Math.max(0, totalBani - redeemBaniApplied)
 
+  const receiptPricing = useMemo(
+    () =>
+      buildReceiptPricingBreakdown({
+        subtotalBani: listOrder?.subtotal,
+        itemDiscountBani: listOrder?.item_discount,
+        promoDiscountBani: listOrder?.promo_discount,
+        promoCode: listOrder?.promo_code,
+        bonusRedeemedMdl: effectiveBonusPoints,
+        deliveryFeeBani:
+          listOrder?.delivery_fee ?? effectiveEngineOutput?.deliveryFeeBani ?? 0,
+        showDelivery:
+          (listOrder?.delivery_mode ?? deliveryMode) === "delivery",
+        totalBani: payableAfterBonusBani,
+        goodsSubtotalBani: effectiveEngineOutput?.itemSubtotalBani,
+        appliedDiscounts: effectiveEngineOutput?.appliedDiscounts,
+        legacyDiscountBani:
+          listOrder?.discount ?? effectiveEngineOutput?.totalDiscountBani,
+      }),
+    [
+      deliveryMode,
+      effectiveBonusPoints,
+      effectiveEngineOutput?.appliedDiscounts,
+      effectiveEngineOutput?.deliveryFeeBani,
+      effectiveEngineOutput?.itemSubtotalBani,
+      effectiveEngineOutput?.totalDiscountBani,
+      listOrder?.delivery_fee,
+      listOrder?.delivery_mode,
+      listOrder?.discount,
+      listOrder?.item_discount,
+      listOrder?.promo_code,
+      listOrder?.promo_discount,
+      listOrder?.subtotal,
+      payableAfterBonusBani,
+    ],
+  )
+
   const receiptProps = useMemo(
     () => ({
       brandSlug: normalizePosBrandSlug(
@@ -1350,8 +1387,8 @@ export function OrderForm({
             (getPosCartItemUnitPriceBani(line, isAggregator) * line.qty) / 100,
         }
       }),
-      total: payableAfterBonusBani / 100,
-      bonusRedeemed: redeemBaniApplied > 0 ? redeemBaniApplied / 100 : undefined,
+      total: receiptPricing.totalMdl,
+      pricing: receiptPricing,
       bonusEarned: Math.floor(
         (payableAfterBonusBani / 100) *
           0.05 *
@@ -1370,39 +1407,23 @@ export function OrderForm({
         listOrder?.delivery_mode === "delivery" && !listOrder?.aggregator
           ? listOrder?.courier_name?.trim() || undefined
           : undefined,
-      deliveryFee:
-        listOrder?.delivery_mode === "delivery" &&
-        listOrder?.delivery_fee != null
-          ? listOrder.delivery_fee / 100
-          : undefined,
-      discount:
-        listOrder?.discount != null && listOrder.discount > 0
-          ? listOrder.discount / 100
-          : effectiveEngineOutput?.totalDiscountBani != null &&
-              effectiveEngineOutput.totalDiscountBani > 0
-            ? effectiveEngineOutput.totalDiscountBani / 100
-            : undefined,
-      discountLabel:
-        listOrder?.promo_code
-          ? `Промокод ${listOrder.promo_code}`
-          : Array.isArray((listOrder as { discount_rules_applied?: unknown })?.discount_rules_applied) &&
-              ((listOrder as { discount_rules_applied?: unknown }).discount_rules_applied as unknown[]).length > 0
-            ? "Акция"
-            : undefined,
     }),
     [
       cart,
       deliveryMode,
       effectiveEngineOutput?.bonusMultiplier,
-      effectiveEngineOutput?.totalDiscountBani,
+      form,
+      isAggregator,
+      listOrder?.aggregator,
       listOrder?.brand_slug,
+      listOrder?.courier_name,
       listOrder?.created_at,
+      listOrder?.delivery_address,
       listOrder?.delivery_mode,
-      listOrder?.discount,
       orderNumber,
       payableAfterBonusBani,
       posBonusBalance,
-      redeemBaniApplied,
+      receiptPricing,
       selectedBrand?.slug,
     ],
   )

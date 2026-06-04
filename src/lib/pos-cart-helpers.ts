@@ -169,6 +169,7 @@ export function isSamePosCartToppingConfig(
 }
 
 export type PosOrderItemToppingPayload = {
+  id: string
   name: string
   price: number
   quantity: number
@@ -181,6 +182,7 @@ export function posToppingsPayloadForDb(
   isAggregator = false,
 ): PosOrderItemToppingPayload[] {
   return migratePosCartToppingsFromLegacy(toppings).map((t) => ({
+    id: t.id,
     name: posToppingDisplayName(t, lang),
     price: Math.round(posToppingUnitPriceBani(t, isAggregator)),
     quantity: t.quantity,

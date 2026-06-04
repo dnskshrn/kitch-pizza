@@ -86,8 +86,23 @@ export function CustomersTable({ rows, loading }: CustomersTableProps) {
               <TableSkeleton />
             ) : (
               rows.map((row) => {
-                const siteCount = row.site_orders_count
-                const posterCount = row.poster_orders_count ?? 0
+                const ordersCount = Number(row.orders_count)
+                const posterCount = row.poster_orders_count
+                const ordersCell =
+                  posterCount != null ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-default underline decoration-dotted underline-offset-2">
+                          {ordersCount}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Сайт: {ordersCount} · Poster: {posterCount}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    ordersCount
+                  )
                 return (
                   <TableRow
                     key={row.id}
@@ -106,22 +121,13 @@ export function CustomersTable({ rows, loading }: CustomersTableProps) {
                       {formatDate(row.created_at)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-default underline decoration-dotted underline-offset-2">
-                            {row.total_orders_count}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          Сайт: {siteCount}, Poster: {posterCount}
-                        </TooltipContent>
-                      </Tooltip>
+                      {ordersCell}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {formatMdl(row.site_total_spend)}
+                      {formatMdl(Number(row.total_spent_bani))}
                     </TableCell>
                     <TableCell className="tabular-nums">
-                      {formatDate(row.last_order_at)}
+                      {formatDate(row.last_order_at ?? row.poster_last_order_at)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {row.bonus_balance > 0

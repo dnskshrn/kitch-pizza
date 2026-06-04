@@ -10,7 +10,8 @@ import { NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-const MODEL = "gpt-5.4"
+const STEP1_MODEL = "gpt-5.4-mini"
+const STEP2_MODEL = "gpt-5.4-nano"
 
 const STEP1_PROMPT = `You are an invoice OCR assistant. Extract all line items from this Moldovan invoice or receipt.
 The document may be in Romanian, Russian, or mixed with English brand names.
@@ -64,6 +65,7 @@ type CallOpenAIResult =
   | { ok: false; response: NextResponse }
 
 async function callOpenAI(
+  model: string,
   messages: { role: string; content: string | object[] }[],
   maxTokens: number
 ): Promise<CallOpenAIResult> {
@@ -77,7 +79,7 @@ async function callOpenAI(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       max_completion_tokens: maxTokens,
       messages,
     }),
@@ -132,6 +134,7 @@ export async function POST(request: Request) {
     const dataUrl = `data:${mime};base64,${base64}`
 
     const step1Result = await callOpenAI(
+      STEP1_MODEL,
       [
         {
           role: "user",
@@ -220,6 +223,7 @@ Return ONLY valid JSON:
 }`
 
     const step2Result = await callOpenAI(
+      STEP2_MODEL,
       [{ role: "user", content: step2Prompt }],
       2000
     )

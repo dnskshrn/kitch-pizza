@@ -1,7 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { format, parseISO } from "date-fns"
+import { useMemo, useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import type { Ingredient, Supplier } from "@/types/database"
+import { PeriodFilter } from "@/components/admin/finances/period-filter"
 import { InventorySearch } from "@/components/admin/inventory-search"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,11 +16,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Plus } from "lucide-react"
+import { Camera, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { toStoragePrice, toStorageQty } from "@/lib/inventory-units"
+import { createSupplyOrder } from "./actions"
+import {
+  InvoiceOcrModal,
+  type InvoiceOcrCompletePayload,
+} from "./invoice-ocr-modal"
 import { SupplyOrderDialog } from "./supply-order-dialog"
-import type { SupplyOrderViewModel } from "./types"
+import type { SupplyOrderViewModel, SupplyPeriodTotals } from "./types"
+
+const OCR_SUPPLY_VAT_RATE = 20
 
 function formatMdlTable(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(Number(value))) return "—"
@@ -30,12 +42,29 @@ type Props = {
   orders: SupplyOrderViewModel[]
   suppliers: Supplier[]
   ingredients: Ingredient[]
+  dateFrom: string
+  dateTo: string
+  periodTotals: SupplyPeriodTotals
 }
 
-export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
+function formatPeriodLabel(dateFrom: string, dateTo: string): string {
+  return `${format(parseISO(dateFrom), "dd.MM.yyyy")} – ${format(parseISO(dateTo), "dd.MM.yyyy")}`
+}
+
+export function SuppliesTable({
+  orders,
+  suppliers,
+  ingredients,
+  dateFrom,
+  dateTo,
+  periodTotals,
+}: Props) {
+  const router = useRouter()
   const [createOpen, setCreateOpen] = useState(false)
+  const [ocrModalOpen, setOcrModalOpen] = useState(false)
   const [viewOrder, setViewOrder] = useState<SupplyOrderViewModel | null>(null)
   const [search, setSearch] = useState("")
+  const [ocrPending, startOcrTransition] = useTransition()
 
   const supplierNameById = useMemo(() => {
     const m: Record<string, string> = {}
@@ -80,22 +109,134 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
     })
   }, [orders, search, supplierNameById, ingredientNameById])
 
+  const ocrSuppliers = useMemo(
+    () => suppliers.map((s) => ({ id: s.id, name: s.name })),
+    [suppliers]
+  )
+
+  const ocrIngredients = useMemo(
+    () =>
+      ingredients.map((i) => ({
+        id: i.id,
+        name: i.name,
+        unit: i.unit,
+      })),
+    [ingredients]
+  )
+
+  function handleOcrComplete(payload: InvoiceOcrCompletePayload) {
+    const supplierId = (payload.supplierId ?? payload.matched_supplier_id ?? "").trim()
+    if (!supplierId) {
+      toast.error("Выберите поставщика")
+      return
+    }
+
+    const payloadItems: {
+      ingredient_id: string
+      quantity: number
+      price_per_unit: number
+      vat_rate: number
+    }[] = []
+
+    for (const item of payload.items) {
+      if (!item.matched_ingredient_id) continue
+      const ing = ingredients.find((i) => i.id === item.matched_ingredient_id)
+      if (!ing) continue
+      if (item.display_quantity <= 0) continue
+
+      const priceExDisplay =
+        item.unit_price / (1 + OCR_SUPPLY_VAT_RATE / 100)
+      payloadItems.push({
+        ingredient_id: item.matched_ingredient_id,
+        quantity: toStorageQty(item.display_quantity, ing.unit),
+        price_per_unit: toStoragePrice(priceExDisplay, ing.unit),
+        vat_rate: OCR_SUPPLY_VAT_RATE,
+      })
+    }
+
+    if (payloadItems.length === 0) return
+
+    startOcrTransition(async () => {
+      try {
+        await createSupplyOrder({
+          supplier_id: supplierId,
+          delivery_date: payload.date ?? format(new Date(), "yyyy-MM-dd"),
+          note: "Создано из фото накладной",
+          items: payloadItems,
+        })
+        toast.success("Поставка создана")
+        setOcrModalOpen(false)
+        router.refresh()
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "Ошибка создания поставки"
+        )
+      }
+    })
+  }
+
   return (
     <>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Поставки</h1>
-        <Button className="gap-2" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Новая поставка
-        </Button>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold">Поставки</h1>
+          <p className="text-muted-foreground text-sm">
+            Период {formatPeriodLabel(dateFrom, dateTo)}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            onClick={() => setOcrModalOpen(true)}
+            disabled={ocrPending}
+          >
+            <Camera className="h-4 w-4" />
+            Из фото
+          </Button>
+          <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Новая поставка
+          </Button>
+        </div>
       </div>
 
-      <div className="mb-4 max-w-md">
-        <InventorySearch
-          value={search}
-          onChange={setSearch}
-          placeholder="Search supply orders…"
-        />
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="max-w-md flex-1">
+          <InventorySearch
+            value={search}
+            onChange={setSearch}
+            placeholder="Поиск по поставщику, позициям…"
+          />
+        </div>
+        <PeriodFilter dateFrom={dateFrom} dateTo={dateTo} />
+      </div>
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border bg-card px-4 py-3">
+          <p className="text-muted-foreground text-xs">Активных поставок</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums">
+            {periodTotals.orderCount}
+          </p>
+          {periodTotals.annulledCount > 0 ? (
+            <p className="text-muted-foreground mt-1 text-xs">
+              +{periodTotals.annulledCount} аннулированных (не в сумме)
+            </p>
+          ) : null}
+        </div>
+        <div className="rounded-lg border bg-card px-4 py-3">
+          <p className="text-muted-foreground text-xs">Потрачено без НДС</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums">
+            {formatMdlTable(periodTotals.totalExVat)} лей
+          </p>
+        </div>
+        <div className="rounded-lg border bg-card px-4 py-3">
+          <p className="text-muted-foreground text-xs">Потрачено с НДС</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums">
+            {formatMdlTable(periodTotals.totalIncVat)} лей
+          </p>
+        </div>
       </div>
 
       <Table>
@@ -117,7 +258,7 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
                 colSpan={7}
                 className="text-muted-foreground text-center"
               >
-                Пока нет поставок
+                Нет поставок за выбранный период
               </TableCell>
             </TableRow>
           ) : filteredOrders.length === 0 ? (
@@ -197,6 +338,14 @@ export function SuppliesTable({ orders, suppliers, ingredients }: Props) {
           )}
         </TableBody>
       </Table>
+
+      <InvoiceOcrModal
+        open={ocrModalOpen}
+        onOpenChange={setOcrModalOpen}
+        suppliers={ocrSuppliers}
+        ingredients={ocrIngredients}
+        onComplete={handleOcrComplete}
+      />
 
       <SupplyOrderDialog
         open={createOpen}

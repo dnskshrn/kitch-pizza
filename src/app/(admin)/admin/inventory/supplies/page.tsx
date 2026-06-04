@@ -1,9 +1,81 @@
+import { endOfMonth, format, startOfMonth } from "date-fns"
 import { createClient } from "@/lib/supabase/server"
 import type { Ingredient, Supplier } from "@/types/database"
 import { SuppliesTable } from "./supplies-table"
-import type { SupplyOrderViewModel } from "./types"
+import type { SupplyOrderViewModel, SupplyPeriodTotals } from "./types"
 
 export const dynamic = "force-dynamic"
+
+type PageProps = {
+  searchParams?: {
+    from?: string | string[]
+    to?: string | string[]
+  }
+}
+
+function toYmd(value: Date): string {
+  return format(value, "yyyy-MM-dd")
+}
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0]
+  return value
+}
+
+function isValidYmd(value: string | undefined): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function resolveDateRange(searchParams: PageProps["searchParams"]): {
+  from: string
+  to: string
+} {
+  const now = new Date()
+  const defaultFrom = toYmd(startOfMonth(now))
+  const defaultTo = toYmd(endOfMonth(now))
+
+  const from = firstParam(searchParams?.from)
+  const to = firstParam(searchParams?.to)
+
+  if (!isValidYmd(from) || !isValidYmd(to) || from > to) {
+    return { from: defaultFrom, to: defaultTo }
+  }
+
+  return { from, to }
+}
+
+function deliveryDateYmd(deliveryDate: string): string {
+  return (deliveryDate ?? "").slice(0, 10)
+}
+
+function isInPeriod(
+  deliveryDate: string,
+  from: string,
+  to: string,
+): boolean {
+  const ymd = deliveryDateYmd(deliveryDate)
+  if (!ymd) return false
+  return ymd >= from && ymd <= to
+}
+
+function computePeriodTotals(orders: SupplyOrderViewModel[]): SupplyPeriodTotals {
+  let orderCount = 0
+  let annulledCount = 0
+  let totalExVat = 0
+  let totalIncVat = 0
+
+  for (const o of orders) {
+    if (o.annulled_at != null) {
+      annulledCount += 1
+      continue
+    }
+    orderCount += 1
+    totalExVat += o.total_cost_ex_vat ?? 0
+    totalIncVat += o.total_cost_inc_vat ?? 0
+  }
+
+  return { orderCount, annulledCount, totalExVat, totalIncVat }
+}
 
 type RawSupplyItemRow = {
   id: string
@@ -79,7 +151,10 @@ function toSupplyOrderViewModel(row: RawSupplyOrderRow): SupplyOrderViewModel {
   }
 }
 
-export default async function AdminInventorySuppliesPage() {
+export default async function AdminInventorySuppliesPage({
+  searchParams,
+}: PageProps) {
+  const { from, to } = resolveDateRange(searchParams)
   const supabase = await createClient()
 
   const [ordersRes, suppliersRes, ingredientsRes] = await Promise.all([
@@ -107,8 +182,11 @@ export default async function AdminInventorySuppliesPage() {
         )
       `
       )
+      .gte("delivery_date", from)
+      .lte("delivery_date", to)
+      .order("delivery_date", { ascending: false })
       .order("created_at", { ascending: false }),
-    supabase.from("suppliers").select("*").order("name"),
+    supabase.from("suppliers").select("id, name, is_active").order("name"),
     supabase.from("ingredients").select("*").order("name"),
   ])
 
@@ -137,14 +215,19 @@ export default async function AdminInventorySuppliesPage() {
   const orders = (ordersRes.data ?? []).map((row) =>
     toSupplyOrderViewModel(row as unknown as RawSupplyOrderRow)
   )
+  const periodOrders = orders.filter((o) => isInPeriod(o.delivery_date, from, to))
+  const periodTotals = computePeriodTotals(periodOrders)
   const suppliers = (suppliersRes.data ?? []) as Supplier[]
   const ingredients = (ingredientsRes.data ?? []) as Ingredient[]
 
   return (
     <SuppliesTable
-      orders={orders}
+      orders={periodOrders}
       suppliers={suppliers}
       ingredients={ingredients}
+      dateFrom={from}
+      dateTo={to}
+      periodTotals={periodTotals}
     />
   )
 }

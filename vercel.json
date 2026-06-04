@@ -20,11 +20,5 @@
       "destination": "/:path*",
       "permanent": true
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/feedback-sms",
-      "schedule": "*/10 * * * *"
-    }
   ]
 }

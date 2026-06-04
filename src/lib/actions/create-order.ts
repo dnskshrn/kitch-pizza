@@ -1,13 +1,18 @@
 "use server"
 
 import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
-import { getCartItemPrice, type CartLang } from "@/lib/cart-helpers"
+import type { CartLang } from "@/lib/cart-helpers"
 import { migrateCartToppingsFromLegacy } from "@/lib/cart-toppings"
 import { redeemBonus } from "@/lib/bonus"
 import { getBrandId } from "@/lib/get-brand-id"
-import { getMessages } from "@/lib/i18n/storefront"
+import { getMessages, promoErrorMessage } from "@/lib/i18n/storefront"
+import {
+  calculateOrderPricing,
+  type CartItem as PricingCartItem,
+} from "@/lib/pricing"
 import { createServiceSupabaseClient } from "@/lib/supabase/server"
 import type { CartItem } from "@/types/cart"
+import type { PromoCodeValidationError } from "@/types/database"
 
 export type CreateOrderPayload = {
   lang: CartLang
@@ -16,7 +21,7 @@ export type CreateOrderPayload = {
   deliveryMode: "delivery" | "pickup"
   /** Полная строка адреса / самовывоза для сохранения в БД */
   deliveryAddress: string
-  paymentMethod: "cash" | "card"
+  paymentMethod: "cash" | "card" | "online_card"
   changeFromBani: number | null
   deliveryTimeMode: "asap" | "scheduled"
   /** При scheduled — время слота вида HH:mm */
@@ -38,11 +43,12 @@ export type CreateOrderPayload = {
 }
 
 export type CreateOrderResult =
-  | { success: true; orderNumber: number }
+  | { success: true; orderNumber: number; orderId: string }
   | { success: false; error: string }
 
 function toppingsPayload(cartItem: CartItem, lang: CartLang) {
   return migrateCartToppingsFromLegacy(cartItem).map((t) => ({
+    id: t.id,
     name: lang === "RO" ? t.name_ro : t.name_ru,
     price: t.price,
     quantity: t.quantity,
@@ -66,6 +72,14 @@ function orderItemSizeAndVariantForInsert(ci: CartItem): {
     return { size: ci.selectedSize, variant_id: null }
   }
   return { size: null, variant_id: null }
+}
+
+function storefrontItemsToPricingItems(items: CartItem[]): PricingCartItem[] {
+  return items.map((ci) => ({
+    menu_item_id: ci.menuItem.id,
+    quantity: ci.quantity,
+    ...(ci.variantId ? { variant_id: ci.variantId } : {}),
+  }))
 }
 
 function deliveryCoordsAreUsable(
@@ -118,7 +132,11 @@ async function sendTelegramNotification(order: {
   const modeLabel =
     order.deliveryMode === "pickup" ? "🏃 Самовывоз" : "🚗 Доставка"
   const payLabel =
-    order.paymentMethod === "card" ? "💳 Карта" : "💵 Наличные"
+    order.paymentMethod === "card"
+      ? "💳 Карта"
+      : order.paymentMethod === "online_card"
+        ? "💳 Онлайн"
+        : "💵 Наличные"
   const itemLines = order.items
     .map(
       (i) =>
@@ -184,6 +202,85 @@ async function sendTelegramNotification(order: {
   }
 }
 
+function orderItemSizeForTelegram(
+  size: string | null | undefined,
+): string | undefined {
+  if (typeof size !== "string" || size.length === 0) return undefined
+  const lower = size.toLowerCase()
+  if (lower === "s" || lower === "l") {
+    return lower === "s" ? "S" : "L"
+  }
+  return size
+}
+
+export async function sendNewOrderTelegramNotification(
+  orderId: string,
+): Promise<void> {
+  const supabase = createServiceSupabaseClient()
+
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .select(
+      "order_number, user_phone, user_name, delivery_address, delivery_mode, payment_method, total, discount, delivery_fee, bonuses_redeemed, comment, brand_id, brands(name)",
+    )
+    .eq("id", orderId)
+    .maybeSingle()
+
+  if (orderError || !order) {
+    console.error(
+      "[sendNewOrderTelegramNotification] order fetch",
+      orderError?.message ?? "not found",
+    )
+    return
+  }
+
+  const { data: itemRows, error: itemsError } = await supabase
+    .from("order_items")
+    .select("item_name, quantity, price, size")
+    .eq("order_id", orderId)
+
+  if (itemsError) {
+    console.error(
+      "[sendNewOrderTelegramNotification] order_items",
+      itemsError.message,
+    )
+    return
+  }
+
+  const brandJoin = order.brands as { name: string } | { name: string }[] | null
+  const brandName = Array.isArray(brandJoin)
+    ? (brandJoin[0]?.name ?? "Заказ")
+    : (brandJoin?.name ?? "Заказ")
+
+  await sendTelegramNotification({
+    orderNumber: order.order_number as number,
+    brandName,
+    userPhone: (order.user_phone as string) ?? "",
+    userName: (order.user_name as string | null) ?? null,
+    deliveryAddress: (order.delivery_address as string) ?? "",
+    deliveryMode: order.delivery_mode as string,
+    paymentMethod: order.payment_method as string,
+    total: Number(order.total),
+    discount: Number(order.discount),
+    deliveryFee: Number(order.delivery_fee),
+    bonusesRedeemed: Number(order.bonuses_redeemed ?? 0),
+    comment: (order.comment as string | null) ?? null,
+    items: (itemRows ?? []).map((row) => {
+      const qty = Math.max(1, Number(row.quantity))
+      const unitBani = Math.round(Number(row.price) / qty)
+      const sizeTelegram = orderItemSizeForTelegram(
+        row.size as string | null | undefined,
+      )
+      return {
+        item_name: row.item_name as string,
+        quantity: qty,
+        price: unitBani,
+        ...(sizeTelegram ? { size: sizeTelegram } : {}),
+      }
+    }),
+  })
+}
+
 /** Витрина: `resolveBrandId` = getBrandId; админ/POS: getAdminBrandId. */
 export async function executeCreateOrder(
   payload: CreateOrderPayload,
@@ -238,6 +335,45 @@ export async function executeCreateOrder(
     }
   }
 
+  const profileId = payload.profile_id?.trim() || null
+  const deliveryFeeBani =
+    payload.deliveryMode === "pickup" ? 0 : payload.deliveryFeeBani
+
+  let pricing
+  try {
+    pricing = await calculateOrderPricing(supabase, {
+      cartItems: storefrontItemsToPricingItems(payload.items),
+      brandId,
+      promoCode: payload.promoCode,
+      profileId,
+      bonusesRequested: profileId ? (payload.bonuses_redeemed ?? 0) : 0,
+      deliveryFeeBani,
+    })
+  } catch (e) {
+    console.error(
+      "[createOrder] pricing",
+      e instanceof Error ? e.message : e,
+    )
+    return { success: false, error: t.orderErrors.serverUnavailable }
+  }
+
+  if (payload.promoCode?.trim() && pricing.promo_error) {
+    return {
+      success: false,
+      error: promoErrorMessage(
+        { code: pricing.promo_error as PromoCodeValidationError },
+        payload.lang,
+      ),
+    }
+  }
+
+  const orderDiscountBani =
+    pricing.item_discount_bani + pricing.promo_discount_bani
+  const promoCodeSaved =
+    pricing.promo_code_id != null
+      ? payload.promoCode?.trim().toUpperCase() ?? null
+      : null
+
   const insertRow = {
     brand_id: brandId,
     user_name: name,
@@ -249,15 +385,19 @@ export async function executeCreateOrder(
     delivery_lng,
     payment_method: payload.paymentMethod,
     change_from: payload.changeFromBani,
-    total: payload.grandTotalBani,
-    delivery_fee: payload.deliveryFeeBani,
-    discount: payload.discountBani,
-    promo_code: payload.promoCode?.trim() || null,
+    total: pricing.total_bani,
+    subtotal: pricing.subtotal_bani,
+    item_discount: pricing.item_discount_bani,
+    promo_discount: pricing.promo_discount_bani,
+    discount: orderDiscountBani,
+    discount_rules_applied: pricing.discount_rules_applied,
+    delivery_fee: pricing.delivery_fee_bani,
+    promo_code: promoCodeSaved,
     scheduled_time: scheduledTime,
     comment: payload.comment?.trim() || null,
-    bonuses_redeemed: payload.bonuses_redeemed ?? 0,
+    bonuses_redeemed: pricing.bonuses_redeemed,
     bonuses_earned: 0,
-    profile_id: payload.profile_id?.trim() || null,
+    profile_id: profileId,
   }
 
   const { data: orderRow, error: orderError } = await supabase
@@ -275,9 +415,11 @@ export async function executeCreateOrder(
   const orderNumber = orderRow.order_number as number
   const lang = payload.lang
 
-  const rows = payload.items.map((ci) => {
-    const unitBani = getCartItemPrice(ci)
-    const lineTotalBani = unitBani * ci.quantity
+  const rows = payload.items.map((ci, index) => {
+    const priced = pricing.items[index]
+    if (!priced) {
+      throw new Error("[createOrder] pricing items count mismatch")
+    }
     const { size, variant_id } = orderItemSizeAndVariantForInsert(ci)
     return {
       order_id: orderId,
@@ -289,7 +431,9 @@ export async function executeCreateOrder(
       size,
       quantity: ci.quantity,
       toppings: toppingsPayload(ci, lang),
-      price: lineTotalBani,
+      price: priced.price_bani * priced.quantity,
+      original_price: priced.original_price_bani * priced.quantity,
+      item_discount_pct: priced.item_discount_pct,
     }
   })
 
@@ -307,7 +451,7 @@ export async function executeCreateOrder(
     return { success: false, error: t.orderErrors.saveItemsFailed }
   }
 
-  const pid = payload.profile_id?.trim()
+  const pid = profileId
   if (pid && name) {
     try {
       const { error: profileNameError } = await supabase
@@ -329,7 +473,7 @@ export async function executeCreateOrder(
     }
   }
 
-  const redeemed = payload.bonuses_redeemed ?? 0
+  const redeemed = pricing.bonuses_redeemed
   if (redeemed > 0 && pid) {
     try {
       await redeemBonus(pid, orderId, redeemed)
@@ -341,57 +485,18 @@ export async function executeCreateOrder(
     }
   }
 
-  const { data: brandRow } = await supabase
-    .from("brands")
-    .select("name")
-    .eq("id", brandId)
-    .maybeSingle()
-  const brandName =
-    (brandRow as { name: string } | null)?.name ?? "Заказ"
-
-  try {
-    await sendTelegramNotification({
-      orderNumber,
-      brandName,
-      userPhone: phone,
-      userName: name || null,
-      deliveryAddress: payload.deliveryAddress.trim(),
-      deliveryMode: payload.deliveryMode,
-      paymentMethod: payload.paymentMethod,
-      total: payload.grandTotalBani,
-      discount: payload.discountBani,
-      deliveryFee: payload.deliveryFeeBani,
-      bonusesRedeemed: redeemed,
-      comment: payload.comment?.trim() ?? null,
-      items: payload.items.map((ci) => {
-        const unitBani = getCartItemPrice(ci)
-        const { size } = orderItemSizeAndVariantForInsert(ci)
-        let sizeTelegram: string | undefined
-        if (typeof size === "string" && size.length > 0) {
-          const lower = size.toLowerCase()
-          if (lower === "s" || lower === "l") {
-            sizeTelegram = lower === "s" ? "S" : "L"
-          } else {
-            sizeTelegram = size
-          }
-        }
-        return {
-          item_name:
-            lang === "RO" ? ci.menuItem.name_ro : ci.menuItem.name_ru,
-          quantity: ci.quantity,
-          price: unitBani,
-          ...(sizeTelegram ? { size: sizeTelegram } : {}),
-        }
-      }),
-    })
-  } catch (e) {
-    console.error(
-      "[createOrder] telegram notification",
-      e instanceof Error ? e.message : e,
-    )
+  if (insertRow.payment_method !== "online_card") {
+    try {
+      await sendNewOrderTelegramNotification(orderId)
+    } catch (e) {
+      console.error(
+        "[createOrder] telegram notification",
+        e instanceof Error ? e.message : e,
+      )
+    }
   }
 
-  return { success: true, orderNumber }
+  return { success: true, orderNumber, orderId }
 }
 
 export async function createOrder(

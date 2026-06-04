@@ -21,6 +21,16 @@ import { useMemo, type ReactNode } from "react"
 const btnMotion = "cursor-pointer transition-all duration-200 ease-out"
 const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
 
+export type CheckoutPricingBreakdown = {
+  subtotalBani: number
+  itemDiscountBani: number
+  promoDiscountBani: number
+  bonusesRedeemedMdl: number
+  deliveryFeeBani: number
+  totalBani: number
+  loading?: boolean
+}
+
 export type OrderSummaryProps = {
   lang: CartLang
   /** Пояснение про категории без авто-скидки (корзина / checkout). */
@@ -40,6 +50,8 @@ export type OrderSummaryProps = {
   grandTotal: number
   /** Списание бонусов в пунктах (1 пункт = 1 MDL к снятию с итога). */
   bonusesRedeemed?: number
+  /** Детализация из `/checkout/pricing`; если передана — показывается вместо legacy-строк. */
+  pricingBreakdown?: CheckoutPricingBreakdown | null
   /** Если не передан — кнопка «Оформить заказ» не показывается (например, страница успеха). */
   onCheckout?: () => void | Promise<void>
   checkoutSubmitting?: boolean
@@ -61,6 +73,7 @@ export function OrderSummary({
   outOfZone = false,
   grandTotal,
   bonusesRedeemed = 0,
+  pricingBreakdown = null,
   children = null,
   onCheckout,
   checkoutSubmitting = false,
@@ -138,72 +151,143 @@ export function OrderSummary({
         })}
       </ul>
 
-      <div className="mt-6 space-y-2 border-t border-[#f5f5f5] pt-4">
-        <div className="flex items-center justify-between text-[14px] font-medium text-[rgba(36,36,36,0.5)]">
-          <span>{goodsPhrase(itemCount, lang)}</span>
-          <span className="tabular-nums">{formatMoney(subtotal, lang)}</span>
-        </div>
-        <div className="space-y-1">
-          <div className="flex items-start justify-between gap-3 text-[14px] font-medium text-[rgba(36,36,36,0.5)]">
-            <span className="inline-flex min-w-0 items-center gap-1">
-              {t.checkout.deliveryCost}
-              <Info className="size-[14px] shrink-0 opacity-60" strokeWidth={2} />
-            </span>
-            <span
-              className={cn(
-                "shrink-0 text-right tabular-nums",
-                deliveryLine.amountLine.includes("--")
-                  ? "text-[rgba(36,36,36,0.45)]"
-                  : "font-medium text-[#242424]",
-              )}
-            >
-              {deliveryLine.amountLine}
-            </span>
-          </div>
+      {children ? <div className="mt-4 border-t border-[#f5f5f5] pt-4">{children}</div> : null}
+
+      {pricingBreakdown ? (
+        <div className="mt-6 space-y-2 border-t border-[#f5f5f5] pt-4 font-mono text-[13px] leading-relaxed text-[#242424]">
+          <BreakdownRow
+            label={t.checkout.pricingSubtotal}
+            value={formatMoney(pricingBreakdown.subtotalBani, lang)}
+          />
+          {pricingBreakdown.itemDiscountBani > 0 ? (
+            <BreakdownRow
+              label={t.checkout.pricingItemDiscount}
+              value={`−${formatMoney(pricingBreakdown.itemDiscountBani, lang)}`}
+              accent
+            />
+          ) : null}
+          {pricingBreakdown.promoDiscountBani > 0 ? (
+            <BreakdownRow
+              label={t.checkout.pricingPromo}
+              value={`−${formatMoney(pricingBreakdown.promoDiscountBani, lang)}`}
+              accent
+            />
+          ) : null}
+          {pricingBreakdown.bonusesRedeemedMdl > 0 ? (
+            <BreakdownRow
+              label={t.checkout.pricingBonuses}
+              value={`−${pricingBreakdown.bonusesRedeemedMdl} MDL`}
+              accent
+            />
+          ) : null}
+          <BreakdownRow
+            label={t.checkout.pricingDelivery}
+            value={
+              pricingBreakdown.deliveryFeeBani > 0
+                ? `+${formatMoney(pricingBreakdown.deliveryFeeBani, lang)}`
+                : deliveryLine.amountLine
+            }
+          />
           {deliveryLine.sublineKind === "addressCost" ? (
-            <p className="text-[12px] font-normal leading-snug text-[rgba(36,36,36,0.45)]">
+            <p className="font-sans text-[12px] font-normal leading-snug text-[rgba(36,36,36,0.45)]">
               {t.cart.deliveryCostAddressHint}
             </p>
           ) : null}
           {deliveryLine.sublineKind === "outOfZone" ? (
-            <p className="text-[12px] font-normal leading-snug text-red-600" role="alert">
+            <p
+              className="font-sans text-[12px] font-normal leading-snug text-red-600"
+              role="alert"
+            >
               {t.cart.deliveryOutsideZoneHint}
             </p>
           ) : null}
-        </div>
-        {discount > 0 ? (
-          <div className="flex items-center justify-between text-[14px] font-medium">
-            <span className="text-[rgba(36,36,36,0.5)]">{t.cart.discount}</span>
-            <span className="storefront-modal-accent tabular-nums">
-              −{formatMoney(discount, lang)}
-            </span>
-          </div>
-        ) : null}
-        {excludedDiscountNotice != null &&
-        excludedDiscountNotice.categories.length > 0 ? (
-          <StorefrontDiscountExcludedNotice
-            categories={excludedDiscountNotice.categories}
-            mode={excludedDiscountNotice.mode}
+          {excludedDiscountNotice != null &&
+          excludedDiscountNotice.categories.length > 0 ? (
+            <div className="font-sans pt-1">
+              <StorefrontDiscountExcludedNotice
+                categories={excludedDiscountNotice.categories}
+                mode={excludedDiscountNotice.mode}
+              />
+            </div>
+          ) : null}
+          <div className="border-t border-dashed border-[#e0e0e0] pt-2" />
+          <BreakdownRow
+            label={t.checkout.pricingTotal}
+            value={
+              pricingBreakdown.loading
+                ? t.checkout.pricingLoading
+                : formatMoney(pricingBreakdown.totalBani, lang)
+            }
+            strong
           />
-        ) : null}
-        {bonusesRedeemed > 0 ? (
-          <div className="flex items-center justify-between text-[14px] font-medium">
-            <span className="text-[rgba(36,36,36,0.5)]">{t.bonus.redeemed}:</span>
-            <span className="storefront-modal-accent tabular-nums">
-              −{bonusesRedeemed} MDL
+        </div>
+      ) : (
+        <div className="mt-6 space-y-2 border-t border-[#f5f5f5] pt-4">
+          <div className="flex items-center justify-between text-[14px] font-medium text-[rgba(36,36,36,0.5)]">
+            <span>{goodsPhrase(itemCount, lang)}</span>
+            <span className="tabular-nums">{formatMoney(subtotal, lang)}</span>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-start justify-between gap-3 text-[14px] font-medium text-[rgba(36,36,36,0.5)]">
+              <span className="inline-flex min-w-0 items-center gap-1">
+                {t.checkout.deliveryCost}
+                <Info className="size-[14px] shrink-0 opacity-60" strokeWidth={2} />
+              </span>
+              <span
+                className={cn(
+                  "shrink-0 text-right tabular-nums",
+                  deliveryLine.amountLine.includes("--")
+                    ? "text-[rgba(36,36,36,0.45)]"
+                    : "font-medium text-[#242424]",
+                )}
+              >
+                {deliveryLine.amountLine}
+              </span>
+            </div>
+            {deliveryLine.sublineKind === "addressCost" ? (
+              <p className="text-[12px] font-normal leading-snug text-[rgba(36,36,36,0.45)]">
+                {t.cart.deliveryCostAddressHint}
+              </p>
+            ) : null}
+            {deliveryLine.sublineKind === "outOfZone" ? (
+              <p className="text-[12px] font-normal leading-snug text-red-600" role="alert">
+                {t.cart.deliveryOutsideZoneHint}
+              </p>
+            ) : null}
+          </div>
+          {discount > 0 ? (
+            <div className="flex items-center justify-between text-[14px] font-medium">
+              <span className="text-[rgba(36,36,36,0.5)]">{t.cart.discount}</span>
+              <span className="storefront-modal-accent tabular-nums">
+                −{formatMoney(discount, lang)}
+              </span>
+            </div>
+          ) : null}
+          {excludedDiscountNotice != null &&
+          excludedDiscountNotice.categories.length > 0 ? (
+            <StorefrontDiscountExcludedNotice
+              categories={excludedDiscountNotice.categories}
+              mode={excludedDiscountNotice.mode}
+            />
+          ) : null}
+          {bonusesRedeemed > 0 ? (
+            <div className="flex items-center justify-between text-[14px] font-medium">
+              <span className="text-[rgba(36,36,36,0.5)]">{t.bonus.redeemed}:</span>
+              <span className="storefront-modal-accent tabular-nums">
+                −{bonusesRedeemed} MDL
+              </span>
+            </div>
+          ) : null}
+          <div className="mt-4 flex items-center justify-between border-t border-[#f0f0f0] pt-4">
+            <span className="text-[16px] font-bold text-[#242424]">
+              {t.checkout.orderTotal}
+            </span>
+            <span className="text-[14px] font-bold tabular-nums text-[#242424]">
+              {formatMoney(grandTotal, lang)}
             </span>
           </div>
-        ) : null}
-      </div>
-
-      {children ? <div className="mt-4">{children}</div> : null}
-
-      <div className="mt-6 flex items-center justify-between border-t border-[#f0f0f0] pt-4">
-        <span className="text-[16px] font-bold text-[#242424]">{t.checkout.orderTotal}</span>
-        <span className="text-[14px] font-bold tabular-nums text-[#242424]">
-          {formatMoney(grandTotal, lang)}
-        </span>
-      </div>
+        </div>
+      )}
 
       {showCheckoutCta ? (
         <div className="mt-6 hidden md:block">
@@ -232,6 +316,38 @@ export function OrderSummary({
           ) : null}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function BreakdownRow({
+  label,
+  value,
+  accent = false,
+  strong = false,
+}: {
+  label: string
+  value: string
+  accent?: boolean
+  strong?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-baseline justify-between gap-4",
+        strong && "text-[14px] font-bold",
+      )}
+    >
+      <span className={cn(!strong && "text-[#808080]")}>{label}:</span>
+      <span
+        className={cn(
+          "shrink-0 tabular-nums",
+          accent && !strong && "text-[#5F7600]",
+          strong && "text-[#242424]",
+        )}
+      >
+        {value}
+      </span>
     </div>
   )
 }

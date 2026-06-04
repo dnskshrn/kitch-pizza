@@ -6,6 +6,7 @@ import { ClientContainer } from "@/components/client/client-container"
 import { CheckoutProgressSteps } from "@/components/client/checkout/checkout-progress-steps"
 import { OrderSummary } from "@/components/client/checkout/order-summary"
 import { CheckoutSkeleton } from "@/components/client/storefront-skeletons"
+import { useCheckoutPricing } from "@/hooks/use-checkout-pricing"
 import { promoErrorMessage, formatStorefrontExcludedCategoryList, type StorefrontMessages } from "@/lib/i18n/storefront"
 import { usePersistStoreHydration } from "@/hooks/use-persist-store-hydration"
 import { useStoreOpen } from "@/hooks/use-store-open"
@@ -49,7 +50,9 @@ import {
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import type { DeliveryZoneForEngine, DiscountRule } from "@/types/promotions"
+import type { PromoCodeValidationError } from "@/types/database"
 import {
   useCallback,
   useEffect,
@@ -266,14 +269,16 @@ export function CheckoutView({
   const [showCustomTimeSelect, setShowCustomTimeSelect] = useState(false)
   const [promoInput, setPromoInput] = useState("")
   const [comment, setComment] = useState("")
-  const [payment, setPayment] = useState<"cash" | "card">("cash")
+  const [payment, setPayment] = useState<"cash" | "card" | "online_card">(
+    "cash",
+  )
   const [changeFrom, setChangeFrom] = useState("")
 
   const [errors, setErrors] = useState<FieldErrors>({})
   const [submitAttempted, setSubmitAttempted] = useState(false)
   const [orderSubmitError, setOrderSubmitError] = useState<string | null>(null)
   const [orderSubmitting, setOrderSubmitting] = useState(false)
-  const [bonusesRedeemed, setBonusesRedeemed] = useState(0)
+  const [bonusesToRedeem, setBonusesToRedeem] = useState(0)
 
   const nameRef = useRef<HTMLInputElement>(null)
   const phoneRef = useRef<HTMLInputElement>(null)
@@ -393,10 +398,51 @@ export function CheckoutView({
     Math.max(0, Math.round(engineOutput.totalDiscountBani)),
   )
 
-  const deliveryFeeBani = getDeliveryFeeBani(subtotal)
-  const discountedGoodsBani = Math.max(0, subtotal - discount)
-  const grandTotal = discountedGoodsBani + deliveryFeeBani
-  const checkoutGrandTotalBani = Math.max(0, grandTotal - bonusesRedeemed * 100)
+  const cartGoodsSubtotalBani = Math.max(0, subtotal - discount)
+  const [deliveryFeeForPricing, setDeliveryFeeForPricing] = useState(0)
+
+  useEffect(() => {
+    setDeliveryFeeForPricing(getDeliveryFeeBani(cartGoodsSubtotalBani))
+  }, [cartGoodsSubtotalBani, getDeliveryFeeBani, mode, selectedZone])
+
+  const { pricing, loading: pricingLoading, error: pricingError } =
+    useCheckoutPricing({
+      brandSlug,
+      items,
+      deliveryMode: mode,
+      deliveryFeeBani: deliveryFeeForPricing,
+      promoCode: appliedPromo?.code ?? null,
+      bonusesToRedeem: appliedPromo ? 0 : bonusesToRedeem,
+      enabled: hydrated && items.length > 0,
+    })
+
+  useEffect(() => {
+    if (!pricing) return
+    const nextFee = getDeliveryFeeBani(
+      Math.max(0, pricing.subtotal_bani - pricing.item_discount_bani),
+    )
+    setDeliveryFeeForPricing((prev) => (prev === nextFee ? prev : nextFee))
+  }, [pricing, getDeliveryFeeBani])
+
+  useEffect(() => {
+    if (appliedPromo) setBonusesToRedeem(0)
+  }, [appliedPromo])
+
+  const deliveryFeeBani = pricing?.delivery_fee_bani ?? deliveryFeeForPricing
+
+  const pricingBreakdown = pricing
+    ? {
+        subtotalBani: pricing.subtotal_bani,
+        itemDiscountBani: pricing.item_discount_bani,
+        promoDiscountBani: pricing.promo_discount_bani,
+        bonusesRedeemedMdl: pricing.bonuses_redeemed,
+        deliveryFeeBani: pricing.delivery_fee_bani,
+        totalBani: pricing.total_bani,
+        loading: pricingLoading,
+      }
+    : null
+
+  const checkoutGrandTotalBani = pricing?.total_bani ?? 0
 
   const hasResolvedAddress = Boolean(resolvedAddress?.trim())
   const deliveryAddressCardBg = !hasResolvedAddress
@@ -451,11 +497,27 @@ export function CheckoutView({
       scrollToFirstError(next)
       return
     }
+    if (!pricing || pricingLoading) {
+      setOrderSubmitError(t.checkout.pricingLoading)
+      return
+    }
+    if (appliedPromo?.code && pricing.promo_error) {
+      setOrderSubmitError(
+        promoErrorMessage(
+          { code: pricing.promo_error as PromoCodeValidationError },
+          lang,
+        ),
+      )
+      return
+    }
     setOrderSubmitError(null)
     setOrderSubmitting(true)
+    let redirectingToMaib = false
     try {
       const changeFromBani =
         payment === "cash" ? parseChangeFromLeiToBani(changeFrom) : null
+      const orderDiscountBani =
+        pricing.item_discount_bani + pricing.promo_discount_bani
       const result = await createOrder({
         lang,
         userName: name.trim(),
@@ -477,11 +539,11 @@ export function CheckoutView({
           deliveryTimeMode === "scheduled" ? scheduledTime : null,
         comment: comment.trim() || null,
         promoCode: appliedPromo?.code ?? null,
-        subtotalBani: subtotal,
-        discountBani: discount,
-        deliveryFeeBani,
-        grandTotalBani: checkoutGrandTotalBani,
-        bonuses_redeemed: bonusesRedeemed,
+        subtotalBani: pricing.subtotal_bani,
+        discountBani: orderDiscountBani,
+        deliveryFeeBani: pricing.delivery_fee_bani,
+        grandTotalBani: pricing.total_bani,
+        bonuses_redeemed: pricing.bonuses_redeemed,
         profile_id: profile?.id ?? null,
         delivery_lat:
           mode === "delivery" &&
@@ -501,17 +563,49 @@ export function CheckoutView({
             : null,
         items,
       })
-      if (result.success) {
-        router.push(
-          `/checkout/success?name=${encodeURIComponent(name.trim())}&order=${result.orderNumber}`,
-        )
-      } else {
+      if (!result.success) {
         setOrderSubmitError(result.error)
+        return
       }
+
+      if (payment === "online_card") {
+        try {
+          const res = await fetch(`/api/${brandSlug}/checkout/pay`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orderId: result.orderId }),
+          })
+          if (!res.ok) {
+            const err = (await res.json().catch(() => ({}))) as {
+              message?: string
+            }
+            throw new Error(err.message ?? "Payment gateway error")
+          }
+          const { payUrl } = (await res.json()) as { payUrl?: string }
+          if (!payUrl) {
+            throw new Error("Payment gateway error")
+          }
+          redirectingToMaib = true
+          useCartStore.setState({ items: [], savedAt: Date.now() })
+          window.location.href = payUrl
+          return
+        } catch (err) {
+          toast.error(
+            err instanceof Error ? err.message : "Payment gateway error",
+          )
+          return
+        }
+      }
+
+      router.push(
+        `/checkout/success?name=${encodeURIComponent(name.trim())}&order=${result.orderNumber}`,
+      )
     } catch {
       setOrderSubmitError(t.checkout.submitFailed)
     } finally {
-      setOrderSubmitting(false)
+      if (!redirectingToMaib) {
+        setOrderSubmitting(false)
+      }
     }
   }
 
@@ -1028,6 +1122,21 @@ export function CheckoutView({
                         {promoErrorMessage(promoError, lang)}
                       </p>
                     ) : null}
+                    {pricing?.promo_error && appliedPromo ? (
+                      <p className="text-sm text-red-600" role="alert">
+                        {promoErrorMessage(
+                          {
+                            code: pricing.promo_error as PromoCodeValidationError,
+                          },
+                          lang,
+                        )}
+                      </p>
+                    ) : null}
+                    {pricingError ? (
+                      <p className="text-sm text-red-600" role="alert">
+                        {pricingError}
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -1104,6 +1213,25 @@ export function CheckoutView({
                       </span>
                     </button>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setPayment("online_card")}
+                    className={cn(
+                      "flex w-full flex-col items-start gap-1 rounded-[12px] px-4 py-3 text-left",
+                      payment === "online_card"
+                        ? cn("storefront-checkout-toggle-active", checkoutActiveToggle)
+                        : checkoutToggleInactive,
+                    )}
+                  >
+                    <span className="flex items-center gap-2 text-[14px] font-bold text-[#242424]">
+                      <CreditCard className="size-[14px] shrink-0" strokeWidth={2} />
+                      Card online / Apple Pay / Google Pay
+                    </span>
+                    <span className="text-[12px] font-normal leading-snug text-[#808080]">
+                      Vei fi redirecționat la pagina de plată MAIB / Вы будете
+                      перенаправлены на страницу оплаты MAIB
+                    </span>
+                  </button>
                   {payment === "cash" ? (
                     <div>
                       <p className="text-[16px] font-bold text-[#242424]">
@@ -1147,16 +1275,23 @@ export function CheckoutView({
               selectedZone={selectedZone}
               outOfZone={outOfZone}
               grandTotal={checkoutGrandTotalBani}
-              bonusesRedeemed={bonusesRedeemed}
+              bonusesRedeemed={pricing?.bonuses_redeemed ?? 0}
+              pricingBreakdown={pricingBreakdown}
               excludedDiscountNotice={excludedDiscountNotice}
               onCheckout={handleSubmit}
-              checkoutSubmitting={orderSubmitting}
+              checkoutSubmitting={orderSubmitting || pricingLoading}
               checkoutError={orderSubmitError}
             >
-              <BonusRedeemBlock
-                orderTotalBani={grandTotal}
-                onRedeemChange={setBonusesRedeemed}
-              />
+              {profile && pricing ? (
+                <BonusRedeemBlock
+                  balance={pricing.bonuses_available}
+                  value={bonusesToRedeem}
+                  maxRedeemable={pricing.max_bonuses_redeemable}
+                  disabled={Boolean(appliedPromo) || pricing.bonuses_blocked}
+                  disabledTooltip={t.checkout.bonusesPromoConflict}
+                  onChange={setBonusesToRedeem}
+                />
+              ) : null}
             </OrderSummary>
           </aside>
         </div>
@@ -1173,7 +1308,7 @@ export function CheckoutView({
           <button
             type="button"
             onClick={() => void handleSubmit()}
-            disabled={orderSubmitting}
+            disabled={orderSubmitting || pricingLoading}
             className={cn(
               "storefront-modal-cta flex h-[54px] w-full items-center justify-center gap-2 rounded-full text-[20px] font-bold disabled:opacity-60",
               checkoutCtaMotion,

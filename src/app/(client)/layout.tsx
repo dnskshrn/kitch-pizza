@@ -7,6 +7,7 @@ import { WelcomeBonusModal } from "@/components/client/welcome-bonus-modal"
 import { StorefrontTopBar } from "@/components/client/storefront-top-bar"
 import { BrandJsonLd } from "@/components/seo/JsonLd"
 import { MetaPixel } from "@/components/MetaPixel"
+import { Toaster } from "@/components/ui/sonner"
 import { getBrandBySlug } from "@/brands"
 import { getStorefrontCategories } from "@/lib/data/storefront-categories"
 import { getBrandSeo } from "@/lib/seo/brand-seo"
@@ -92,6 +93,7 @@ export default async function ClientLayout({
       <ClientChrome brandSlug={brandSlug} categories={categories}>
         {children}
       </ClientChrome>
+      <Toaster position="top-center" richColors />
     </div>
   )
 }

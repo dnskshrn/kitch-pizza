@@ -126,12 +126,26 @@ export async function accrueBonus(profileId: string, orderId: string, amount: nu
 }
 
 export async function redeemBonus(profileId: string, orderId: string, amount: number): Promise<void> {
-  if (amount <= 0) return
+  if (!amount || amount <= 0) return
+
+  const supabase = createServiceSupabaseClient()
+
+  // IDEMPOTENCY: не списывать дважды по одному заказу
+  const { data: existing } = await supabase
+    .from('bonus_transactions')
+    .select('id')
+    .eq('profile_id', profileId)
+    .eq('order_id', orderId)
+    .eq('type', 'redemption')
+    .maybeSingle()
+
+  if (existing) {
+    console.warn(`[redeemBonus] Already redeemed for order ${orderId}, skipping`)
+    return
+  }
 
   const currentBalance = await getUserBalance(profileId)
   if (currentBalance < amount) throw new Error('Недостаточно бонусов')
-
-  const supabase = createServiceSupabaseClient()
   const { error } = await supabase.from('bonus_transactions').insert({
     profile_id: profileId,
     order_id: orderId,

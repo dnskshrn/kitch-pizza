@@ -268,6 +268,16 @@ export const messages = {
       orderContent: "Содержимое заказа",
       deliveryCost: "Стоимость доставки",
       orderTotal: "Сумма заказа",
+      pricingSubtotal: "Сумма без скидок",
+      pricingItemDiscount: "Скидка на сеты",
+      pricingPromo: "Промокод",
+      pricingBonuses: "Бонусы",
+      pricingDelivery: "Доставка",
+      pricingTotal: "Итого",
+      bonusesMaxRedeem: (amount: number) =>
+        `Макс. списание бонусами: ${amount} MDL`,
+      bonusesPromoConflict: "Промокод и бонусы нельзя совмещать",
+      pricingLoading: "Пересчёт…",
       submitFailed: "Не удалось отправить заказ",
       validation: {
         nameRequired: "Укажите имя",
@@ -502,6 +512,16 @@ export const messages = {
       orderContent: "Conținutul comenzii",
       deliveryCost: "Costul livrării",
       orderTotal: "Suma comenzii",
+      pricingSubtotal: "Suma fără reduceri",
+      pricingItemDiscount: "Reducere la seturi",
+      pricingPromo: "Promocod",
+      pricingBonuses: "Bonusuri",
+      pricingDelivery: "Livrare",
+      pricingTotal: "Total",
+      bonusesMaxRedeem: (amount: number) =>
+        `Maxim de bonusuri de utilizat: ${amount} MDL`,
+      bonusesPromoConflict: "Promocodul și bonusurile nu pot fi combinate",
+      pricingLoading: "Recalcul…",
       submitFailed: "Nu am putut trimite comanda",
       validation: {
         nameRequired: "Introduceți numele",

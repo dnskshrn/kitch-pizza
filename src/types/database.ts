@@ -304,7 +304,12 @@ export type OrderStatus =
 
 export type DeliveryMode = "delivery" | "pickup" | "aggregator"
 
-export type PaymentMethod = "cash" | "card" | "aggregator_card" | "mixed"
+export type PaymentMethod =
+  | "cash"
+  | "card"
+  | "aggregator_card"
+  | "mixed"
+  | "online_card"
 
 export interface Order {
   id: string
@@ -358,6 +363,8 @@ export interface Order {
 
 /** Элемент JSONB `order_items.toppings`. */
 export type OrderItemTopping = {
+  /** UUID топпинга — в новых заказах; в legacy-строках отсутствует. */
+  id?: string
   name: string
   price: number
   quantity: number

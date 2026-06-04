@@ -2,7 +2,6 @@
 
 import { format, parseISO } from "date-fns"
 import { useMemo, useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import type { Ingredient, Supplier } from "@/types/database"
 import { PeriodFilter } from "@/components/admin/finances/period-filter"
@@ -63,7 +62,6 @@ export function SuppliesTable({
   dateTo,
   periodTotals,
 }: Props) {
-  const router = useRouter()
   const [createOpen, setCreateOpen] = useState(false)
   const [ocrModalOpen, setOcrModalOpen] = useState(false)
   const [viewOrder, setViewOrder] = useState<SupplyOrderViewModel | null>(null)
@@ -173,7 +171,7 @@ export function SuppliesTable({
         })
         toast.success("Поставка создана")
         setOcrModalOpen(false)
-        router.refresh()
+        window.location.reload()
       } catch (e) {
         toast.error(
           e instanceof Error ? e.message : "Ошибка создания поставки"

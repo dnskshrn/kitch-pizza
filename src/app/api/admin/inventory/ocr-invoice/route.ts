@@ -10,7 +10,7 @@ import { NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-const MODEL = "gpt-5.5-2026-04-23"
+const MODEL = "gpt-5.4"
 
 const STEP1_PROMPT = `You are an invoice OCR assistant. Extract all line items from this Moldovan invoice or receipt.
 The document may be in Romanian, Russian, or mixed with English brand names.
@@ -21,6 +21,27 @@ IMPORTANT for Moldovan fiscal invoices (FACTURA FISCALA):
 
 For supermarket receipts (format: "ProductName\\n qty x price = total"):
 - Extract each product line
+
+- For each item, extract the VAT rate as a percentage number:
+   - In supermarket receipts: letter at end of line means: A = 20, B = 8, C = 0
+   - In FACTURA FISCALA: read the 'Cota TVA %' column value directly (20 or 8)
+   - Default to 20 if unclear
+- unit_price should be the price WITH VAT (consumer price)
+
+IMPORTANT - Package size multiplication:
+If a product name contains a weight or volume (e.g. '5kg', '500ml', '2L', '1kg'),
+AND the quantity is in pieces (buc, шт, pcs, bucati):
+→ multiply: quantity = package_count × package_size
+→ set raw_unit to the weight/volume unit (kg, ml, l, g)
+→ do NOT return quantity in pieces
+
+Examples:
+- 'Faina de grau 5kg Bunetto, 2 buc x 51.99' → quantity: 10, raw_unit: 'kg'
+- 'Monster Mango Loco 500ml, 3 buc x 22.99' → quantity: 1500, raw_unit: 'ml'
+- 'Zahar 1kg Domnita, 3 buc x 16.99' → quantity: 3, raw_unit: 'kg'
+- 'Castraveti marinati 720ml/650g, 2 buc' → quantity: 1440, raw_unit: 'ml'
+
+If no weight/volume in name → keep original quantity and unit as-is.
 
 Return ONLY valid JSON, no markdown, no explanation:
 {
@@ -33,7 +54,8 @@ Return ONLY valid JSON, no markdown, no explanation:
       "quantity": number,
       "raw_unit": "as written",
       "unit_price": number,
-      "total_price": number
+      "total_price": number,
+      "vat_rate": 20
     }
   ]
 }`
@@ -47,14 +69,18 @@ function imageMimeType(file: File): string {
   return "image/jpeg"
 }
 
+type CallOpenAIResult =
+  | { ok: true; content: string }
+  | { ok: false; response: NextResponse }
+
 async function callOpenAI(
   messages: { role: string; content: string | object[] }[],
   maxTokens: number
-): Promise<string> {
+): Promise<CallOpenAIResult> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new Error("OPENAI_API_KEY not configured")
 
-  const res = await fetch(OPENAI_URL, {
+  const openaiResponse = await fetch(OPENAI_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -62,22 +88,33 @@ async function callOpenAI(
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: maxTokens,
+      max_completion_tokens: maxTokens,
       messages,
     }),
   })
 
-  if (!res.ok) {
-    const errText = await res.text()
-    throw new Error(`OpenAI API error: ${res.status} ${errText}`)
+  const openaiData = await openaiResponse.json()
+
+  if (!openaiResponse.ok) {
+    console.error("OpenAI API error:", JSON.stringify(openaiData))
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "openai_error" }, { status: 500 }),
+    }
   }
 
-  const data = (await res.json()) as {
+  const data = openaiData as {
     choices?: { message?: { content?: string } }[]
   }
   const content = data.choices?.[0]?.message?.content
-  if (!content) throw new Error("Empty OpenAI response")
-  return content
+  if (!content) {
+    console.error("OpenAI API error:", JSON.stringify(openaiData))
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "openai_error" }, { status: 500 }),
+    }
+  }
+  return { ok: true, content }
 }
 
 function extractJson(text: string): string {
@@ -104,7 +141,7 @@ export async function POST(request: Request) {
     const mime = imageMimeType(image as File)
     const dataUrl = `data:${mime};base64,${base64}`
 
-    const step1Text = await callOpenAI(
+    const step1Result = await callOpenAI(
       [
         {
           role: "user",
@@ -116,6 +153,8 @@ export async function POST(request: Request) {
       ],
       2000
     )
+    if (!step1Result.ok) return step1Result.response
+    const step1Text = step1Result.content
 
     let extracted: OcrExtractedData
     try {
@@ -168,6 +207,7 @@ Rules:
 - "none": no reasonable match found
 - For display_quantity: keep the quantity in the SAME display units as the invoice (kg stays kg, liters stay liters, pieces stay pieces). Do NOT multiply by 1000. Just normalize the value as a decimal number (e.g. '0.518 kg' → display_quantity: 0.518, matched_ingredient_unit: 'g').
 - Match supplier by company name similarity
+- vat_rate: carry through from each input item unchanged (percentage: 20, 8, or 0)
 
 Return ONLY valid JSON:
 {
@@ -179,6 +219,7 @@ Return ONLY valid JSON:
       "raw_unit": "same as input",
       "unit_price": number,
       "total_price": number,
+      "vat_rate": number,
       "matched_ingredient_id": "uuid or null",
       "matched_ingredient_name": "string or null",
       "matched_ingredient_unit": "g|ml|pcs or null",
@@ -188,10 +229,12 @@ Return ONLY valid JSON:
   ]
 }`
 
-    const step2Text = await callOpenAI(
+    const step2Result = await callOpenAI(
       [{ role: "user", content: step2Prompt }],
       2000
     )
+    if (!step2Result.ok) return step2Result.response
+    const step2Text = step2Result.content
 
     let matched: {
       matched_supplier_id: string | null

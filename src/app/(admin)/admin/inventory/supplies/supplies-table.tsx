@@ -32,7 +32,7 @@ import {
 import { SupplyOrderDialog } from "./supply-order-dialog"
 import type { SupplyOrderViewModel, SupplyPeriodTotals } from "./types"
 
-const OCR_SUPPLY_VAT_RATE = 20
+const DEFAULT_OCR_VAT_RATE = 20
 
 function formatMdlTable(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(Number(value))) return "—"
@@ -144,19 +144,23 @@ export function SuppliesTable({
 
     for (const item of payload.items) {
       if (!item.matched_ingredient_id) continue
-      const ing = ingredients.find((i) => i.id === item.matched_ingredient_id)
-      if (!ing) continue
       if (item.display_quantity <= 0) continue
       const unit = item.matched_ingredient_unit as StorageUnit | null
       if (unit !== "g" && unit !== "ml" && unit !== "pcs") continue
 
-      const priceExDisplay =
-        item.unit_price / (1 + OCR_SUPPLY_VAT_RATE / 100)
+      const vatRate =
+        Number.isFinite(Number(item.vat_rate)) && Number(item.vat_rate) >= 0
+          ? Number(item.vat_rate)
+          : DEFAULT_OCR_VAT_RATE
+      const priceWithVat = item.unit_price
+      const priceWithoutVat =
+        Math.round((priceWithVat / (1 + vatRate / 100)) * 100) / 100
+
       payloadItems.push({
         ingredient_id: item.matched_ingredient_id,
         quantity: toStorageQty(item.display_quantity, unit),
-        price_per_unit: toStoragePrice(priceExDisplay, unit),
-        vat_rate: OCR_SUPPLY_VAT_RATE,
+        price_per_unit: toStoragePrice(priceWithoutVat, unit),
+        vat_rate: vatRate,
       })
     }
 

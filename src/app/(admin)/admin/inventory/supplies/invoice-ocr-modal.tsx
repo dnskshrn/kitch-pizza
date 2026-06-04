@@ -672,6 +672,21 @@ export function InvoiceOcrModal({
                           </div>
                         </div>
                       </div>
+
+                      <div className="mt-3 flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">НДС</span>
+                        <select
+                          value={item.vat_rate ?? 20}
+                          onChange={(e) =>
+                            patchItem(index, { vat_rate: Number(e.target.value) })
+                          }
+                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value={20}>20%</option>
+                          <option value={8}>8%</option>
+                          <option value={0}>0%</option>
+                        </select>
+                      </div>
                     </>
                   ) : null}
                 </div>

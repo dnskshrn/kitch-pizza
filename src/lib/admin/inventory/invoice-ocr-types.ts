@@ -4,6 +4,8 @@ export type OcrRawItem = {
   raw_unit: string
   unit_price: number
   total_price: number
+  /** Процент НДС: 20, 8 или 0 */
+  vat_rate: number
 }
 
 export type OcrExtractedData = {

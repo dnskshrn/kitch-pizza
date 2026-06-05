@@ -567,6 +567,7 @@ const POS_RUNNER_CTA_CLASS =
 function CartPanel({
   cart,
   cartCount,
+  panelTitle = "Корзина",
   totalsSlot,
   orderTotalSlot,
   onUpdateQty,
@@ -575,6 +576,7 @@ function CartPanel({
   errorBanner,
   cartInteractionDisabled,
   onRunnerSend,
+  runnerFormId,
   onCourierAssign,
   onPayOrder,
   onPrintPrecheck,
@@ -593,6 +595,7 @@ function CartPanel({
 }: {
   cart: PosCartItem[]
   cartCount: number
+  panelTitle?: string
   /** Сводка: промо + строки скидок (без «Итого»). */
   totalsSlot?: ReactNode
   /** Строка «Итого» — всегда видима. */
@@ -603,6 +606,8 @@ function CartPanel({
   errorBanner?: string | null
   cartInteractionDisabled: boolean
   onRunnerSend?: () => void | Promise<void>
+  /** Отправка бегунка через submit внешней формы (шаг 3). */
+  runnerFormId?: string
   onCourierAssign?: () => void
   onPayOrder?: () => void
   onPrintPrecheck?: () => void | Promise<void>
@@ -654,11 +659,14 @@ function CartPanel({
       >
         Принять оплату
       </button>
-    ) : onRunnerSend != null ? (
+    ) : onRunnerSend != null || runnerFormId != null ? (
       <button
-        type="button"
+        type={runnerFormId ? "submit" : "button"}
+        form={runnerFormId}
         disabled={runnerAlreadySent || runnerDisabled || runnerBusy}
-        onClick={() => void onRunnerSend()}
+        onClick={
+          runnerFormId ? undefined : () => void onRunnerSend?.()
+        }
         className={cn(POS_RUNNER_CTA_CLASS, "flex-1 !w-auto")}
       >
         {runnerAlreadySent ? (
@@ -674,7 +682,35 @@ function CartPanel({
       </button>
     ) : null
 
+  const showRunnerButton = onRunnerSend != null || runnerFormId != null
   const showActionRow = onPrintPrecheck != null || mainCta != null
+
+  const printButton =
+    onPrintPrecheck != null ? (
+      <button
+        type="button"
+        disabled={printPrecheckDisabled || printPrecheckBusy}
+        onClick={() => void onPrintPrecheck()}
+        aria-label={showRunnerButton ? "Печать предчека" : undefined}
+        className={cn(
+          "flex items-center justify-center rounded-lg border border-[#242424] bg-white text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40",
+          showRunnerButton
+            ? "h-12 w-[52px] shrink-0"
+            : "h-12 flex-1 gap-2 px-4 text-[15px] font-bold",
+        )}
+      >
+        {printPrecheckBusy ? (
+          <Loader2 className="size-4 shrink-0 animate-spin" />
+        ) : showRunnerButton ? (
+          <Printer className="size-4 shrink-0" />
+        ) : (
+          <>
+            <Printer className="size-4 shrink-0" />
+            <span>Печать чека</span>
+          </>
+        )}
+      </button>
+    ) : null
 
   return (
     /* Серая полоса-отступ справа — часть родительского bg-[#f2f2f2] */
@@ -688,7 +724,7 @@ function CartPanel({
         {/* Заголовок */}
         <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-5 py-3.5">
           <span className="text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
-            Корзина
+            {panelTitle}
           </span>
           {cartCount > 0 && (
             <span className="inline-flex size-5 items-center justify-center rounded-full bg-foreground text-[10px] font-bold text-background">
@@ -729,7 +765,7 @@ function CartPanel({
             <button
               type="button"
               onClick={() => setDetailsOpen((prev) => !prev)}
-              className="flex w-full items-center justify-between gap-2 border-t border-border py-2 px-3 text-[13px] font-medium text-[#242424] transition-colors hover:bg-[#f2f2f2]/60"
+              className="flex w-full items-center justify-between gap-2 rounded-lg bg-muted/60 py-2.5 px-3 text-[13px] font-medium text-[#242424] transition-colors hover:bg-muted/80"
             >
               <span className="flex min-w-0 items-center gap-2">
                 <LayoutList className="size-4 shrink-0 text-[#808080]" />
@@ -810,21 +846,7 @@ function CartPanel({
 
           {showActionRow ? (
             <div className="mt-3 flex items-stretch gap-2">
-              {onPrintPrecheck ? (
-                <button
-                  type="button"
-                  disabled={printPrecheckDisabled || printPrecheckBusy}
-                  onClick={() => void onPrintPrecheck()}
-                  aria-label="Печать предчека"
-                  className="flex w-[46px] shrink-0 items-center justify-center rounded-lg border border-[#242424] bg-white text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {printPrecheckBusy ? (
-                    <Loader2 className="size-4 shrink-0 animate-spin" />
-                  ) : (
-                    <Printer className="size-4 shrink-0" />
-                  )}
-                </button>
-              ) : null}
+              {printButton}
               {mainCta}
             </div>
           ) : null}
@@ -1366,56 +1388,22 @@ export function OrderForm({
   const posBonusMaxRedeemable = useMemo(() => {
     const balance = posBonusBalance ?? 0
     const rate = posMaxRedemptionRate ?? 0.3
-    const cartSubtotalBani = effectiveEngineOutput.itemSubtotalBani
-
-    const giftItemsValueBani = (effectiveEngineOutput.giftItems ?? []).reduce(
-      (sum, gift) => {
-        const cartItem = cartForEngine.find(
-          (i) =>
-            i.menu_item_id === gift.menu_item_id &&
-            (gift.variant_id != null
-              ? i.variant_id === gift.variant_id
-              : i.variant_id == null),
-        )
-        return sum + (cartItem ? cartItem.unit_price_bani * gift.quantity : 0)
-      },
-      0,
-    )
-
-    const cheapestDiscountBani = (effectiveEngineOutput.appliedDiscounts ?? [])
-      .filter((d) => d.effect_type === "cheapest_item_free")
-      .reduce((sum, d) => sum + d.discount_bani, 0)
-    const engineDiscountBani = Math.max(
-      0,
-      (effectiveEngineOutput.totalDiscountBani ?? 0) - cheapestDiscountBani,
-    )
-    const effectiveSubtotalBani = Math.max(
-      0,
-      cartSubtotalBani - engineDiscountBani - giftItemsValueBani,
-    )
-
-    const maxFromOrder = Math.floor((effectiveSubtotalBani / 100) * rate)
-    return Math.floor(Math.min(balance, maxFromOrder))
+    const grandTotalBani =
+      effectiveEngineOutput.totalBani != null
+        ? effectiveEngineOutput.totalBani
+        : Math.max(
+            0,
+            effectiveEngineOutput.discountedSubtotalBani +
+              (effectiveEngineOutput.deliveryFeeBani ?? 0),
+          )
+    return Math.floor(Math.min(balance, (grandTotalBani / 100) * rate))
   }, [
     posBonusBalance,
     posMaxRedemptionRate,
-    effectiveEngineOutput.itemSubtotalBani,
-    effectiveEngineOutput.totalDiscountBani,
-    effectiveEngineOutput.appliedDiscounts,
-    effectiveEngineOutput.giftItems,
-    cartForEngine,
+    effectiveEngineOutput.totalBani,
+    effectiveEngineOutput.discountedSubtotalBani,
+    effectiveEngineOutput.deliveryFeeBani,
   ])
-
-  const promotionActive = useMemo(
-    () =>
-      (effectiveEngineOutput.appliedDiscounts ?? []).some(
-        (e) => e.effect_type !== "bonus_multiplier",
-      ) || (effectiveEngineOutput.giftItems ?? []).length > 0,
-    [
-      effectiveEngineOutput.appliedDiscounts,
-      effectiveEngineOutput.giftItems,
-    ],
-  )
 
   const redeemBaniApplied = effectiveBonusPoints * 100
   const payableAfterBonusBani = Math.max(0, totalBani - redeemBaniApplied)
@@ -1711,12 +1699,6 @@ export function OrderForm({
       prev > posBonusMaxRedeemable ? posBonusMaxRedeemable : prev,
     )
   }, [posBonusRedeemAllowed, posBonusMaxRedeemable])
-
-  useEffect(() => {
-    if (!promotionActive) return
-    setBonusesToRedeem(0)
-    setBonusRedeemFieldError(null)
-  }, [promotionActive])
 
   useEffect(() => {
     setBonusRedeemTouched(false)
@@ -4018,11 +4000,7 @@ export function OrderForm({
                         >
                           Списать бонусов
                         </label>
-                        {promotionActive ? (
-                          <p className="text-[11px] text-[#808080]">
-                            Бонусы недоступны при активной акции
-                          </p>
-                        ) : !bonusRedeemTouched && posBonusRedeemAllowed ? (
+                        {!bonusRedeemTouched && posBonusRedeemAllowed ? (
                           <p className="text-[11px] text-[#808080]">
                             Можно списать до {posBonusMaxRedeemable} бонусов (
                             {Math.round((posMaxRedemptionRate ?? 0.3) * 100)}% от
@@ -4035,8 +4013,7 @@ export function OrderForm({
                           min={0}
                           step={0.01}
                           inputMode="decimal"
-                          disabled={promotionActive}
-                          className="h-8 font-mono text-xs tabular-nums disabled:cursor-not-allowed disabled:opacity-50"
+                          className="h-8 font-mono text-xs tabular-nums"
                           value={
                             bonusesToRedeem === 0 && !bonusRedeemTouched
                               ? effectiveBonusPoints === 0
@@ -4537,99 +4514,65 @@ export function OrderForm({
           </div>
         </div>
 
-        {/* ── ПРАВАЯ ПАНЕЛЬ: сводка заказа — белая карточка в сером острове ── */}
-        <div className="flex h-full min-h-0 w-[300px] shrink-0 flex-col overflow-hidden p-3 pl-0">
-          <aside className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
-            <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-5 py-3.5">
-              <span className="text-[11px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
-                Сводка
-              </span>
-              {cartCount > 0 && (
-                <span className="inline-flex size-5 items-center justify-center rounded-full bg-foreground text-[10px] font-bold text-background">
-                  {cartCount}
-                </span>
-              )}
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="space-y-2 p-3 pr-2">
-                {cart.map((line, idx) => (
-                  <CartItemRow
-                    key={
-                      line.orderItemId ??
-                      `${line.menuItemId}-${line.variantId ?? ""}-${line.size ?? "x"}-${idx}`
-                    }
-                    line={line}
-                    idx={idx}
-                    onUpdateQty={updateQty}
-                    onRemove={removeLine}
-                    onOpenLine={(i) => void openCartLineModal(i)}
-                    cartInteractionDisabled={cartInteractionDisabled}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="shrink-0 border-t border-border p-5">
-              <div className="space-y-3">
-                {brandId ? (
-                  <PromoPanel
-                    brandId={brandId}
-                    promoSessionKey={posOrderId}
-                    seedPromoCode={listOrder?.promo_code?.trim() ?? null}
-                    skipSeedResolve={skipWebsitePromoSeedResolve}
-                    items={cartForEngine}
-                    deliveryZone={deliveryZoneForEngine}
-                    excludedCategoryIds={excludedCategoryIds}
-                    onDiscountChange={setEngineOutput}
-                    onAppliedPromoCodeChange={setAppliedPromoCode}
-                  />
-                ) : null}
-                <DiscountBreakdown
-                  output={effectiveEngineOutput}
+        <CartPanel
+          panelTitle="Сводка"
+          cart={cart}
+          cartCount={cartCount}
+          totalsSlot={
+            <>
+              {brandId ? (
+                <PromoPanel
+                  brandId={brandId}
+                  promoSessionKey={posOrderId}
+                  seedPromoCode={listOrder?.promo_code?.trim() ?? null}
+                  skipSeedResolve={skipWebsitePromoSeedResolve}
+                  items={cartForEngine}
                   deliveryZone={deliveryZoneForEngine}
-                  bonusRedeemedBani={redeemBaniApplied}
-                  excludedCategories={excludedCategoriesInCart}
+                  excludedCategoryIds={excludedCategoryIds}
+                  onDiscountChange={setEngineOutput}
+                  onAppliedPromoCodeChange={setAppliedPromoCode}
                 />
-              </div>
-              {showPayOrderCta ? (
-                <button
-                  type="button"
-                  disabled={!cashSession}
-                  onClick={() => setPayModalOpen(true)}
-                  className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
-                >
-                  Принять оплату
-                </button>
-              ) : listOrder?.status === "draft" ||
-                listOrder?.status === "new" ||
-                listOrder?.status === "confirmed" ? (
-                <button
-                  type="submit"
-                  form="pos-wizard-details-form"
-                  disabled={
-                    runnerAlreadySent ||
-                    submitting ||
-                    cartActionBusy ||
-                    !runnerHasPricedItems
-                  }
-                  className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
-                >
-                  {runnerAlreadySent ? (
-                    "Бегунок отправлен"
-                  ) : submitting ? (
-                    <span className="flex items-center gap-2">
-                      <Loader2 className="size-4 shrink-0 animate-spin" />
-                      Отправка…
-                    </span>
-                  ) : (
-                    "Отправить бегунок"
-                  )}
-                </button>
               ) : null}
-            </div>
-          </aside>
-        </div>
+              <DiscountBreakdown
+                output={effectiveEngineOutput}
+                deliveryZone={deliveryZoneForEngine}
+                bonusRedeemedBani={redeemBaniApplied}
+                excludedCategories={excludedCategoriesInCart}
+                hideTotal
+              />
+            </>
+          }
+          orderTotalSlot={
+            <DiscountOrderTotal
+              output={effectiveEngineOutput}
+              bonusRedeemedBani={redeemBaniApplied}
+            />
+          }
+          onUpdateQty={updateQty}
+          onRemove={removeLine}
+          onOpenLine={(i) => void openCartLineModal(i)}
+          cartInteractionDisabled={cartInteractionDisabled}
+          onPayOrder={
+            showPayOrderCta ? () => setPayModalOpen(true) : undefined
+          }
+          payOrderDisabled={!cashSession}
+          runnerFormId={
+            !showPayOrderCta &&
+            (listOrder?.status === "draft" ||
+              listOrder?.status === "new" ||
+              listOrder?.status === "confirmed")
+              ? "pos-wizard-details-form"
+              : undefined
+          }
+          runnerDisabled={
+            runnerAlreadySent ||
+            submitting ||
+            cartActionBusy ||
+            !runnerHasPricedItems
+          }
+          runnerBusy={submitting}
+          runnerAlreadySent={runnerAlreadySent}
+        />
       </div>
     </div>
 

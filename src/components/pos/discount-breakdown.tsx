@@ -32,17 +32,19 @@ export function DiscountOrderTotal({
   const safeBonusBani = Math.max(0, Math.round(bonusRedeemedBani))
   const finalTotalBani =
     output.totalBani === null ? null : Math.max(0, output.totalBani - safeBonusBani)
+  const subtotalOnlyBani =
+    output.discountedSubtotalBani > 0
+      ? Math.max(0, output.discountedSubtotalBani - safeBonusBani)
+      : null
+  const displayBani = finalTotalBani ?? subtotalOnlyBani
 
   return (
-    <>
-      <div className="border-t-2 border-border" />
-      <div className="flex items-baseline justify-between gap-3 pt-0.5">
-        <span className="text-base font-bold text-[#242424]">Итого</span>
-        <span className="font-mono text-lg font-bold tabular-nums text-[#242424]">
-          {finalTotalBani === null ? '—' : `${formatMdl(finalTotalBani)} MDL`}
-        </span>
-      </div>
-    </>
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-base font-bold text-[#242424]">Итого</span>
+      <span className="font-mono text-lg font-bold tabular-nums text-[#242424]">
+        {displayBani === null ? '—' : `${formatMdl(displayBani)} MDL`}
+      </span>
+    </div>
   )
 }
 

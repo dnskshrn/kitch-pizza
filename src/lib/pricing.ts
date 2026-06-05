@@ -1,3 +1,4 @@
+import { getBonusSettings } from "@/lib/bonus"
 import {
   calcCompareAt,
   calcPromoDiscount,
@@ -7,8 +8,6 @@ import { isRuleScheduleActive } from "@/lib/discount-engine"
 import type { PromoCode, PromoCodeValidationError } from "@/types/database"
 import type { DiscountRule } from "@/types/promotions"
 import type { SupabaseClient } from "@supabase/supabase-js"
-
-const MAX_BONUS_REDEMPTION_PCT = 30
 
 export interface CartItem {
   menu_item_id: string
@@ -223,7 +222,7 @@ export async function calculateOrderPricing(
       bonuses_available: profileId
         ? await fetchProfileBonusBalance(supabase, profileId)
         : 0,
-      bonuses_blocked: Boolean(promoCode?.trim()),
+      bonuses_blocked: false,
       max_bonuses_redeemable: 0,
       bonuses_redeemed: 0,
       delivery_fee_bani: deliveryFeeBani,
@@ -393,55 +392,60 @@ export async function calculateOrderPricing(
   let promoDiscountBani = 0
   let promoDiscountPct = 0
   let promoError: string | null = null
-  let bonusesBlocked = false
-  let bonusesRedeemed = 0
-  let maxBonusesRedeemable = 0
-
-  const bonusesAvailable = profileId
-    ? await fetchProfileBonusBalance(supabase, profileId)
-    : 0
 
   const normalizedPromo = promoCode?.trim() ?? ""
-  if (normalizedPromo || promotionActive) {
-    bonusesBlocked = true
-    if (normalizedPromo) {
-      const validation = await validatePromoCodeWithClient(
-        supabase,
-        normalizedPromo,
-        brandId,
-        subtotalBani,
-      )
-
-      if (validation.valid) {
-        promoCodeId = validation.promo.id
-        const promoEligibleSubtotalBani = eligiblePromoSubtotalBani(
-          cartItems,
-          items,
-          menuById,
-          excludedCategoryIds,
-        )
-        promoDiscountBani =
-          promoEligibleSubtotalBani > 0
-            ? calcPromoDiscount(validation.promo, promoEligibleSubtotalBani)
-            : 0
-        promoDiscountPct = pctOf(promoDiscountBani, promoEligibleSubtotalBani)
-      } else {
-        promoError = validation.error
-      }
-    }
-  } else {
-    const remainingPct = Math.max(0, MAX_BONUS_REDEMPTION_PCT - itemDiscountPct)
-    maxBonusesRedeemable = Math.floor(
-      (subtotalBani / 100) * (remainingPct / 100),
+  if (normalizedPromo) {
+    const validation = await validatePromoCodeWithClient(
+      supabase,
+      normalizedPromo,
+      brandId,
+      subtotalBani,
     )
 
-    if (profileId && bonusesRequested > 0) {
-      bonusesRedeemed = Math.min(
-        Math.max(0, Math.floor(bonusesRequested)),
-        bonusesAvailable,
-        maxBonusesRedeemable,
+    if (validation.valid) {
+      promoCodeId = validation.promo.id
+      const promoEligibleSubtotalBani = eligiblePromoSubtotalBani(
+        cartItems,
+        items,
+        menuById,
+        excludedCategoryIds,
       )
+      promoDiscountBani =
+        promoEligibleSubtotalBani > 0
+          ? calcPromoDiscount(validation.promo, promoEligibleSubtotalBani)
+          : 0
+      promoDiscountPct = pctOf(promoDiscountBani, promoEligibleSubtotalBani)
+    } else {
+      promoError = validation.error
     }
+  }
+
+  const grandTotalAfterDiscountsBani = Math.max(
+    0,
+    subtotalBani - itemDiscountBani - promoDiscountBani + deliveryFeeBani,
+  )
+
+  const [{ maxRedemptionRate }, bonusesAvailable] = await Promise.all([
+    getBonusSettings(),
+    profileId
+      ? fetchProfileBonusBalance(supabase, profileId)
+      : Promise.resolve(0),
+  ])
+
+  const maxBonusesRedeemable = Math.floor(
+    Math.min(
+      bonusesAvailable,
+      (grandTotalAfterDiscountsBani / 100) * (maxRedemptionRate ?? 0.3),
+    ),
+  )
+
+  let bonusesRedeemed = 0
+  if (profileId && bonusesRequested > 0) {
+    bonusesRedeemed = Math.min(
+      Math.max(0, Math.floor(bonusesRequested)),
+      bonusesAvailable,
+      maxBonusesRedeemable,
+    )
   }
 
   const totalBani = Math.max(
@@ -499,7 +503,7 @@ export async function calculateOrderPricing(
     promo_discount_pct: promoDiscountPct,
     promo_error: promoError,
     bonuses_available: bonusesAvailable,
-    bonuses_blocked: bonusesBlocked,
+    bonuses_blocked: false,
     max_bonuses_redeemable: maxBonusesRedeemable,
     bonuses_redeemed: bonusesRedeemed,
     delivery_fee_bani: deliveryFeeBani,

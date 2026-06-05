@@ -5,9 +5,12 @@ import {
   getCartItemSizeLabel,
   type CartLang,
 } from "@/lib/cart-helpers"
+import { CartLinePrice } from "@/components/client/cart/cart-line-price"
 import { StorefrontDiscountExcludedNotice } from "@/components/client/cart/storefront-discount-excluded-notice"
 import { CartItemToppingDetails } from "@/components/client/cart/CartItemToppingDetails"
+import { useStorefrontCampaignRules } from "@/components/client/storefront-campaign-rules-context"
 import { formatMoney, goodsPhrase, pickLocalizedName } from "@/lib/i18n/storefront"
+import { getItemCampaignDiscount } from "@/lib/storefront-item-campaign-discount"
 import { getStorefrontDeliveryLineDisplay } from "@/lib/storefront-delivery-display"
 import { useLanguage } from "@/lib/store/language-store"
 import { cn } from "@/lib/utils"
@@ -87,6 +90,7 @@ export function OrderSummary({
   checkoutError = null,
 }: OrderSummaryProps) {
   const { t } = useLanguage()
+  const campaignRules = useStorefrontCampaignRules()
   const deliveryLine = useMemo(
     () =>
       getStorefrontDeliveryLineDisplay({
@@ -117,6 +121,15 @@ export function OrderSummary({
           const unit =
             cartItem.quantity > 1 ? ` × ${cartItem.quantity}` : ""
           const imageUrl = cartItem.menuItem.image_url
+          const shelfUnitBani = getCartItemPrice(cartItem)
+          const { discountedPriceBani, originalPriceBani, hasCampaign } =
+            getItemCampaignDiscount(
+              cartItem.menuItem,
+              campaignRules,
+              shelfUnitBani,
+            )
+          const unitBani = hasCampaign ? discountedPriceBani : shelfUnitBani
+          const compareUnitBani = hasCampaign ? originalPriceBani : null
           return (
             <li
               key={cartItem.id}
@@ -150,9 +163,14 @@ export function OrderSummary({
                 ) : null}
                 <CartItemToppingDetails cartItem={cartItem} lang={lang} />
               </div>
-              <p className="shrink-0 self-start pt-0.5 text-right text-[14px] font-medium tabular-nums text-[#242424]">
-                {formatMoney(getCartItemPrice(cartItem) * cartItem.quantity, lang)}
-              </p>
+              <div className="shrink-0 self-start pt-0.5 text-right">
+                <CartLinePrice
+                  unitBani={unitBani}
+                  compareUnitBani={compareUnitBani}
+                  quantity={cartItem.quantity}
+                  lang={lang}
+                />
+              </div>
             </li>
           )
         })}

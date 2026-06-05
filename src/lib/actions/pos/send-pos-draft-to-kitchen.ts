@@ -2,9 +2,7 @@
 
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { redeemBonus } from "@/lib/bonus"
-import { isRuleScheduleActive } from "@/lib/discount-engine"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
-import type { DiscountRule } from "@/types/promotions"
 
 export type SendPosDraftToKitchenInput = {
   orderId: string
@@ -103,32 +101,7 @@ export async function sendPosDraftToKitchen(
 
   const nowIso = new Date().toISOString()
 
-  const brandId = (orderBefore as { brand_id: string | null }).brand_id
-  let promotionBlocksBonus = false
-  if (brandId) {
-    const now = new Date()
-    const { data: autoDiscountRules } = await (supabase.from("discount_rules") as any)
-      .select("*")
-      .eq("brand_id", brandId)
-      .eq("trigger_type", "auto")
-      .eq("is_active", true)
-
-    promotionBlocksBonus = (autoDiscountRules ?? []).some(
-      (rule: DiscountRule) =>
-        rule.effect_type !== "bonus_multiplier" &&
-        isRuleScheduleActive(rule, now),
-    )
-  }
-
-  if (promotionBlocksBonus) {
-    console.warn("[POS] bonuses cleared: active promotion", input.orderId)
-    await supabase
-      .from("orders")
-      .update({ bonuses_redeemed: 0 })
-      .eq("id", input.orderId)
-    redeemPoints = 0
-    newTotalBani = grossBeforeRedeemBani
-  } else if (redeemPoints > 0) {
+  if (redeemPoints > 0) {
     if (profileIdForRedeem) {
       const { data: freshOrder } = await supabase
         .from("orders")

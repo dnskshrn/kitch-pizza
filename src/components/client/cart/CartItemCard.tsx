@@ -1,11 +1,14 @@
 "use client"
 
+import { useStorefrontCampaignRules } from "@/components/client/storefront-campaign-rules-context"
 import { getCartItemPrice, getCartItemSizeLabel } from "@/lib/cart-helpers"
 import type { CartLang } from "@/lib/cart-helpers"
 import { formatMoney } from "@/lib/i18n/storefront"
+import { getItemCampaignDiscount } from "@/lib/storefront-item-campaign-discount"
 import { useLanguage } from "@/lib/store/language-store"
 import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
 import type { CartItem } from "@/types/cart"
+import type { DiscountRule } from "@/types/promotions"
 import { Minus, Plus, X } from "lucide-react"
 import Image from "next/image"
 import { CartItemToppingDetails } from "./CartItemToppingDetails"
@@ -16,6 +19,8 @@ type CartItemCardProps = {
   lang: CartLang
   /** Сколько единиц на этой строке бесплатны по акции (giftItems). */
   giftFreeUnits?: number
+  /** Правила item_percent для отображения цены со скидкой. */
+  itemPercentRules?: DiscountRule[]
   onEdit: () => void
   onRemove: () => void
   onQuantityChange: (delta: 1 | -1) => void
@@ -23,39 +28,72 @@ type CartItemCardProps = {
 
 function CartLinePrice({
   unitBani,
+  compareUnitBani,
   quantity,
   giftFreeUnits,
   lang,
 }: {
   unitBani: number
+  compareUnitBani?: number | null
   quantity: number
   giftFreeUnits: number
   lang: CartLang
 }) {
   const freeUnits = Math.min(Math.max(0, giftFreeUnits), quantity)
   const paidUnits = quantity - freeUnits
+  const showItemDiscount =
+    compareUnitBani != null &&
+    compareUnitBani > unitBani
+  const strikeUnitBani = showItemDiscount ? compareUnitBani : unitBani
 
   if (freeUnits <= 0) {
+    if (!showItemDiscount) {
+      return (
+        <p className="text-[16px] font-bold tabular-nums text-[#242424]">
+          {formatMoney(unitBani * quantity, lang)}
+        </p>
+      )
+    }
+
     return (
-      <p className="text-[16px] font-bold tabular-nums text-[#242424]">
-        {formatMoney(unitBani * quantity, lang)}
-      </p>
+      <div className="flex flex-wrap items-baseline gap-2 text-[16px] tabular-nums">
+        <span className="font-normal text-muted-foreground line-through">
+          {formatMoney(compareUnitBani * quantity, lang)}
+        </span>
+        <span className="font-bold text-[#242424]">
+          {formatMoney(unitBani * quantity, lang)}
+        </span>
+      </div>
     )
   }
 
-  const freePartBani = unitBani * freeUnits
+  const freePartStrikeBani = strikeUnitBani * freeUnits
   const paidPartBani = unitBani * paidUnits
+  const paidPartStrikeBani = strikeUnitBani * paidUnits
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-[16px] font-bold tabular-nums">
-      <span className="line-through text-muted-foreground font-normal">
-        {formatMoney(freePartBani, lang)}
+    <div className="flex flex-wrap items-baseline gap-2 text-[16px] tabular-nums">
+      <span className="font-normal text-muted-foreground line-through">
+        {formatMoney(freePartStrikeBani, lang)}
       </span>
       <span className="storefront-modal-accent font-medium">
         {formatMoney(0, lang)}
       </span>
       {paidUnits > 0 ? (
-        <span className="text-[#242424]">{formatMoney(paidPartBani, lang)}</span>
+        showItemDiscount ? (
+          <>
+            <span className="font-normal text-muted-foreground line-through">
+              {formatMoney(paidPartStrikeBani, lang)}
+            </span>
+            <span className="font-bold text-[#242424]">
+              {formatMoney(paidPartBani, lang)}
+            </span>
+          </>
+        ) : (
+          <span className="font-bold text-[#242424]">
+            {formatMoney(paidPartBani, lang)}
+          </span>
+        )
       ) : null}
     </div>
   )
@@ -66,13 +104,21 @@ export function CartItemCard({
   name,
   lang,
   giftFreeUnits = 0,
+  itemPercentRules = [],
   onEdit,
   onRemove,
   onQuantityChange,
 }: CartItemCardProps) {
   const { t } = useLanguage()
+  const contextCampaignRules = useStorefrontCampaignRules()
+  const campaignRules =
+    contextCampaignRules.length > 0 ? contextCampaignRules : itemPercentRules
   const sizeLabel = getCartItemSizeLabel(cartItem, lang)
-  const unitBani = getCartItemPrice(cartItem)
+  const shelfUnitBani = getCartItemPrice(cartItem)
+  const { discountedPriceBani, originalPriceBani, hasCampaign } =
+    getItemCampaignDiscount(cartItem.menuItem, campaignRules, shelfUnitBani)
+  const unitBani = hasCampaign ? discountedPriceBani : shelfUnitBani
+  const compareUnitBani = hasCampaign ? originalPriceBani : null
 
   return (
     <div className="storefront-modal-surface storefront-modal-card-radius flex flex-col rounded-[16px] p-3">
@@ -115,6 +161,7 @@ export function CartItemCard({
       <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
         <CartLinePrice
           unitBani={unitBani}
+          compareUnitBani={compareUnitBani}
           quantity={cartItem.quantity}
           giftFreeUnits={giftFreeUnits}
           lang={lang}

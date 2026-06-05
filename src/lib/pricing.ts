@@ -65,6 +65,7 @@ type MenuItemRow = {
   price: number | null
   discount_percent: number | null
   has_sizes: boolean
+  category_id: string | null
 }
 
 type VariantRow = {
@@ -100,6 +101,48 @@ function unitOriginalPriceBani(
 function pctOf(part: number, whole: number): number {
   if (whole <= 0) return 0
   return (part / whole) * 100
+}
+
+async function fetchExcludedDiscountCategoryIds(
+  supabase: SupabaseClient,
+  brandId: string,
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("menu_categories")
+    .select("id")
+    .eq("brand_id", brandId)
+    .eq("exclude_from_discounts", true)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return new Set((data ?? []).map((row) => row.id as string))
+}
+
+function eligiblePromoSubtotalBani(
+  cartItems: CartItem[],
+  pricedItems: PricingResult["items"],
+  menuById: Map<string, MenuItemRow>,
+  excludedCategoryIds: Set<string>,
+): number {
+  if (excludedCategoryIds.size === 0) {
+    return pricedItems.reduce(
+      (sum, line) => sum + line.original_price_bani * line.quantity,
+      0,
+    )
+  }
+
+  let sum = 0
+  for (let i = 0; i < cartItems.length; i++) {
+    const menuItem = menuById.get(cartItems[i].menu_item_id)
+    const categoryId = menuItem?.category_id
+    if (!categoryId || excludedCategoryIds.has(categoryId)) continue
+    const line = pricedItems[i]
+    if (!line) continue
+    sum += line.original_price_bani * line.quantity
+  }
+  return sum
 }
 
 async function validatePromoCodeWithClient(
@@ -199,10 +242,14 @@ export async function calculateOrderPricing(
     ),
   ]
 
-  const [{ data: menuRows, error: menuError }, variantResult] = await Promise.all([
+  const [
+    { data: menuRows, error: menuError },
+    variantResult,
+    excludedCategoryIds,
+  ] = await Promise.all([
     supabase
       .from("menu_items")
-      .select("id, price, discount_percent, has_sizes")
+      .select("id, price, discount_percent, has_sizes, category_id")
       .in("id", menuItemIds),
     variantIds.length
       ? supabase
@@ -210,6 +257,7 @@ export async function calculateOrderPricing(
           .select("id, menu_item_id, price")
           .in("id", variantIds)
       : Promise.resolve({ data: [] as VariantRow[], error: null }),
+    fetchExcludedDiscountCategoryIds(supabase, brandId),
   ])
 
   if (menuError) {
@@ -366,8 +414,17 @@ export async function calculateOrderPricing(
 
       if (validation.valid) {
         promoCodeId = validation.promo.id
-        promoDiscountBani = calcPromoDiscount(validation.promo, subtotalBani)
-        promoDiscountPct = pctOf(promoDiscountBani, subtotalBani)
+        const promoEligibleSubtotalBani = eligiblePromoSubtotalBani(
+          cartItems,
+          items,
+          menuById,
+          excludedCategoryIds,
+        )
+        promoDiscountBani =
+          promoEligibleSubtotalBani > 0
+            ? calcPromoDiscount(validation.promo, promoEligibleSubtotalBani)
+            : 0
+        promoDiscountPct = pctOf(promoDiscountBani, promoEligibleSubtotalBani)
       } else {
         promoError = validation.error
       }

@@ -207,6 +207,14 @@ export function CartContent({
     return allocateGiftFreeUnitsByCartLineId(items, gifts)
   }, [items, storefrontEngineOutput?.giftItems])
 
+  const itemPercentRules = useMemo(
+    () =>
+      (pricingBootstrap?.discountAutoRules ?? []).filter(
+        (rule) => rule.effect_type === "item_percent",
+      ),
+    [pricingBootstrap?.discountAutoRules],
+  )
+
   useEffect(() => {
     if (!isOpen) setUpsellCategory(null)
   }, [isOpen])
@@ -366,6 +374,7 @@ export function CartContent({
                 cartItem={cartItem}
                 lang={lang}
                 giftFreeUnits={giftFreeUnitsByLineId.get(cartItem.id) ?? 0}
+                itemPercentRules={itemPercentRules}
                 name={
                   pickLocalizedName(cartItem.menuItem, lang)
                 }

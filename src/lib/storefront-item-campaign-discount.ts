@@ -1,4 +1,4 @@
-import { calcCompareAt } from "@/lib/discount"
+import { calcCompareAt, discountRateFromEffectValue } from "@/lib/discount"
 import { isRuleScheduleActive } from "@/lib/discount-engine"
 import type { MenuItem } from "@/types/database"
 import type { DiscountRule } from "@/types/promotions"
@@ -10,11 +10,6 @@ export type ItemCampaignDiscount = {
 }
 
 type CampaignItemFields = Pick<MenuItem, "id" | "price" | "discount_percent">
-
-/** effect_value в БД: доля 0–1 (0.2 = 20%); значения >1 — проценты 1–100. */
-function discountRateFromEffectValue(value: number): number {
-  return value > 1 ? value / 100 : value
-}
 
 export function getItemCampaignDiscount(
   item: CampaignItemFields,

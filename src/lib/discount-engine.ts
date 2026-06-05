@@ -1,3 +1,4 @@
+import { discountRateFromEffectValue } from '@/lib/discount'
 import type {
   AppliedDiscount,
   CartItemForEngine,
@@ -67,6 +68,22 @@ function isRuleEligible(rule: DiscountRule, now: Date): boolean {
   if (rule.valid_from != null && now < new Date(rule.valid_from)) return false
   if (rule.valid_until != null && now > new Date(rule.valid_until)) return false
   if (!isRuleScheduleActive(rule, now)) return false
+  return true
+}
+
+/** exclude_from_discounts: пропуск, кроме item_percent с явным target_item_ids. */
+function skipExcludedCategoryItem(
+  item: CartItemForEngine,
+  rule: DiscountRule,
+  excludedCategoryIds: Set<string>,
+): boolean {
+  if (!excludedCategoryIds.has(item.category_id)) return false
+  if (
+    rule.effect_type === 'item_percent' &&
+    rule.target_item_ids?.includes(item.menu_item_id)
+  ) {
+    return false
+  }
   return true
 }
 
@@ -258,12 +275,13 @@ export function evaluateDiscounts(
   for (const rule of itemPercentRules) {
     const ev = rule.effect_value
     if (ev == null) continue
+    const rate = discountRateFromEffectValue(ev)
     let ruleDisc = 0
     for (const it of items) {
-      if (excludedSet.has(it.category_id)) continue
+      if (skipExcludedCategoryItem(it, rule, excludedSet)) continue
       if (!matchesTargets(it, rule)) continue
       const lineSub = it.unit_price_bani * it.quantity
-      ruleDisc += Math.round(lineSub * ev)
+      ruleDisc += Math.round(lineSub * rate)
     }
     if (ruleDisc <= 0) continue
     itemPercentTotal += ruleDisc

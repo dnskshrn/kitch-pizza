@@ -1,5 +1,10 @@
 import type { PromoCode } from "@/types/database"
 
+/** effect_value в discount_rules: доля 0–1 (0.12 = 12%); значения >1 — проценты 1–100. */
+export function discountRateFromEffectValue(value: number): number {
+  return value > 1 ? value / 100 : value
+}
+
 /**
  * «Старая» цена (в бани) для зачёркивания; в БД не хранится.
  * `price` — актуальная цена в бани, `discountPercent` — скидка в процентах.

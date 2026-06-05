@@ -21,6 +21,12 @@ import { useMemo, type ReactNode } from "react"
 const btnMotion = "cursor-pointer transition-all duration-200 ease-out"
 const checkoutCtaMotion = `${btnMotion} hover:brightness-95 active:scale-[0.97]`
 
+export type CheckoutDiscountRuleLine = {
+  type: "item_discount" | "promo_code" | "bonus_redemption"
+  label: string
+  amount_bani: number
+}
+
 export type CheckoutPricingBreakdown = {
   subtotalBani: number
   itemDiscountBani: number
@@ -29,6 +35,7 @@ export type CheckoutPricingBreakdown = {
   deliveryFeeBani: number
   totalBani: number
   loading?: boolean
+  discountRulesApplied?: CheckoutDiscountRuleLine[]
 }
 
 export type OrderSummaryProps = {
@@ -159,13 +166,36 @@ export function OrderSummary({
             label={t.checkout.pricingSubtotal}
             value={formatMoney(pricingBreakdown.subtotalBani, lang)}
           />
-          {pricingBreakdown.itemDiscountBani > 0 ? (
-            <BreakdownRow
-              label={t.checkout.pricingItemDiscount}
-              value={`−${formatMoney(pricingBreakdown.itemDiscountBani, lang)}`}
-              accent
-            />
-          ) : null}
+          {(() => {
+            const itemDiscountLines =
+              pricingBreakdown.discountRulesApplied?.filter(
+                (entry) =>
+                  entry.type === "item_discount" && entry.amount_bani > 0,
+              ) ?? []
+
+            if (itemDiscountLines.length > 0) {
+              return itemDiscountLines.map((entry, index) => (
+                <BreakdownRow
+                  key={`item-discount-${entry.label}-${index}`}
+                  label={entry.label}
+                  value={`−${formatMoney(entry.amount_bani, lang)}`}
+                  accent
+                />
+              ))
+            }
+
+            if (pricingBreakdown.itemDiscountBani > 0) {
+              return (
+                <BreakdownRow
+                  label={t.checkout.pricingItemDiscount}
+                  value={`−${formatMoney(pricingBreakdown.itemDiscountBani, lang)}`}
+                  accent
+                />
+              )
+            }
+
+            return null
+          })()}
           {pricingBreakdown.promoDiscountBani > 0 ? (
             <BreakdownRow
               label={t.checkout.pricingPromo}

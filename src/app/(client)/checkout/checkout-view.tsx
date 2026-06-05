@@ -454,6 +454,7 @@ export function CheckoutView({
         deliveryFeeBani: pricing.delivery_fee_bani,
         totalBani: pricing.total_bani,
         loading: pricingLoading,
+        discountRulesApplied: pricing.discount_rules_applied,
       }
     : null
 

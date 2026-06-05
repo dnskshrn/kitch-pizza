@@ -1,4 +1,8 @@
-import { calcCompareAt, calcPromoDiscount } from "@/lib/discount"
+import {
+  calcCompareAt,
+  calcPromoDiscount,
+  discountRateFromEffectValue,
+} from "@/lib/discount"
 import { isRuleScheduleActive } from "@/lib/discount-engine"
 import type { PromoCode, PromoCodeValidationError } from "@/types/database"
 import type { DiscountRule } from "@/types/promotions"
@@ -285,16 +289,19 @@ export async function calculateOrderPricing(
 
   for (let i = 0; i < items.length; i++) {
     const line = items[i]
-    const rule = activeItemPercentRules.find((r: DiscountRule) =>
-      r.target_item_ids?.includes(line.menu_item_id),
+    const rule = activeItemPercentRules.find(
+      (r: DiscountRule) =>
+        r.brand_id === brandId &&
+        r.target_item_ids?.includes(line.menu_item_id),
     )
 
     if (rule?.effect_value != null) {
+      const rate = discountRateFromEffectValue(rule.effect_value)
       const campaignDiscountPerUnit = Math.round(
-        line.original_price_bani * rule.effect_value,
+        line.original_price_bani * rate,
       )
       const lineCampaignDiscountBani = campaignDiscountPerUnit * line.quantity
-      const campaignPct = Math.round(rule.effect_value * 100)
+      const campaignPct = Math.round(rate * 100)
 
       items[i] = {
         ...line,

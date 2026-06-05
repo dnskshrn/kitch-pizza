@@ -11,6 +11,11 @@ export type ItemCampaignDiscount = {
 
 type CampaignItemFields = Pick<MenuItem, "id" | "price" | "discount_percent">
 
+/** effect_value в БД: доля 0–1 (0.2 = 20%); значения >1 — проценты 1–100. */
+function discountRateFromEffectValue(value: number): number {
+  return value > 1 ? value / 100 : value
+}
+
 export function getItemCampaignDiscount(
   item: CampaignItemFields,
   rules: DiscountRule[],
@@ -31,7 +36,8 @@ export function getItemCampaignDiscount(
 
   if (rule?.effect_value != null) {
     const originalPriceBani = shelfBani
-    const discountedPriceBani = Math.round(shelfBani * (1 - rule.effect_value))
+    const rate = discountRateFromEffectValue(rule.effect_value)
+    const discountedPriceBani = Math.round(shelfBani * (1 - rate))
     return {
       discountedPriceBani,
       originalPriceBani,

@@ -277,6 +277,7 @@ export const messages = {
       bonusesMaxRedeem: (amount: number) =>
         `Макс. списание бонусами: ${amount} MDL`,
       bonusesPromoConflict: "Промокод и бонусы нельзя совмещать",
+      bonusesPromotionConflict: "Бонусы недоступны при активной акции",
       pricingLoading: "Пересчёт…",
       submitFailed: "Не удалось отправить заказ",
       validation: {
@@ -521,6 +522,8 @@ export const messages = {
       bonusesMaxRedeem: (amount: number) =>
         `Maxim de bonusuri de utilizat: ${amount} MDL`,
       bonusesPromoConflict: "Promocodul și bonusurile nu pot fi combinate",
+      bonusesPromotionConflict:
+        "Bonusurile nu sunt disponibile în timpul promoției active",
       pricingLoading: "Recalcul…",
       submitFailed: "Nu am putut trimite comanda",
       validation: {

@@ -8,6 +8,25 @@ import type { PromoCode } from '@/types/database'
 
 type PromoCodeRow = PromoCode & { brand_id: string }
 
+export async function getStorefrontItemPercentCampaignRules(): Promise<DiscountRule[]> {
+  const brandId = await getBrandId()
+  const supabase = createServiceRoleClient()
+  const { data, error } = await (supabase.from("discount_rules") as any)
+    .select("*")
+    .eq("brand_id", brandId)
+    .eq("trigger_type", "auto")
+    .eq("effect_type", "item_percent")
+    .eq("is_active", true)
+    .order("priority", { ascending: false })
+
+  if (error) {
+    console.error("[getStorefrontItemPercentCampaignRules]", error.message)
+    return []
+  }
+
+  return (data ?? []) as DiscountRule[]
+}
+
 export async function getActiveDiscountRules(brandId: string): Promise<DiscountRule[]> {
   const supabase = createServiceRoleClient()
   const { data, error } = await (supabase.from('discount_rules') as any)

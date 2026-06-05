@@ -224,3 +224,84 @@ export async function fetchPromoCodeForDiscountRule(
   if (!data) return null
   return data as DiscountRulePromoPickRow
 }
+
+/** Позиция меню для выбора target_item_ids (item_percent). */
+export type DiscountRuleTargetMenuItemRow = {
+  id: string
+  name_ru: string
+  price: number | null
+  category_id: string
+  category_name_ru: string
+  category_sort_order: number
+  sort_order: number
+}
+
+/** Категория для выбора target_category_ids (cheapest_item_free). */
+export type DiscountRuleCategoryPickRow = {
+  id: string
+  name_ru: string
+  sort_order: number
+}
+
+function normalizeTargetMenuItemRow(raw: Record<string, unknown>): DiscountRuleTargetMenuItemRow {
+  const categoryRaw = raw.category
+  let category_id = ""
+  let category_name_ru = "Без категории"
+  let category_sort_order = 0
+  if (categoryRaw && typeof categoryRaw === "object") {
+    const c = categoryRaw as Record<string, unknown>
+    category_id = typeof c.id === "string" ? c.id : ""
+    category_name_ru =
+      typeof c.name_ru === "string" && c.name_ru.trim() !== ""
+        ? c.name_ru
+        : "Без категории"
+    category_sort_order =
+      typeof c.sort_order === "number" ? c.sort_order : 0
+  }
+  return {
+    id: String(raw.id ?? ""),
+    name_ru: typeof raw.name_ru === "string" ? raw.name_ru : "",
+    price: typeof raw.price === "number" ? raw.price : null,
+    category_id,
+    category_name_ru,
+    category_sort_order,
+    sort_order: typeof raw.sort_order === "number" ? raw.sort_order : 0,
+  }
+}
+
+export async function fetchTargetMenuItemsForDiscountRule(
+  brandId: string,
+): Promise<DiscountRuleTargetMenuItemRow[]> {
+  const supabase = createServiceRoleClient()
+  const { data, error } = await supabase
+    .from("menu_items")
+    .select(
+      "id, name_ru, price, sort_order, category_id, category:menu_categories(id, name_ru, sort_order)",
+    )
+    .eq("brand_id", brandId)
+    .order("sort_order", { ascending: true })
+
+  if (error) throw new Error(error.message)
+  const rows = (data ?? []) as Record<string, unknown>[]
+  return rows
+    .map((row) => normalizeTargetMenuItemRow(row))
+    .sort((a, b) => {
+      const cat = a.category_sort_order - b.category_sort_order
+      if (cat !== 0) return cat
+      return a.sort_order - b.sort_order
+    })
+}
+
+export async function fetchCategoriesForDiscountRule(
+  brandId: string,
+): Promise<DiscountRuleCategoryPickRow[]> {
+  const supabase = createServiceRoleClient()
+  const { data, error } = await supabase
+    .from("menu_categories")
+    .select("id, name_ru, sort_order")
+    .eq("brand_id", brandId)
+    .order("sort_order", { ascending: true })
+
+  if (error) throw new Error(error.message)
+  return (data ?? []) as DiscountRuleCategoryPickRow[]
+}

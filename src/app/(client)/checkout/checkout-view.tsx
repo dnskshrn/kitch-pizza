@@ -440,8 +440,8 @@ export function CheckoutView({
   }, [pricing, getDeliveryFeeBani])
 
   useEffect(() => {
-    if (appliedPromo) setBonusesToRedeem(0)
-  }, [appliedPromo])
+    if (appliedPromo || pricing?.active_promotion) setBonusesToRedeem(0)
+  }, [appliedPromo, pricing?.active_promotion])
 
   const deliveryFeeBani = pricing?.delivery_fee_bani ?? deliveryFeeForPricing
 
@@ -1320,8 +1320,18 @@ export function CheckoutView({
                   balance={pricing.bonuses_available}
                   value={bonusesToRedeem}
                   maxRedeemable={pricing.max_bonuses_redeemable}
-                  disabled={Boolean(appliedPromo) || pricing.bonuses_blocked}
-                  disabledTooltip={t.checkout.bonusesPromoConflict}
+                  disabled={
+                    Boolean(appliedPromo) ||
+                    pricing.bonuses_blocked ||
+                    pricing.active_promotion
+                  }
+                  disabledTooltip={
+                    appliedPromo
+                      ? t.checkout.bonusesPromoConflict
+                      : pricing.active_promotion
+                        ? t.checkout.bonusesPromotionConflict
+                        : t.checkout.bonusesPromoConflict
+                  }
                   onChange={setBonusesToRedeem}
                 />
               ) : null}

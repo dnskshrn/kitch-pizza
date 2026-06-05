@@ -2,7 +2,9 @@
 
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { redeemBonus } from "@/lib/bonus"
+import { isRuleScheduleActive } from "@/lib/discount-engine"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
+import type { DiscountRule } from "@/types/promotions"
 
 export type SendPosDraftToKitchenInput = {
   orderId: string
@@ -53,7 +55,7 @@ export async function sendPosDraftToKitchen(
 
   const { data: orderBefore, error: orderLoadError } = await supabase
     .from("orders")
-    .select("status, total, profile_id, bonuses_redeemed, order_number")
+    .select("status, total, profile_id, bonuses_redeemed, order_number, brand_id")
     .eq("id", input.orderId)
     .maybeSingle()
 
@@ -90,9 +92,9 @@ export async function sendPosDraftToKitchen(
   const rawMdl = Math.max(0, Number(input.bonusesToRedeem ?? 0))
   const redeemBani = Math.round(rawMdl * 100)
   const maxPointsFromGross = Math.floor(grossBeforeRedeemBani / 100)
-  const redeemPoints = Math.min(Math.floor(redeemBani / 100), maxPointsFromGross)
+  let redeemPoints = Math.min(Math.floor(redeemBani / 100), maxPointsFromGross)
   const appliedBani = redeemPoints * 100
-  const newTotalBani = Math.max(0, grossBeforeRedeemBani - appliedBani)
+  let newTotalBani = Math.max(0, grossBeforeRedeemBani - appliedBani)
 
   const profileIdForRedeem =
     typeof input.profileId === "string" && input.profileId.trim()
@@ -101,7 +103,32 @@ export async function sendPosDraftToKitchen(
 
   const nowIso = new Date().toISOString()
 
-  if (redeemPoints > 0) {
+  const brandId = (orderBefore as { brand_id: string | null }).brand_id
+  let promotionBlocksBonus = false
+  if (brandId) {
+    const now = new Date()
+    const { data: autoDiscountRules } = await (supabase.from("discount_rules") as any)
+      .select("*")
+      .eq("brand_id", brandId)
+      .eq("trigger_type", "auto")
+      .eq("is_active", true)
+
+    promotionBlocksBonus = (autoDiscountRules ?? []).some(
+      (rule: DiscountRule) =>
+        rule.effect_type !== "bonus_multiplier" &&
+        isRuleScheduleActive(rule, now),
+    )
+  }
+
+  if (promotionBlocksBonus) {
+    console.warn("[POS] bonuses cleared: active promotion", input.orderId)
+    await supabase
+      .from("orders")
+      .update({ bonuses_redeemed: 0 })
+      .eq("id", input.orderId)
+    redeemPoints = 0
+    newTotalBani = grossBeforeRedeemBani
+  } else if (redeemPoints > 0) {
     if (profileIdForRedeem) {
       const { data: freshOrder } = await supabase
         .from("orders")

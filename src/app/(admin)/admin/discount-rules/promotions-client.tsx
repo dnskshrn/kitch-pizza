@@ -60,6 +60,42 @@ function scheduleSummary(rule: DiscountRule): string {
   return bits.join(" ")
 }
 
+function formatValidityDate(iso: string | null): string {
+  if (!iso) return ""
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  return d.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+}
+
+function validitySummary(rule: DiscountRule): string {
+  if (!rule.valid_from && !rule.valid_until) return "бессрочно"
+  const from = formatValidityDate(rule.valid_from)
+  const to = formatValidityDate(rule.valid_until)
+  if (from && to) return `${from} — ${to}`
+  if (from) return `с ${from}`
+  if (to) return `до ${to}`
+  return "бессрочно"
+}
+
+function itemCountBadge(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return `${n} товар`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+    return `${n} товара`
+  }
+  return `${n} товаров`
+}
+
+function itemPercentDiscountPct(rule: DiscountRule): number {
+  if (rule.effect_value == null) return 0
+  return Math.round(rule.effect_value * 100)
+}
+
 type PromotionsClientProps = {
   rules: DiscountRule[]
   brands: AdminBrandOption[]
@@ -112,12 +148,15 @@ export function PromotionsClient({ rules: initialRules, brands }: PromotionsClie
     <>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold">Акции</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">Кампании</h1>
+            <p className="text-muted-foreground text-sm">Campanii</p>
+          </div>
           <Badge variant="secondary">{rules.length}</Badge>
         </div>
         <Button className="gap-2" onClick={openCreate}>
           <Plus className="h-4 w-4" />
-          Новое правило
+          Новая кампания
         </Button>
       </div>
 
@@ -144,45 +183,62 @@ export function PromotionsClient({ rules: initialRules, brands }: PromotionsClie
               </TableCell>
             </TableRow>
           ) : (
-            rules.map((rule) => (
-              <TableRow key={rule.id}>
-                <TableCell className="font-medium">{rule.name}</TableCell>
-                <TableCell className="font-mono text-sm">
-                  {brandSlugById.get(rule.brand_id) ?? rule.brand_id}
-                </TableCell>
-                <TableCell>{EFFECT_LABELS[rule.effect_type]}</TableCell>
-                <TableCell className="max-w-[200px] text-sm whitespace-normal">
-                  {scheduleSummary(rule)}
-                </TableCell>
-                <TableCell>{rule.priority}</TableCell>
-                <TableCell>
-                  <Switch
-                    checked={rule.is_active}
-                    disabled={togglePending}
-                    onCheckedChange={(v) => handleToggle(rule, v)}
-                    aria-label="Активно"
-                  />
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Редактировать"
-                    onClick={() => openEdit(rule)}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Удалить"
-                    onClick={() => setDeleteTarget(rule)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))
+            rules.map((rule) => {
+              const isItemPercent = rule.effect_type === "item_percent"
+              const itemCount = rule.target_item_ids?.length ?? 0
+              const discountPct = itemPercentDiscountPct(rule)
+
+              return (
+                <TableRow key={rule.id}>
+                  <TableCell className="font-medium">{rule.name}</TableCell>
+                  <TableCell className="font-mono text-sm">
+                    {brandSlugById.get(rule.brand_id) ?? rule.brand_id}
+                  </TableCell>
+                  <TableCell>
+                    {isItemPercent ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">{discountPct}% скидка</Badge>
+                        <Badge variant="secondary">
+                          {itemCountBadge(itemCount)}
+                        </Badge>
+                      </div>
+                    ) : (
+                      EFFECT_LABELS[rule.effect_type]
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-[200px] text-sm whitespace-normal">
+                    {isItemPercent ? validitySummary(rule) : scheduleSummary(rule)}
+                  </TableCell>
+                  <TableCell>{rule.priority}</TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={rule.is_active}
+                      disabled={togglePending}
+                      onCheckedChange={(v) => handleToggle(rule, v)}
+                      aria-label="Активно"
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Редактировать"
+                      onClick={() => openEdit(rule)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Удалить"
+                      onClick={() => setDeleteTarget(rule)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              )
+            })
           )}
         </TableBody>
       </Table>

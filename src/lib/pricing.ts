@@ -1,5 +1,7 @@
 import { calcCompareAt, calcPromoDiscount } from "@/lib/discount"
+import { isRuleScheduleActive } from "@/lib/discount-engine"
 import type { PromoCode, PromoCodeValidationError } from "@/types/database"
+import type { DiscountRule } from "@/types/promotions"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 const MAX_BONUS_REDEMPTION_PCT = 30
@@ -35,6 +37,7 @@ export interface PricingResult {
 
   delivery_fee_bani: number
   total_bani: number
+  active_promotion: boolean
 
   discount_rules_applied: Array<{
     type: "item_discount" | "promo_code" | "bonus_redemption"
@@ -178,6 +181,7 @@ export async function calculateOrderPricing(
       bonuses_redeemed: 0,
       delivery_fee_bani: deliveryFeeBani,
       total_bani: deliveryFeeBani,
+      active_promotion: false,
       discount_rules_applied: [],
     }
   }
@@ -261,7 +265,74 @@ export async function calculateOrderPricing(
     })
   }
 
+  const now = new Date()
+  const { data: itemPercentRules } = await (supabase.from("discount_rules") as any)
+    .select("*")
+    .eq("brand_id", brandId)
+    .eq("trigger_type", "auto")
+    .eq("effect_type", "item_percent")
+    .eq("is_active", true)
+
+  const activeItemPercentRules = (itemPercentRules ?? [])
+    .filter((rule: DiscountRule) => isRuleScheduleActive(rule, now))
+    .sort((a: DiscountRule, b: DiscountRule) => b.priority - a.priority)
+
+  const campaignDiscountByRule = new Map<
+    string,
+    { label: string; amount_bani: number }
+  >()
+  let menuDerivedItemDiscountBani = 0
+
+  for (let i = 0; i < items.length; i++) {
+    const line = items[i]
+    const rule = activeItemPercentRules.find((r: DiscountRule) =>
+      r.target_item_ids?.includes(line.menu_item_id),
+    )
+
+    if (rule?.effect_value != null) {
+      const campaignDiscountPerUnit = Math.round(
+        line.original_price_bani * rule.effect_value,
+      )
+      const lineCampaignDiscountBani = campaignDiscountPerUnit * line.quantity
+      const campaignPct = Math.round(rule.effect_value * 100)
+
+      items[i] = {
+        ...line,
+        item_discount_pct: campaignPct,
+        item_discount_bani: lineCampaignDiscountBani,
+      }
+
+      const tracked = campaignDiscountByRule.get(rule.id) ?? {
+        label: rule.label_ru?.trim() || rule.name,
+        amount_bani: 0,
+      }
+      tracked.amount_bani += lineCampaignDiscountBani
+      campaignDiscountByRule.set(rule.id, tracked)
+    } else {
+      menuDerivedItemDiscountBani += line.item_discount_bani
+    }
+  }
+
+  subtotalBani = 0
+  itemDiscountBani = 0
+  for (const line of items) {
+    subtotalBani += line.original_price_bani * line.quantity
+    itemDiscountBani += line.item_discount_bani
+  }
+
   const itemDiscountPct = pctOf(itemDiscountBani, subtotalBani)
+
+  const { data: autoDiscountRules } = await (supabase.from("discount_rules") as any)
+    .select("*")
+    .eq("brand_id", brandId)
+    .eq("trigger_type", "auto")
+    .eq("is_active", true)
+
+  const promotionActive = (autoDiscountRules ?? []).some(
+    (rule: DiscountRule) =>
+      rule.effect_type !== "bonus_multiplier" &&
+      isRuleScheduleActive(rule, now),
+  )
 
   let promoCodeId: string | null = null
   let promoDiscountBani = 0
@@ -276,21 +347,23 @@ export async function calculateOrderPricing(
     : 0
 
   const normalizedPromo = promoCode?.trim() ?? ""
-  if (normalizedPromo) {
+  if (normalizedPromo || promotionActive) {
     bonusesBlocked = true
-    const validation = await validatePromoCodeWithClient(
-      supabase,
-      normalizedPromo,
-      brandId,
-      subtotalBani,
-    )
+    if (normalizedPromo) {
+      const validation = await validatePromoCodeWithClient(
+        supabase,
+        normalizedPromo,
+        brandId,
+        subtotalBani,
+      )
 
-    if (validation.valid) {
-      promoCodeId = validation.promo.id
-      promoDiscountBani = calcPromoDiscount(validation.promo, subtotalBani)
-      promoDiscountPct = pctOf(promoDiscountBani, subtotalBani)
-    } else {
-      promoError = validation.error
+      if (validation.valid) {
+        promoCodeId = validation.promo.id
+        promoDiscountBani = calcPromoDiscount(validation.promo, subtotalBani)
+        promoDiscountPct = pctOf(promoDiscountBani, subtotalBani)
+      } else {
+        promoError = validation.error
+      }
     }
   } else {
     const remainingPct = Math.max(0, MAX_BONUS_REDEMPTION_PCT - itemDiscountPct)
@@ -318,12 +391,22 @@ export async function calculateOrderPricing(
 
   const discountRulesApplied: PricingResult["discount_rules_applied"] = []
 
-  if (itemDiscountBani > 0) {
+  if (menuDerivedItemDiscountBani > 0) {
     discountRulesApplied.push({
       type: "item_discount",
       label: "Скидка на товары",
-      amount_bani: itemDiscountBani,
+      amount_bani: menuDerivedItemDiscountBani,
     })
+  }
+
+  for (const entry of campaignDiscountByRule.values()) {
+    if (entry.amount_bani > 0) {
+      discountRulesApplied.push({
+        type: "item_discount",
+        label: entry.label,
+        amount_bani: entry.amount_bani,
+      })
+    }
   }
 
   if (promoDiscountBani > 0) {
@@ -357,6 +440,7 @@ export async function calculateOrderPricing(
     bonuses_redeemed: bonusesRedeemed,
     delivery_fee_bani: deliveryFeeBani,
     total_bani: totalBani,
+    active_promotion: promotionActive,
     discount_rules_applied: discountRulesApplied,
   }
 }

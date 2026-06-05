@@ -34,7 +34,12 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { deleteRule, saveRule } from "./actions"
-import { GiftMenuItemPicker, PromoCodePicker } from "./rule-search-comboboxes"
+import {
+  CategoryTargetPicker,
+  GiftMenuItemPicker,
+  ItemPercentTargetPicker,
+  PromoCodePicker,
+} from "./rule-search-comboboxes"
 
 const EFFECT_OPTIONS: { value: DiscountEffect; label: string }[] = [
   { value: "order_percent", label: "% от заказа" },
@@ -81,6 +86,8 @@ const ruleFormSchema = z
     valid_from: z.string(),
     valid_until: z.string(),
     max_uses: z.string(),
+    target_item_ids: z.array(z.string().uuid()),
+    target_category_ids: z.array(z.string().uuid()),
   })
   .superRefine((val, ctx) => {
     const vf = val.valid_from.trim()
@@ -169,6 +176,14 @@ const ruleFormSchema = z
       }
     }
 
+    if (val.effect_type === "item_percent" && val.target_item_ids.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Выберите хотя бы один товар",
+        path: ["target_item_ids"],
+      })
+    }
+
     if (val.effect_type === "free_item") {
       const gid = val.gift_item_id.trim()
       if (!gid) {
@@ -231,6 +246,8 @@ export type RuleFormValues = {
   valid_from: string
   valid_until: string
   max_uses: string
+  target_item_ids: string[]
+  target_category_ids: string[]
 }
 
 function isoToDatetimeLocal(iso: string | null): string {
@@ -277,6 +294,10 @@ function ruleToFormValues(rule: DiscountRule): RuleFormValues {
     valid_from: isoToDatetimeLocal(rule.valid_from),
     valid_until: isoToDatetimeLocal(rule.valid_until),
     max_uses: rule.max_uses != null ? String(rule.max_uses) : "",
+    target_item_ids: rule.target_item_ids ? [...rule.target_item_ids] : [],
+    target_category_ids: rule.target_category_ids
+      ? [...rule.target_category_ids]
+      : [],
   }
 }
 
@@ -300,6 +321,8 @@ function emptyForm(defaultBrandId: string): RuleFormValues {
     valid_from: "",
     valid_until: "",
     max_uses: "",
+    target_item_ids: [],
+    target_category_ids: [],
   }
 }
 
@@ -379,8 +402,15 @@ function formToPartialRule(values: RuleFormValues, id: string | null): Partial<D
     effect_value,
     gift_item_id,
     gift_item_variant_id,
-    target_item_ids: null,
-    target_category_ids: null,
+    target_item_ids:
+      values.effect_type === "item_percent" && values.target_item_ids.length > 0
+        ? [...values.target_item_ids]
+        : null,
+    target_category_ids:
+      values.effect_type === "cheapest_item_free" &&
+      values.target_category_ids.length > 0
+        ? [...values.target_category_ids]
+        : null,
     free_every_n,
     trigger_type: values.trigger_type,
     promo_code_id,
@@ -664,14 +694,53 @@ export function RuleDialog({
                 ) : null}
 
                 {effectType === "cheapest_item_free" ? (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name="free_every_n"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Купи N — один бесплатно</FormLabel>
+                          <FormControl>
+                            <Input type="number" min={1} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="target_category_ids"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Категории</FormLabel>
+                          <FormControl>
+                            <CategoryTargetPicker
+                              brandId={form.watch("brand_id")}
+                              selectedIds={field.value}
+                              onChange={field.onChange}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </>
+                ) : null}
+
+                {effectType === "item_percent" ? (
                   <FormField
                     control={form.control}
-                    name="free_every_n"
+                    name="target_item_ids"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Купи N — один бесплатно</FormLabel>
+                        <FormLabel>Товары</FormLabel>
                         <FormControl>
-                          <Input type="number" min={1} {...field} />
+                          <ItemPercentTargetPicker
+                            brandId={form.watch("brand_id")}
+                            selectedIds={field.value}
+                            onChange={field.onChange}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>

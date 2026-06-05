@@ -12,13 +12,13 @@ type SegmentConfig = {
   min_orders: number
   order_period_days: number
   inactive_days: number
+  bonus_amount: number
 }
 
 type CampaignRow = {
   id: string
   name: string
   sms_text: string
-  bonus_amount: number
   segment_config: SegmentConfig
   status: string
 }
@@ -256,7 +256,7 @@ async function logCampaignSend(
 
 async function markCampaignFailed(supabase: SupabaseClient): Promise<void> {
   const { error } = await (supabase.from("campaigns") as any)
-    .update({ status: "failed", updated_at: new Date().toISOString() })
+    .update({ status: "failed" })
     .eq("id", CAMPAIGN_ID)
 
   if (error) {
@@ -277,7 +277,7 @@ async function run(): Promise<void> {
   const { data: campaignRaw, error: campaignError } = await (
     supabase.from("campaigns") as any
   )
-    .select("id, name, sms_text, bonus_amount, segment_config, status")
+    .select("id, name, sms_text, segment_config, status")
     .eq("id", CAMPAIGN_ID)
     .single()
 
@@ -293,14 +293,15 @@ async function run(): Promise<void> {
     !segment ||
     typeof segment.min_orders !== "number" ||
     typeof segment.order_period_days !== "number" ||
-    typeof segment.inactive_days !== "number"
+    typeof segment.inactive_days !== "number" ||
+    typeof segment.bonus_amount !== "number"
   ) {
     throw new Error("Invalid campaign.segment_config")
   }
 
-  const bonusAmount = Number(campaign.bonus_amount)
+  const bonusAmount = segment.bonus_amount
   if (!Number.isFinite(bonusAmount) || bonusAmount <= 0) {
-    throw new Error("Invalid campaign.bonus_amount")
+    throw new Error("Invalid campaign.segment_config.bonus_amount")
   }
 
   const smsText = campaign.sms_text?.trim()
@@ -396,7 +397,6 @@ async function run(): Promise<void> {
       status: "sent",
       sent_at: now,
       total_recipients: sent,
-      updated_at: now,
     })
     .eq("id", CAMPAIGN_ID)
 

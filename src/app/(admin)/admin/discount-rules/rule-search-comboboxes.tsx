@@ -1,8 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { CheckIcon, ChevronDownIcon } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Command,
   CommandEmpty,
@@ -11,6 +13,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import { Input } from "@/components/ui/input"
 import {
   Popover,
   PopoverContent,
@@ -25,12 +28,16 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import {
+  fetchCategoriesForDiscountRule,
   fetchGiftMenuItemForDiscountRule,
   fetchPromoCodeForDiscountRule,
+  fetchTargetMenuItemsForDiscountRule,
   searchGiftMenuItemsForDiscountRule,
   searchPromoCodesForDiscountRule,
+  type DiscountRuleCategoryPickRow,
   type DiscountRuleGiftMenuPickRow,
   type DiscountRulePromoPickRow,
+  type DiscountRuleTargetMenuItemRow,
 } from "./actions"
 
 function useDebouncedValue<T>(value: T, ms: number): T {
@@ -233,6 +240,265 @@ type PromoCodePickerProps = {
   selectedPromoId: string
   onPick: (promoId: string) => void
   disabled?: boolean
+}
+
+function formatPriceBani(price: number | null): string {
+  if (price == null) return "—"
+  return `${(price / 100).toFixed(2)} MDL`
+}
+
+function itemCountLabel(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return `${n} товар выбран`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+    return `${n} товара выбрано`
+  }
+  return `${n} товаров выбрано`
+}
+
+type ItemPercentTargetPickerProps = {
+  brandId: string
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+  disabled?: boolean
+}
+
+export function ItemPercentTargetPicker({
+  brandId,
+  selectedIds,
+  onChange,
+  disabled,
+}: ItemPercentTargetPickerProps) {
+  const [search, setSearch] = useState("")
+  const [rows, setRows] = useState<DiscountRuleTargetMenuItemRow[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!brandId) {
+      setRows([])
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    fetchTargetMenuItemsForDiscountRule(brandId)
+      .then((list) => {
+        if (!cancelled) setRows(list)
+      })
+      .catch(() => {
+        if (!cancelled) setRows([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [brandId])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((row) => row.name_ru.toLowerCase().includes(q))
+  }, [rows, search])
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, DiscountRuleTargetMenuItemRow[]>()
+    for (const row of filtered) {
+      const key = row.category_id || "__none__"
+      const list = map.get(key) ?? []
+      list.push(row)
+      map.set(key, list)
+    }
+    return [...map.entries()].map(([categoryId, items]) => ({
+      categoryId,
+      categoryName: items[0]?.category_name_ru ?? "Без категории",
+      items,
+    }))
+  }, [filtered])
+
+  function toggleItem(id: string, checked: boolean) {
+    if (checked) {
+      onChange([...new Set([...selectedIds, id])])
+    } else {
+      onChange(selectedIds.filter((x) => x !== id))
+    }
+  }
+
+  function toggleCategory(items: DiscountRuleTargetMenuItemRow[], checked: boolean) {
+    const ids = items.map((i) => i.id)
+    if (checked) {
+      onChange([...new Set([...selectedIds, ...ids])])
+    } else {
+      const remove = new Set(ids)
+      onChange(selectedIds.filter((x) => !remove.has(x)))
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">{itemCountLabel(selectedIds.length)}</Badge>
+      </div>
+      <Input
+        placeholder="Поиск по названию…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        disabled={disabled || !brandId}
+        autoComplete="off"
+      />
+      <div className="max-h-64 overflow-y-auto rounded-md border">
+        {loading ? (
+          <p className="text-muted-foreground px-3 py-6 text-center text-sm">
+            Загрузка…
+          </p>
+        ) : grouped.length === 0 ? (
+          <p className="text-muted-foreground px-3 py-6 text-center text-sm">
+            {brandId ? "Нет позиций" : "Выберите бренд"}
+          </p>
+        ) : (
+          grouped.map((group) => {
+            const groupIds = group.items.map((i) => i.id)
+            const allSelected = groupIds.every((id) => selectedIds.includes(id))
+            const someSelected =
+              !allSelected && groupIds.some((id) => selectedIds.includes(id))
+            return (
+              <div key={group.categoryId} className="border-b last:border-b-0">
+                <label className="bg-muted/40 flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium">
+                  <Checkbox
+                    checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                    disabled={disabled}
+                    onCheckedChange={(c) =>
+                      toggleCategory(group.items, c === true)
+                    }
+                  />
+                  {group.categoryName}
+                </label>
+                <ul>
+                  {group.items.map((item) => (
+                    <li key={item.id}>
+                      <label className="hover:bg-muted/50 flex cursor-pointer items-center gap-2 px-3 py-2 pl-8 text-sm">
+                        <Checkbox
+                          checked={selectedIds.includes(item.id)}
+                          disabled={disabled}
+                          onCheckedChange={(c) => toggleItem(item.id, c === true)}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{item.name_ru}</span>
+                        <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                          {formatPriceBani(item.price)}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
+type CategoryTargetPickerProps = {
+  brandId: string
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+  disabled?: boolean
+}
+
+export function CategoryTargetPicker({
+  brandId,
+  selectedIds,
+  onChange,
+  disabled,
+}: CategoryTargetPickerProps) {
+  const [search, setSearch] = useState("")
+  const [rows, setRows] = useState<DiscountRuleCategoryPickRow[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!brandId) {
+      setRows([])
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    fetchCategoriesForDiscountRule(brandId)
+      .then((list) => {
+        if (!cancelled) setRows(list)
+      })
+      .catch(() => {
+        if (!cancelled) setRows([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [brandId])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((row) => row.name_ru.toLowerCase().includes(q))
+  }, [rows, search])
+
+  function toggleCategory(id: string, checked: boolean) {
+    if (checked) {
+      onChange([...new Set([...selectedIds, id])])
+    } else {
+      onChange(selectedIds.filter((x) => x !== id))
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Input
+        placeholder="Поиск категории…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        disabled={disabled || !brandId}
+        autoComplete="off"
+      />
+      <div className="max-h-48 overflow-y-auto rounded-md border">
+        {loading ? (
+          <p className="text-muted-foreground px-3 py-6 text-center text-sm">
+            Загрузка…
+          </p>
+        ) : filtered.length === 0 ? (
+          <p className="text-muted-foreground px-3 py-6 text-center text-sm">
+            {brandId ? "Нет категорий" : "Выберите бренд"}
+          </p>
+        ) : (
+          <ul>
+            {filtered.map((cat) => (
+              <li key={cat.id}>
+                <label className="hover:bg-muted/50 flex cursor-pointer items-center gap-2 px-3 py-2 text-sm">
+                  <Checkbox
+                    checked={selectedIds.includes(cat.id)}
+                    disabled={disabled}
+                    onCheckedChange={(c) => toggleCategory(cat.id, c === true)}
+                  />
+                  <span className="truncate">{cat.name_ru}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {selectedIds.length > 0 ? (
+        <p className="text-muted-foreground text-xs">
+          Выбрано категорий: {selectedIds.length}
+        </p>
+      ) : (
+        <p className="text-muted-foreground text-xs">
+          Без выбора — правило действует на все категории
+        </p>
+      )}
+    </div>
+  )
 }
 
 export function PromoCodePicker({

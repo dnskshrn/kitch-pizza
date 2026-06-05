@@ -1,12 +1,14 @@
 "use client"
 
-import { calcCompareAt } from "@/lib/discount"
+import { useStorefrontCampaignRules } from "@/components/client/storefront-campaign-rules-context"
 import {
   formatMoney,
   pickLocalizedDescription,
   pickLocalizedName,
   type Lang,
 } from "@/lib/i18n/storefront"
+import { getItemCampaignDiscount } from "@/lib/storefront-item-campaign-discount"
+import type { DiscountRule } from "@/types/promotions"
 import { useStoreOpen } from "@/hooks/use-store-open"
 import { showStoreClosedModal } from "@/lib/store/store-closed-store"
 import { useLanguage } from "@/lib/store/language-store"
@@ -42,11 +44,6 @@ function getDisplayPriceBani(item: MenuItem): number | null {
   return item.price
 }
 
-function hasActiveDiscount(item: MenuItem): boolean {
-  const d = item.discount_percent
-  return d != null && d > 0 && d < 100
-}
-
 export type MenuItemPriceLabels = {
   priceMain: string | null
   priceCompare: string | null
@@ -56,38 +53,34 @@ export type MenuItemPriceLabels = {
 export function getMenuItemPriceLabels(
   item: MenuItem,
   lang: Lang,
+  rules: DiscountRule[] = [],
 ): MenuItemPriceLabels {
   const priceBani = getDisplayPriceBani(item)
-  const discount = hasActiveDiscount(item) ? item.discount_percent! : null
-
-  const priceLabelNoDiscount =
-    priceBani != null
-      ? item.has_sizes
-        ? lang === "RO"
-          ? `de la ${formatMoney(priceBani, lang)}`
-          : `от ${formatMoney(priceBani, lang)}`
-        : formatMoney(priceBani, lang)
-      : null
-
-  let priceMain: string | null = null
-  let priceCompare: string | null = null
-
-  if (priceBani != null && discount != null) {
-    const compareBani = calcCompareAt(priceBani, discount)
-    priceCompare = formatMoney(compareBani, lang)
-    if (item.has_sizes) {
-      priceMain =
-        lang === "RO"
-          ? `de la ${formatMoney(priceBani, lang)}`
-          : `от ${formatMoney(priceBani, lang)}`
-    } else {
-      priceMain = formatMoney(priceBani, lang)
-    }
-  } else {
-    priceMain = priceLabelNoDiscount
+  if (priceBani == null) {
+    return { priceMain: null, priceCompare: null }
   }
 
-  return { priceMain, priceCompare }
+  const { discountedPriceBani, originalPriceBani, hasCampaign } =
+    getItemCampaignDiscount(item, rules, priceBani)
+
+  const formatShelf = (bani: number) =>
+    item.has_sizes
+      ? lang === "RO"
+        ? `de la ${formatMoney(bani, lang)}`
+        : `от ${formatMoney(bani, lang)}`
+      : formatMoney(bani, lang)
+
+  if (hasCampaign) {
+    return {
+      priceMain: formatShelf(discountedPriceBani),
+      priceCompare: formatMoney(originalPriceBani, lang),
+    }
+  }
+
+  return {
+    priceMain: formatShelf(priceBani),
+    priceCompare: null,
+  }
 }
 
 function MenuItemPriceBlock({
@@ -132,11 +125,16 @@ export function MenuItemCard({
   const openProductModal = useProductModalStore((s) => s.open)
   const { isOpen: storeOpen } = useStoreOpen(brandSlug)
   const { t } = useLanguage()
+  const campaignRules = useStorefrontCampaignRules()
 
   const name = pickLocalizedName(item, lang)
   const description = pickLocalizedDescription(item, lang)
 
-  const { priceMain, priceCompare } = getMenuItemPriceLabels(item, lang)
+  const { priceMain, priceCompare } = getMenuItemPriceLabels(
+    item,
+    lang,
+    campaignRules,
+  )
   const aria = cardAriaLabel(name, priceMain, t.menu.chooseProduct)
 
   const openModal = () => {

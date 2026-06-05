@@ -1,5 +1,6 @@
 "use client"
 
+import { useStorefrontCampaignRules } from "@/components/client/storefront-campaign-rules-context"
 import {
   fetchStorefrontMenuItemToppingGroups,
   type StorefrontMenuItemToppingGroup,
@@ -28,6 +29,7 @@ import {
   getFreeUnitsRemaining,
 } from "@/lib/topping-pricing"
 import { useProductModalStore } from "@/lib/store/product-modal-store"
+import { getItemCampaignDiscount } from "@/lib/storefront-item-campaign-discount"
 import type { CartTopping } from "@/types/cart"
 import type { MenuItem, MenuItemVariant, Topping } from "@/types/database"
 import { menuItemImageAlt } from "@/lib/seo/menu-item-image-alt"
@@ -216,6 +218,7 @@ export function ProductModalRoot() {
   const [rendered, setRendered] = useState(false)
 
   const { lang, t } = useLanguage()
+  const campaignRules = useStorefrontCampaignRules()
   const { isOpen: storeOpen } = useStoreOpen()
   const [toppingSections, setToppingSections] = useState<
     StorefrontMenuItemToppingGroup[]
@@ -440,26 +443,51 @@ export function ProductModalRoot() {
   const addToCartLabel = t.product.addToCart
   const closeLabel = t.product.close
 
-  const totalLabel = useMemo(() => {
-    if (!panelItem) return ""
-    return formatMoney(
-      totalBani(
-        panelItem,
-        variantsEffective,
-        selectedVariantId,
-        cartToppings,
-        toppingSections,
-      ),
-      lang,
+  const priceDisplay = useMemo(() => {
+    if (!panelItem) {
+      return {
+        totalLabel: "",
+        compareLabel: null as string | null,
+        hasCampaign: false,
+      }
+    }
+
+    const rawTotalBani = totalBani(
+      panelItem,
+      variantsEffective,
+      selectedVariantId,
+      cartToppings,
+      toppingSections,
     )
+    const baseBani = getBasePriceBani(
+      panelItem,
+      variantsEffective,
+      selectedVariantId,
+    )
+    const campaign = getItemCampaignDiscount(
+      panelItem,
+      campaignRules,
+      baseBani,
+    )
+    const displayTotalBani = campaign.hasCampaign
+      ? rawTotalBani - baseBani + campaign.discountedPriceBani
+      : rawTotalBani
+
+    return {
+      totalLabel: formatMoney(displayTotalBani, lang),
+      compareLabel: campaign.hasCampaign
+        ? formatMoney(rawTotalBani, lang)
+        : null,
+      hasCampaign: campaign.hasCampaign,
+    }
   }, [
     panelItem,
     selectedVariantId,
-    toppings,
     cartToppings,
     toppingSections,
     lang,
     variantsEffective,
+    campaignRules,
   ])
 
   const weightPillLabel = useMemo(() => {
@@ -531,7 +559,18 @@ export function ProductModalRoot() {
         disabled={addToCartDisabled}
         className="storefront-modal-cta w-full cursor-pointer rounded-full py-3.5 text-[16px] font-bold transition-all duration-200 hover:brightness-110 active:scale-[0.98] active:brightness-95 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {addToCartLabel} · {totalLabel}
+        {addToCartLabel}
+        {priceDisplay.compareLabel ? (
+          <>
+            {" · "}
+            <span className="font-normal line-through opacity-70">
+              {priceDisplay.compareLabel}
+            </span>{" "}
+            {priceDisplay.totalLabel}
+          </>
+        ) : (
+          <> · {priceDisplay.totalLabel}</>
+        )}
       </button>
     )
 

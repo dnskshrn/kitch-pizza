@@ -9,6 +9,7 @@ import { BrandJsonLd } from "@/components/seo/JsonLd"
 import { MetaPixel } from "@/components/MetaPixel"
 import { Toaster } from "@/components/ui/sonner"
 import { getBrandBySlug } from "@/brands"
+import { getStorefrontItemPercentCampaignRules } from "@/lib/actions/discounts"
 import { getStorefrontCategories } from "@/lib/data/storefront-categories"
 import { getBrandSeo } from "@/lib/seo/brand-seo"
 import { headers } from "next/headers"
@@ -78,7 +79,10 @@ export default async function ClientLayout({
     )
   }
 
-  const categories = await getStorefrontCategories()
+  const [categories, itemPercentCampaignRules] = await Promise.all([
+    getStorefrontCategories(),
+    getStorefrontItemPercentCampaignRules(),
+  ])
 
   return (
     <div
@@ -90,7 +94,11 @@ export default async function ClientLayout({
       <BrandJsonLd brandSlug={brandSlug} />
       <MetaPixel pixelId={brand.metaPixelId} />
       <StorefrontTopBar brandSlug={brandSlug} />
-      <ClientChrome brandSlug={brandSlug} categories={categories}>
+      <ClientChrome
+        brandSlug={brandSlug}
+        categories={categories}
+        itemPercentCampaignRules={itemPercentCampaignRules}
+      >
         {children}
       </ClientChrome>
       <Toaster position="top-center" richColors />

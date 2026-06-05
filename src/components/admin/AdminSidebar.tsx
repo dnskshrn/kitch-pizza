@@ -140,7 +140,7 @@ const marketingNavGroup: NavGroup = {
   icon: Megaphone,
   items: [
     { href: "/admin/promotions", label: "Галерея", icon: Images },
-    { href: "/admin/discount-rules", label: "Акции", icon: Tag },
+    { href: "/admin/discount-rules", label: "Кампании", icon: Tag },
     { href: "/admin/promo-codes", label: "Промокоды", icon: Ticket },
     {
       href: "/admin/settings/bonus",

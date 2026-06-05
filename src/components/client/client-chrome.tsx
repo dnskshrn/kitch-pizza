@@ -7,6 +7,8 @@ import { DeliveryRoot } from "@/components/client/delivery-modal"
 import { MainHeader } from "@/components/client/main-header"
 import { MenuCategoryBar } from "@/components/client/menu-category-bar"
 import { ProductModalRoot } from "@/components/client/product-modal/ProductModalRoot"
+import { StorefrontCampaignRulesProvider } from "@/components/client/storefront-campaign-rules-context"
+import type { DiscountRule } from "@/types/promotions"
 import { StorefrontHaptics } from "@/components/client/storefront-haptics"
 import type { Category } from "@/types/database"
 import { htmlLang } from "@/lib/i18n/storefront"
@@ -17,6 +19,7 @@ import { useEffect } from "react"
 type ClientChromeProps = {
   brandSlug: string
   categories: Category[]
+  itemPercentCampaignRules: DiscountRule[]
   children: React.ReactNode
 }
 
@@ -31,6 +34,7 @@ function hasBoutiqueStorefront(brandSlug: string): boolean {
 export function ClientChrome({
   brandSlug,
   categories,
+  itemPercentCampaignRules,
   children,
 }: ClientChromeProps) {
   const pathname = usePathname()
@@ -59,7 +63,7 @@ export function ClientChrome({
   }, [brandSlug])
 
   return (
-    <>
+    <StorefrontCampaignRulesProvider rules={itemPercentCampaignRules}>
       <AuthInitializer />
       <AuthModal />
       {isCheckoutFlow ? (
@@ -83,6 +87,6 @@ export function ClientChrome({
           <main className="flex-1">{children}</main>
         </>
       )}
-    </>
+    </StorefrontCampaignRulesProvider>
   )
 }

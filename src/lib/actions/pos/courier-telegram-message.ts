@@ -180,13 +180,41 @@ function estimatedDeliveryTime(createdAt: string | null | undefined): string {
   })
 }
 
+function paymentCollectionLines(
+  row: CourierOrderTelegramFields,
+  totalBani: number,
+): string[] {
+  const totalText = `${formatMdl(totalBani)} MDL`
+  const method = row.payment_method
+  const lines = [
+    `💳 Оплата: ${paymentMethodLabel(method)}`,
+    `💰 ИТОГОВАЯ СУММА: ${totalText}`,
+  ]
+
+  if (method === "cash") {
+    const changeFromBani = Math.max(0, Math.round(row.change_from ?? 0))
+    if (changeFromBani > totalBani) {
+      lines.push(
+        `👉 Взять у клиента: ${totalText}`,
+        `💵 Клиент даст: ${formatMdl(changeFromBani)} MDL · Сдача: ${formatMdl(changeFromBani - totalBani)} MDL`,
+      )
+    } else {
+      lines.push(`👉 Взять у клиента: ${totalText}`)
+    }
+    return lines
+  }
+
+  if (method === "card") {
+    lines.push(`👉 Принять картой: ${totalText}`)
+    return lines
+  }
+
+  lines.push(`👉 Сумма к получению: ${totalText}`)
+  return lines
+}
+
 function buildCourierAssignmentMessage(row: CourierOrderTelegramFields): string {
   const totalBani = Math.max(0, Math.round(row.total ?? 0))
-  const deliveryFeeBani = Math.max(0, Math.round(row.delivery_fee ?? 0))
-  const subtotalBani = Math.max(0, totalBani - deliveryFeeBani)
-  const deliveryPriceText =
-    deliveryFeeBani === 0 ? "Бесплатно" : `${formatMdl(deliveryFeeBani)} MDL`
-
   const clientName = row.user_name?.trim() ?? ""
   const lines: string[] = [
     `🛵 Новый заказ #${row.order_number}`,
@@ -205,9 +233,7 @@ function buildCourierAssignmentMessage(row: CourierOrderTelegramFields): string 
     "Состав заказа:",
     orderItemsBlock(row.order_items),
     "",
-    `🧾 Сумма заказа: ${formatMdl(subtotalBani)} MDL`,
-    `🚗 Доставка: ${deliveryPriceText}`,
-    `💰 К оплате: ${formatMdl(totalBani)} MDL — ${paymentMethodLabel(row.payment_method)}`,
+    ...paymentCollectionLines(row, totalBani),
   )
 
   return lines.join("\n")

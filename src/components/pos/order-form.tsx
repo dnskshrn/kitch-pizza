@@ -1314,10 +1314,57 @@ export function OrderForm({
 
   const posBonusMaxRedeemable = useMemo(() => {
     const balance = posBonusBalance ?? 0
-    const orderTotalMdl = totalBani / 100
     const rate = posMaxRedemptionRate ?? 0.3
-    return Math.floor(Math.min(balance, orderTotalMdl * rate))
-  }, [posBonusBalance, totalBani, posMaxRedemptionRate])
+    const cartSubtotalBani = effectiveEngineOutput.itemSubtotalBani
+
+    const giftItemsValueBani = (effectiveEngineOutput.giftItems ?? []).reduce(
+      (sum, gift) => {
+        const cartItem = cartForEngine.find(
+          (i) =>
+            i.menu_item_id === gift.menu_item_id &&
+            (gift.variant_id != null
+              ? i.variant_id === gift.variant_id
+              : i.variant_id == null),
+        )
+        return sum + (cartItem ? cartItem.unit_price_bani * gift.quantity : 0)
+      },
+      0,
+    )
+
+    const cheapestDiscountBani = (effectiveEngineOutput.appliedDiscounts ?? [])
+      .filter((d) => d.effect_type === "cheapest_item_free")
+      .reduce((sum, d) => sum + d.discount_bani, 0)
+    const engineDiscountBani = Math.max(
+      0,
+      (effectiveEngineOutput.totalDiscountBani ?? 0) - cheapestDiscountBani,
+    )
+    const effectiveSubtotalBani = Math.max(
+      0,
+      cartSubtotalBani - engineDiscountBani - giftItemsValueBani,
+    )
+
+    const maxFromOrder = Math.floor((effectiveSubtotalBani / 100) * rate)
+    return Math.floor(Math.min(balance, maxFromOrder))
+  }, [
+    posBonusBalance,
+    posMaxRedemptionRate,
+    effectiveEngineOutput.itemSubtotalBani,
+    effectiveEngineOutput.totalDiscountBani,
+    effectiveEngineOutput.appliedDiscounts,
+    effectiveEngineOutput.giftItems,
+    cartForEngine,
+  ])
+
+  const promotionActive = useMemo(
+    () =>
+      (effectiveEngineOutput.appliedDiscounts ?? []).some(
+        (e) => e.effect_type !== "bonus_multiplier",
+      ) || (effectiveEngineOutput.giftItems ?? []).length > 0,
+    [
+      effectiveEngineOutput.appliedDiscounts,
+      effectiveEngineOutput.giftItems,
+    ],
+  )
 
   const redeemBaniApplied = effectiveBonusPoints * 100
   const payableAfterBonusBani = Math.max(0, totalBani - redeemBaniApplied)
@@ -1609,19 +1656,16 @@ export function OrderForm({
 
   useEffect(() => {
     if (!posBonusRedeemAllowed) return
-    const persisted =
-      listOrder?.id === posOrderId
-        ? Math.max(0, Math.floor(listOrder.bonuses_redeemed ?? 0))
-        : 0
-    const cap = Math.max(posBonusMaxRedeemable, persisted)
-    setBonusesToRedeem((prev) => (prev > cap ? cap : prev))
-  }, [
-    posBonusRedeemAllowed,
-    posBonusMaxRedeemable,
-    listOrder?.id,
-    listOrder?.bonuses_redeemed,
-    posOrderId,
-  ])
+    setBonusesToRedeem((prev) =>
+      prev > posBonusMaxRedeemable ? posBonusMaxRedeemable : prev,
+    )
+  }, [posBonusRedeemAllowed, posBonusMaxRedeemable])
+
+  useEffect(() => {
+    if (!promotionActive) return
+    setBonusesToRedeem(0)
+    setBonusRedeemFieldError(null)
+  }, [promotionActive])
 
   useEffect(() => {
     setBonusRedeemTouched(false)
@@ -2711,7 +2755,7 @@ export function OrderForm({
     (rawStr: string) => {
       setBonusRedeemTouched(true)
       const rate = posMaxRedemptionRate ?? 0.3
-      const maxAllowed = Math.max(posBonusMaxRedeemable, persistedOrderBonusPts)
+      const maxAllowed = posBonusMaxRedeemable
       const t = rawStr.trim().replace(",", ".")
       if (t === "") {
         setBonusesToRedeem(0)
@@ -2732,7 +2776,7 @@ export function OrderForm({
       setBonusRedeemFieldError(msg)
       setBonusesToRedeem(capped)
     },
-    [posMaxRedemptionRate, posBonusMaxRedeemable, persistedOrderBonusPts],
+    [posMaxRedemptionRate, posBonusMaxRedeemable],
   )
 
   const handleSelectSavedAddress = useCallback(
@@ -3916,7 +3960,11 @@ export function OrderForm({
                         >
                           Списать бонусов
                         </label>
-                        {!bonusRedeemTouched && posBonusRedeemAllowed ? (
+                        {promotionActive ? (
+                          <p className="text-[11px] text-[#808080]">
+                            Бонусы недоступны при активной акции
+                          </p>
+                        ) : !bonusRedeemTouched && posBonusRedeemAllowed ? (
                           <p className="text-[11px] text-[#808080]">
                             Можно списать до {posBonusMaxRedeemable} бонусов (
                             {Math.round((posMaxRedemptionRate ?? 0.3) * 100)}% от
@@ -3929,7 +3977,8 @@ export function OrderForm({
                           min={0}
                           step={0.01}
                           inputMode="decimal"
-                          className="h-8 font-mono text-xs tabular-nums"
+                          disabled={promotionActive}
+                          className="h-8 font-mono text-xs tabular-nums disabled:cursor-not-allowed disabled:opacity-50"
                           value={
                             bonusesToRedeem === 0 && !bonusRedeemTouched
                               ? effectiveBonusPoints === 0

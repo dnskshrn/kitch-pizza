@@ -9,7 +9,6 @@ import {
   updateMenuItem,
   type MenuItemToppingGroupAttachment,
 } from "./actions"
-import { calcCompareAt } from "@/lib/discount"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -40,13 +39,6 @@ function leiToBani(lei: number) {
 function baniToLei(bani: number | null) {
   if (bani === null || bani === undefined) return ""
   return String(bani / 100)
-}
-
-function formatPreviewLeiFromBani(bani: number): string {
-  return (bani / 100).toLocaleString("ro-MD", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
 }
 
 const TAG_NONE = "__none__" as const
@@ -93,59 +85,6 @@ function parseGrams(s: string): number | null | "invalid" {
   return n
 }
 
-function DiscountPreview({
-  addDiscount,
-  discountPercentStr,
-  priceLei,
-  variants,
-}: {
-  addDiscount: boolean
-  discountPercentStr: string
-  priceLei: string
-  variants: VariantDraft[]
-}) {
-  const discountD = Number.parseInt(discountPercentStr.trim(), 10)
-  const show =
-    addDiscount &&
-    Number.isFinite(discountD) &&
-    discountD >= 1 &&
-    discountD <= 90
-
-  if (!show) return null
-
-  if (variants.length > 0) {
-    return (
-      <div className="text-muted-foreground space-y-1 text-xs">
-        {variants.map((v, i) => {
-          const pLei = parseLei(v.priceLei)
-          if (pLei === null) return null
-          const bani = leiToBani(pLei)
-          const label = v.name_ru.trim() || `Вариант ${i + 1}`
-          return (
-            <div key={v.id ?? `draft-${i}`}>
-              {label}: {formatPreviewLeiFromBani(bani)} лей →{" "}
-              <span className="line-through text-gray-400">
-                {formatPreviewLeiFromBani(calcCompareAt(bani, discountD))} лей
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
-  const p = parseLei(priceLei)
-  if (p === null) return null
-  return (
-    <div className="text-muted-foreground text-xs">
-      {formatPreviewLeiFromBani(leiToBani(p))} лей →{" "}
-      <span className="line-through text-gray-400">
-        {formatPreviewLeiFromBani(calcCompareAt(leiToBani(p), discountD))} лей
-      </span>
-    </div>
-  )
-}
-
 type MenuItemRow = MenuItem & {
   category: { id: string; name_ru: string; name_ro: string } | null
 }
@@ -187,8 +126,6 @@ export function MenuItemDialog({
   const [groupAttachments, setGroupAttachments] = useState<
     Record<string, number>
   >({})
-  const [addDiscount, setAddDiscount] = useState(false)
-  const [discountPercentStr, setDiscountPercentStr] = useState("")
   const [tagValue, setTagValue] = useState<string>(TAG_NONE)
   const itemId = item?.id
 
@@ -210,14 +147,6 @@ export function MenuItemDialog({
       setPortionLabelStr("")
       setIsActive(item.is_active)
       setSortOrder(item.sort_order)
-      setAddDiscount(
-        item.discount_percent != null && item.discount_percent > 0,
-      )
-      setDiscountPercentStr(
-        item.discount_percent != null && item.discount_percent > 0
-          ? String(item.discount_percent)
-          : "",
-      )
       setTagValue(item.tag && TAG_OPTIONS.some((o) => o.value === item.tag) ? item.tag : TAG_NONE)
     } else {
       const first = categories[0]?.id ?? ""
@@ -236,8 +165,6 @@ export function MenuItemDialog({
       setIsActive(true)
       setSortOrder(0)
       setGroupAttachments({})
-      setAddDiscount(false)
-      setDiscountPercentStr("")
       setTagValue(TAG_NONE)
     }
   }, [open, mode, item, categories])
@@ -438,15 +365,6 @@ export function MenuItemDialog({
       return
     }
 
-    let discount_percent: number | null = null
-    if (addDiscount) {
-      const d = Number.parseInt(discountPercentStr.trim(), 10)
-      if (!Number.isFinite(d) || d < 1 || d > 90) {
-        alert("Укажите скидку от 1 до 90%")
-        return
-      }
-      discount_percent = d
-    }
     const tag = tagValue === TAG_NONE ? null : tagValue
 
     let payload: Parameters<typeof createMenuItem>[0]
@@ -485,7 +403,7 @@ export function MenuItemDialog({
         aggregator_price_bani: null,
         is_active: isActive,
         sort_order: sortOrder,
-        discount_percent,
+        discount_percent: null,
         tag,
       }
     } else {
@@ -512,7 +430,7 @@ export function MenuItemDialog({
         aggregator_price_bani: optionalLeiToBani(aggregatorPriceLei),
         is_active: isActive,
         sort_order: sortOrder,
-        discount_percent,
+        discount_percent: null,
         tag,
       }
     }
@@ -882,37 +800,6 @@ export function MenuItemDialog({
                 })}
               </ul>
             )}
-          </div>
-          <div className="grid gap-3 border-t pt-4">
-            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
-              <input
-                type="checkbox"
-                className="border-input size-4 rounded"
-                checked={addDiscount}
-                onChange={(e) => setAddDiscount(e.target.checked)}
-              />
-              Добавить скидку
-            </label>
-            {addDiscount ? (
-              <div className="grid gap-2">
-                <Label htmlFor="mi-discount">Скидка %</Label>
-                <Input
-                  id="mi-discount"
-                  type="number"
-                  min={1}
-                  max={90}
-                  placeholder="Скидка %"
-                  value={discountPercentStr}
-                  onChange={(e) => setDiscountPercentStr(e.target.value)}
-                />
-                <DiscountPreview
-                  addDiscount={addDiscount}
-                  discountPercentStr={discountPercentStr}
-                  priceLei={priceLei}
-                  variants={hasSizes ? variants : []}
-                />
-              </div>
-            ) : null}
           </div>
           <div className="grid gap-2">
             <Label>Тег</Label>

@@ -4,6 +4,7 @@ import {
   getMenuItemPriceLabels,
   type MenuItemPriceLabels,
 } from "@/components/client/menu-item-card"
+import { useStorefrontCampaignRules } from "@/components/client/storefront-campaign-rules-context"
 import { useStoreOpen } from "@/hooks/use-store-open"
 import { showStoreClosedModal } from "@/lib/store/store-closed-store"
 import { pickLocalizedName } from "@/lib/i18n/storefront"
@@ -66,8 +67,9 @@ function FeaturedMenuCard({
   const openProductModal = useProductModalStore((state) => state.open)
   const { isOpen: storeOpen } = useStoreOpen(brandSlug)
   const { lang, t } = useLanguage()
+  const campaignRules = useStorefrontCampaignRules()
   const name = pickLocalizedName(item, lang)
-  const priceLabels = getMenuItemPriceLabels(item, lang)
+  const priceLabels = getMenuItemPriceLabels(item, lang, campaignRules)
   const ariaLabel = priceLabels.priceMain
     ? `${name}. ${priceLabels.priceMain}. ${t.menu.chooseProduct}`
     : `${name}. ${t.menu.chooseProduct}`

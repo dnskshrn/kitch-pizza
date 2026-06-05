@@ -295,10 +295,7 @@ export function CheckoutView({
   const timeSlots = useMemo(() => buildDeliveryTimeSlots(), [])
 
   useEffect(() => {
-    if (
-      !CARD_PAYMENT_ENABLED &&
-      (payment === "card" || payment === "online_card")
-    ) {
+    if (!CARD_PAYMENT_ENABLED && payment === "online_card") {
       setPayment("cash")
     }
   }, [payment])
@@ -1204,8 +1201,7 @@ export function CheckoutView({
                       type="button"
                       onClick={() => setPayment("cash")}
                       className={cn(
-                        "flex min-h-[48px] min-w-0 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
-                        CARD_PAYMENT_ENABLED ? "flex-1" : "w-full",
+                        "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
                         payment === "cash"
                           ? checkoutPaymentActive
                           : checkoutPaymentInactive,
@@ -1214,26 +1210,24 @@ export function CheckoutView({
                       <Banknote className="size-[14px] shrink-0" strokeWidth={2} />
                       <span className="text-center leading-tight">{t.checkout.cash}</span>
                     </button>
-                    {CARD_PAYMENT_ENABLED ? (
-                      <button
-                        type="button"
-                        onClick={() => setPayment("card")}
-                        className={cn(
-                          "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
-                          payment === "card"
-                            ? checkoutPaymentActive
-                            : checkoutPaymentInactive,
-                        )}
-                      >
-                        <CreditCard
-                          className="size-[14px] shrink-0"
-                          strokeWidth={2}
-                        />
-                        <span className="text-center leading-tight">
-                          {t.checkout.card}
-                        </span>
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setPayment("card")}
+                      className={cn(
+                        "flex min-h-[48px] min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] px-3 py-3 text-[14px] font-bold",
+                        payment === "card"
+                          ? checkoutPaymentActive
+                          : checkoutPaymentInactive,
+                      )}
+                    >
+                      <CreditCard
+                        className="size-[14px] shrink-0"
+                        strokeWidth={2}
+                      />
+                      <span className="text-center leading-tight">
+                        {t.checkout.card}
+                      </span>
+                    </button>
                   </div>
                   {CARD_PAYMENT_ENABLED ? (
                     <button

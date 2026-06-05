@@ -63,7 +63,7 @@ src/
 │   ├── i18n/, pos/, pbx/, seo/, telegram/, supabase/
 │   ├── admin/           # get-actual-balance, orders-today-metrics; inventory/invoice-ocr-types.ts
 │   ├── actions/admin/customers-list.ts, analytics.ts, feedback.ts, delivery-zone-schedules.ts
-│   ├── bonus.ts, customers.ts, discount-engine.ts, pricing.ts, storefront-item-campaign-discount.ts, resolve-brand-id.ts
+│   ├── bonus.ts, customers.ts, discount.ts, discount-engine.ts, pricing.ts, storefront-item-campaign-discount.ts, resolve-brand-id.ts
 │   ├── maib/            # token.ts, signature.ts, client.ts — MAIB Merchants API (онлайн-оплата)
 │   ├── feedback.ts      # isNegativeFeedback, short URL/SMS, generateFeedbackShortCode
 │   ├── feedback-telegram.ts  # sendNegativeFeedbackTelegram (негативные отзывы → Telegram)
@@ -428,7 +428,7 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 **Логика:**
 1. Цены из `menu_items` / `menu_item_variants`; `original_price` через `calcCompareAt(price, discount_percent)`; при `discount_percent = 0` → `original_price = price`.
 2. `subtotal_bani` = Σ(original × qty); `item_discount_bani` = Σ((original − price) × qty) из `discount_percent`.
-2b. **Кампании `item_percent`:** fetch `discount_rules` (`trigger_type='auto'`, `effect_type='item_percent'`, `is_active`); фильтр `isRuleScheduleActive`. Для каждой строки — правило с `target_item_ids.includes(menu_item_id)` **заменяет** скидку строки (не суммирует с `discount_percent`): `item_discount_bani = round(original × effect_value) × qty` (`effect_value` — доля, 0.2 = 20%). Пересчёт `subtotal_bani` / `item_discount_bani`. В `discount_rules_applied` — отдельные строки с `label` правила; legacy «Скидка на товары» — только для позиций без кампании.
+2b. **Кампании `item_percent`:** fetch `discount_rules` (`.eq('brand_id', brandId)`, `trigger_type='auto'`, `effect_type='item_percent'`, `is_active`); фильтр `isRuleScheduleActive`. Для каждой строки — правило с `brand_id === brandId` и `target_item_ids.includes(menu_item_id)` (по приоритету) **заменяет** скидку строки (не суммирует с `discount_percent`): `rate = discountRateFromEffectValue(effect_value)` (`lib/discount.ts`; доля 0.2 или legacy-процент 20 → 0.2), `item_discount_bani = round(original × rate) × qty`. Пересчёт `subtotal_bani` / `item_discount_bani`. В `discount_rules_applied` — отдельные строки с `label` = `rule.name` / `label_ru`; legacy «Скидка на товары» — только для позиций без кампании.
 3. Флаг **`active_promotion`**: любое schedule-active авто-правило с `effect_type ≠ bonus_multiplier` (не только `item_percent`).
 4. Промокод — валидация как в `validate-promo-code.ts`; `promo_discount` через `calcPromoDiscount`. При промокоде **или** `active_promotion`: **`bonuses_blocked = true`**, `bonuses_redeemed = 0`.
 5. Без блокировки бонусов: `max_bonuses_redeemable = floor(subtotal_mdl × max(0, 30 − item_discount_pct) / 100)` (MDL); списание = `min(requested, balance, max)`.
@@ -443,7 +443,7 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 
 **API:** `POST /api/[brandSlug]/checkout/pricing` — тело `{ items, delivery_fee, delivery_mode, promo_code?, bonuses_to_redeem? }`; ответ — `PricingResult`. Сессия опциональна: без auth → `bonuses_available = 0`, `bonuses_redeemed = 0`. Хелпер бренда — `resolveBrandIdBySlug` (`lib/resolve-brand-id.ts`).
 
-**Checkout UI:** `useCheckoutPricing` (debounce 300 ms) → breakdown в `OrderSummary` (`pricingBreakdown`); `BonusRedeemBlock` — числовой ввод MDL, «Макс. списание…»; disabled + tooltip при промокоде («Промокод и бонусы нельзя совмещать») или при `active_promotion` («Бонусы недоступны при активной акции» / RO-аналог).
+**Checkout UI:** `useCheckoutPricing` (debounce 300 ms) → breakdown в `OrderSummary` (`pricingBreakdown` + `discountRulesApplied` из `discount_rules_applied`). Строки скидки на товары — **по `label` кампании** из сервера; i18n `pricingItemDiscount` («Скидка на сеты») — только fallback для legacy `discount_percent` без кампании. `BonusRedeemBlock` — числовой ввод MDL, «Макс. списание…»; disabled + tooltip при промокоде («Промокод и бонусы нельзя совмещать») или при `active_promotion` («Бонусы недоступны при активной акции» / RO-аналог).
 
 **Создание заказа с витрины:** `create-order.ts` → `executeCreateOrder` вызывает `calculateOrderPricing` перед insert; **`total`, `subtotal`, `item_discount`, `promo_discount`, `discount`, `discount_rules_applied`, `bonuses_redeemed`** — только с сервера; значения с фронта не доверяются.
 
@@ -455,9 +455,9 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 
 **`cheapest_item_free`:** правило `free_every_n` + опциональный потолок **`max_free_items`** (ограничивает число бесплатных единиц за применение правила). Результат — `giftItems: GiftCartItem[]` (`menu_item_id`, `variant_id`, `quantity`, `rule_id`, `label_ru`).
 
-`DiscountEngineInput.excludedCategoryIds` — категории `menu_categories.exclude_from_discounts`. Не участвуют в `item_percent`, `order_percent`, `order_fixed`, `cheapest_item_free`. На `free_delivery`, `bonus_multiplier`, подарки — не влияют.
+`DiscountEngineInput.excludedCategoryIds` — категории `menu_categories.exclude_from_discounts`. Не участвуют в `order_percent`, `order_fixed`, `cheapest_item_free`. **`item_percent`:** категория с `exclude_from_discounts` **не блокирует** позицию, если её `menu_item_id` явно в `rule.target_item_ids` (кампании на комбо Kitch); иначе — пропуск. На `free_delivery`, `bonus_multiplier`, подарки — не влияют.
 
-Источники: таблица `discount_rules` (`trigger_type='auto'` или `promo_code`) + `promo_codes` (legacy, через синтетическое правило в `resolvePromoCode`). **`effect_value` в БД — доля** (0.2 = 20% для `item_percent` / `order_percent`); в админке (`rule-dialog.tsx`) ввод в процентах, на сервер уходит ÷100.
+Источники: таблица `discount_rules` (`trigger_type='auto'` или `promo_code`) + `promo_codes` (legacy, через синтетическое правило в `resolvePromoCode`). **`effect_value`:** канонически **доля** (0.2 = 20% для `item_percent` / `order_percent`); в админке (`rule-dialog.tsx`) ввод в процентах, на сервер уходит ÷100. В runtime для `item_percent` — **`discountRateFromEffectValue`** (доля или legacy-процент 1–100).
 
 В `orders` сохраняется: **`subtotal`, `item_discount`, `promo_discount`, `discount`** (= item + promo), `discount_rules_applied`, `promo_code`, `delivery_fee`, `bonus_multiplier`. Подарочные строки — `order_items.is_gift` + `gift_rule_id`. На витрине после `create-order` также **`order_items.original_price`, `item_discount_pct`**.
 
@@ -465,7 +465,7 @@ POS-мастер по-прежнему использует **`evaluateDiscounts
 
 Bootstrap для витрины — `getStorefrontCartPricingBootstrap` в `discounts.ts`: авто-правила, `excludedDiscountCategoryIds`, `storefrontExcludedDiscountCategories` (с именами категорий для подсказок). Отдельно **`getStorefrontItemPercentCampaignRules`** — только `item_percent` для отображения цен в меню; загружается в `(client)/layout.tsx` и передаётся в `StorefrontCampaignRulesProvider` (`ClientChrome`).
 
-**Отображение цен в меню (не корзина):** `getItemCampaignDiscount` (`lib/storefront-item-campaign-discount.ts`) + `isRuleScheduleActive`. Активная кампания на позицию → зачёркнутая `originalPriceBani` (= shelf `item.price`), основная — `discountedPriceBani = round(price × (1 − effect_value))`. Без кампании — legacy `calcCompareAt` по `discount_percent` (Kitch!). Используется в `getMenuItemPriceLabels` (`menu-item-card.tsx`), `featured-menu-section.tsx`, превью цены в `ProductModalRoot` (кнопка «В корзину»; корзина по-прежнему через `evaluateDiscounts`).
+**Отображение цен в меню (не корзина):** `getItemCampaignDiscount` (`lib/storefront-item-campaign-discount.ts`) + `isRuleScheduleActive` + `discountRateFromEffectValue`. Активная кампания на позицию → зачёркнутая `originalPriceBani` (= shelf `item.price`), основная — `discountedPriceBani = round(price × (1 − rate))`. Без кампании — legacy `calcCompareAt` по `discount_percent` в БД (Kitch!, только чтение). Используется в `getMenuItemPriceLabels` (`menu-item-card.tsx`), `featured-menu-section.tsx`, превью цены в `ProductModalRoot` (кнопка «В корзину»; корзина по-прежнему через `evaluateDiscounts`).
 
 Сборка корзины витрины — `src/components/client/cart/storefront-cart-pricing.ts` (`CartItemForEngine` + `evaluateStorefrontCartDiscount` → `evaluateDiscounts`; **`allocateGiftFreeUnitsByCartLineId`** — раздаёт `giftItems.quantity` по строкам корзины в порядке `items`). Подсказки: `storefront-discount-excluded-notice.tsx`, `storefront-promo-excluded-warning.tsx`.
 
@@ -600,7 +600,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - Чекбокс группы + поле «Бесплатных единиц» (min 0); helper: «0 = все платные».
 - Бейдж «N бесплатно» у прикреплённой группы при `free_count > 0`.
 - Поле **Glovo** (`aggregator_price_bani`) рядом с ценой: для позиции без размеров — на уровне `menu_items`; для `has_sizes` — в каждой строке варианта (`menu_item_variants`). Nullable, в UI — MDL.
-- Поле **`discount_percent` в UI убрано** (миграция на `discount_rules`); при редактировании существующее значение в БД **сохраняется** (backward compat Kitch!); новые позиции — `null`.
+- Поле **`discount_percent` в UI убрано** (миграция на `/admin/discount-rules`); при сохранении всегда пишется **`null`** (legacy значения в БД остаются для старых заказов / `calcCompareAt` на витрине).
 - Actions: `getMenuItemToppingGroups` / `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`: `topping_group_id`, `free_count`).
 
 **Витрина — корзина / checkout** (`CartItemToppingDetails`, `CartItemCard`, `order-summary`):
@@ -753,7 +753,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 Корень `/admin` → `redirect('/admin/orders')`.
 
-`AdminSidebar`: первый пункт навигации — **Аналитика** (`/admin/analytics`).
+`AdminSidebar`: первый пункт навигации — **Аналитика** (`/admin/analytics`). Группа **«Маркетинг»**: «Галерея», **«Кампании»** (`/admin/discount-rules`, подпись Campanii), «Промокоды», программа лояльности.
 
 `/admin/*` без сессии → редирект на `/admin/login`. `/api/admin/*` без сессии → 401 JSON.
 
@@ -770,11 +770,11 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 | `/admin/customers/[id]` | RSC: профиль, баланс через **`getActualBalance`**, до 50 транзакций, до 20 заказов. `BonusAdjustForm` → `POST /api/admin/bonus/adjust` (тоже `getActualBalance` для `balance_after`). |
 | `/admin/settings/bonus` | `bonus_settings` id=1; `updateBonusSettings` (`%` в UI → доли в БД). |
 | `/admin/categories` | `menu_categories`: RU/RO, slug, `image_url`, `show_in_upsell`, `exclude_from_discounts`, `workshop`. |
-| `/admin/menu` | `menu_items` + `menu_item_variants` (+ `aggregator_price_bani`). Привязка групп топпингов с `free_count` (`menu-item-dialog.tsx`; **без UI `discount_percent`** — скидки на товары через `/admin/discount-rules`). `RecipeEditorModal` (типы строк: ингредиент, п/ф, комбо; себестоимость — `product-recipe-cost.ts`; embed п/ф — FK-hint `semi_finished_items!semi_finished_items_semi_finished_id_fkey`). `?edit={id}` автооткрытие. Бейджи покрытия рецептом + **себестоимость рецепта** (MDL) из `buildMenuItemRecipeCostMap` на сервере. |
+| `/admin/menu` | `menu_items` + `menu_item_variants` (+ `aggregator_price_bani`). Привязка групп топпингов с `free_count` (`menu-item-dialog.tsx`; **без UI `discount_percent`** — скидки на товары через **Кампании**). `RecipeEditorModal` (типы строк: ингредиент, п/ф, комбо; себестоимость — `product-recipe-cost.ts`; embed п/ф — FK-hint `semi_finished_items!semi_finished_items_semi_finished_id_fkey`). `?edit={id}` автооткрытие. Бейджи покрытия рецептом + **себестоимость рецепта** (MDL) из `buildMenuItemRecipeCostMap` на сервере. |
 | `/admin/featured-menu` | «Популярное». |
 | `/admin/toppings` | Группы + топпинги (`aggregator_price_bani`); копирование между группами; состав через `topping_recipes` (RPC `save_topping_with_recipes`). |
 | `/admin/promotions` | Промо-баннеры RU/RO. |
-| `/admin/discount-rules` | `discount_rules` (все бренды, без `getAdminBrandId()`). `trigger_type`: `auto` \| `promo_code`; эффекты incl. `item_percent` (скидка на выбранные позиции — заменяет legacy `discount_percent` в pricing/checkout). Actions: `saveRule`, `deleteRule`, `toggleRuleActive` (service role). |
+| `/admin/discount-rules` | **Кампании** (`PromotionsClient`, sidebar «Кампании» / Campanii). `discount_rules` (все бренды в списке, без `getAdminBrandId()`). Редактор `rule-dialog.tsx` + `rule-search-comboboxes.tsx`: `item_percent` — multi-select товаров по категориям (`target_item_ids`, `ItemPercentTargetPicker`); `cheapest_item_free` — `free_every_n` + multi-select категорий (`target_category_ids`, `CategoryTargetPicker`); `valid_from` / `valid_until`. Список: для `item_percent` — бейджи «X% скидка», «N товаров», период / «бессрочно». Actions: `saveRule`, `deleteRule`, `toggleRuleActive`, `fetchTargetMenuItemsForDiscountRule`, `fetchCategoriesForDiscountRule` (service role). |
 | `/admin/promo-codes` | `promo_codes`. |
 | `/admin/staff` | `staff` + PIN (`bcryptjs`); deep-link Telegram для курьеров. Service role. |
 | `/admin/staff/shifts` | `shift_logs` + join `staff` + подсчёт доставленных (`orders.status=done`, `courier_id`, `delivered_at` в интервале). |
@@ -809,10 +809,10 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 - `brands` — slug, name, UUID.
 - `menu_categories` — `name_ru/ro`, slug, `image_url`, `is_active`, `sort_order`, `is_condiment` (legacy), `show_in_upsell`, `exclude_from_discounts`, `workshop` (KDS-фильтр).
-- `menu_items` — `has_sizes` (true → цены из variants), `included_items` (JSON `{name_ru,name_ro}[]`), `category_id`, `brand_id`, `aggregator_price_bani` (nullable bani). Legacy: `is_default_condiment`, `condiment_default_qty` (не используются).
+- `menu_items` — `has_sizes` (true → цены из variants), `included_items` (JSON `{name_ru,name_ro}[]`), `category_id`, `brand_id`, `aggregator_price_bani` (nullable bani). Legacy: `discount_percent` (только чтение на витрине; новые сохранения — `null`), `is_default_condiment`, `condiment_default_qty` (не используются).
 - `menu_item_variants` — `name_ru/ro`, `price` (bani), `aggregator_price_bani` (nullable bani), `sort_order`, `weight_grams`, `menu_item_id`.
 - `topping_groups` (`max_selections` NULL/число), `toppings` (`aggregator_price_bani`), `topping_recipes`, `menu_item_topping_groups` (`menu_item_id`, `topping_group_id`, `free_count`).
-- `promotions`, `featured_menu_items`, `promo_codes` (с `valid_channels`), `discount_rules`.
+- `promotions`, `featured_menu_items`, `promo_codes` (с `valid_channels`), `discount_rules` (`effect_type`, `effect_value`, `target_item_ids[]`, `target_category_ids[]`, `free_every_n`, `trigger_type`, `valid_from` / `valid_until`, `priority`, `brand_id`).
 - `delivery_zones` — `polygon` JSONB `[lat,lng][]`, `color` (TEXT, HEX), `delivery_price_bani`, `night_delivery_price_bani`, `active_from`, `active_to`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `is_active`, `sort_order`, `brand_id`.
 - `delivery_zone_schedules` — `zone_id`, `from_time`, `to_time`, `delivery_price_bani`, `min_order_bani`, `free_delivery_from_bani`, `delivery_time_min`, `sort_order` (миграции `*_delivery_zone_schedules.sql`, `*_delivery_zones_night_and_window.sql` для legacy-колонок зоны).
 - `orders`, `order_items` — см. раздел Контракты.
@@ -831,7 +831,7 @@ URL аккаунта по бренду: `storefront-account-path.ts` (`/account`
 
 `src/types/customers.ts` — `CustomerRow` (`orders_count`, `total_spent_bani` как **string** из bigint RPC; `last_order_at`, legacy Poster-поля, `bonus_balance`), `CustomerFilters`, `DEFAULT_CUSTOMER_FILTERS`.
 
-`src/types/promotions.ts` — `DiscountRule` incl. **`max_free_items?`**, `GiftCartItem`, `DiscountEngineOutput.giftItems`.
+`src/types/promotions.ts` — `DiscountRule` incl. **`target_item_ids?`**, **`target_category_ids?`**, **`max_free_items?`**, `GiftCartItem`, `DiscountEngineOutput.giftItems`.
 
 `src/types/cart.ts` — `CartItem`, `CartTopping` (`quantity`, `topping_group_id`), `toppingGroupFreeCounts`, `toppingGroupLabels`.
 
@@ -918,7 +918,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `admin/customers-list.ts` — `getCustomersList`.
 - `admin/feedback.ts` — `fetchFeedbackPageData(brand?, from?, to?)`.
 - `inventory/ingredient-categories.ts` — CRUD категорий (service role).
-- `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive` (service role).
+- `(admin)/admin/discount-rules/actions.ts` — `saveRule`, `deleteRule`, `toggleRuleActive`, поиск подарков/промокодов, **`fetchTargetMenuItemsForDiscountRule`**, **`fetchCategoriesForDiscountRule`** (service role).
 - `(admin)/admin/menu/actions.ts` — CRUD позиций (`aggregator_price_bani`); `getMenuItemToppingGroups`, `setMenuItemToppingGroups` (`MenuItemToppingGroupAttachment`).
 - `(admin)/admin/toppings/actions.ts` — `save_topping_with_recipes` (RPC, `p_aggregator_price_bani`).
 - Inventory: `supplies/actions.ts` (`createSupplyOrder` → RPC `apply_supply_order_stock_items`; **`updateSupplyOrder`** → `replace_supply_order_stock_items`; `annulSupplyOrder` → RPC `annul_supply_order_stock`), `writeoffs/actions.ts` (`createWriteoff`, service role), `audits/actions.ts` (`createAudit`), `audits/[id]/actions.ts` (`updateAuditItem`, `confirmAudit`, service role). Полуфабрикаты: `(admin)/admin/inventory/semi-finished/actions.ts` (`createSemiFinished`, `updateSemiFinished`).
@@ -953,14 +953,15 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/customers.ts` — `getCustomerByPhone` (JOIN `customer_addresses`), `saveCustomer`, `saveCustomerAddress`, `setDefaultAddress`, `getDefaultAddress`. Service role.
 - `lib/delivery-zone-schedule.ts` — `getActiveSchedule`, `isZoneAvailableNow`, `resolveZoneParams`, `attachResolvedZoneParams`.
 - `lib/actions/admin/delivery-zone-schedules.ts` — CRUD слотов расписания зоны.
-- `lib/pricing.ts` — **`calculateOrderPricing`** (server-side расчёт витрины; шаг 2b `item_percent`, `active_promotion`; см. раздел «Скидки»).
+- `lib/discount.ts` — `calcCompareAt`, `calcPromoDiscount`, **`discountRateFromEffectValue`** (нормализация `effect_value` для `item_percent`).
+- `lib/pricing.ts` — **`calculateOrderPricing`** (server-side расчёт витрины; шаг 2b `item_percent`, `active_promotion`, `.eq('brand_id')`; см. раздел «Скидки»).
 - `lib/storefront-item-campaign-discount.ts` — **`getItemCampaignDiscount`** (отображение зачёркнутой цены в меню; не корзина).
 - `lib/resolve-brand-id.ts` — `resolveBrandIdBySlug` для API по slug бренда.
 - **`lib/maib/token.ts`** — кэш OAuth MAIB в `maib_tokens` (singleton `id=1`), `getMaibAccessToken()` (refresh / project credentials).
 - **`lib/maib/signature.ts`** — `validateMaibSignature` для webhook (ksort + SHA256 binary → Base64).
 - **`lib/maib/client.ts`** — `createMaibPayment`, `getMaibPaymentInfo`, `refundMaibPayment` (`MAIB_BASE_URL`, Bearer).
 - `lib/receipt-pricing-breakdown.ts` — `buildReceiptPricingBreakdown` для термочека.
-- `lib/discount-engine.ts` — `evaluateDiscounts`, `isRuleScheduleActive` (pure, без Supabase; POS + UI корзины).
+- `lib/discount-engine.ts` — `evaluateDiscounts`, `isRuleScheduleActive` (pure, без Supabase; POS + UI корзины; `item_percent` + исключение `exclude_from_discounts` при явном `target_item_ids`).
 - `lib/order-recipe-stock-deduction.ts` — `computeIngredientTotalsForOrder`.
 - `lib/inventory-units.ts`.
 - `lib/ingredient-avg-cost.ts` — `parseIngredientAvgCostStorage` из embed `ingredient_stock`.

@@ -1,7 +1,10 @@
 "use client"
 
 import { normalizePosBrandSlug, type BrandConfig } from "@/brands/index"
-import { DiscountBreakdown } from "@/components/pos/discount-breakdown"
+import {
+  DiscountBreakdown,
+  DiscountOrderTotal,
+} from "@/components/pos/discount-breakdown"
 import { ReceiptTemplate } from "@/components/ReceiptTemplate"
 import type { OrdersPanelHandle } from "@/components/pos/orders-panel"
 import { AssignCourierModal } from "@/components/pos/AssignCourierModal"
@@ -111,10 +114,13 @@ import {
   Layers,
   Loader2,
   ChefHat,
+  ChevronDown,
+  LayoutList,
   MapPin,
   Minus,
   MoreVertical,
   Plus,
+  Printer,
   XIcon,
 } from "lucide-react"
 import Image from "next/image"
@@ -562,6 +568,7 @@ function CartPanel({
   cart,
   cartCount,
   totalsSlot,
+  orderTotalSlot,
   onUpdateQty,
   onRemove,
   onOpenLine,
@@ -586,8 +593,10 @@ function CartPanel({
 }: {
   cart: PosCartItem[]
   cartCount: number
-  /** Сводка: промо + строки скидок и итог (вместо одной строки «подытог»). */
+  /** Сводка: промо + строки скидок (без «Итого»). */
   totalsSlot?: ReactNode
+  /** Строка «Итого» — всегда видима. */
+  orderTotalSlot?: ReactNode
   onUpdateQty: (idx: number, delta: number) => void | Promise<void>
   onRemove: (idx: number) => void | Promise<void>
   onOpenLine: (idx: number) => void
@@ -612,6 +621,61 @@ function CartPanel({
   courierButtonDisabled?: boolean
   courierButtonHints?: string[]
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false)
+
+  const hasCollapsibleDetails =
+    totalsSlot != null ||
+    ((onCourierAssign || onChangeAssignedCourier) &&
+      courierContactWarnings.length > 0) ||
+    (assignedCourierId != null && onChangeAssignedCourier != null)
+
+  const mainCta =
+    onCourierAssign != null ? (
+      <button
+        type="button"
+        disabled={courierButtonDisabled}
+        onClick={onCourierAssign}
+        className={cn(
+          POS_RUNNER_CTA_CLASS,
+          "flex-1 !w-auto",
+          courierButtonDisabled
+            ? "pointer-events-none cursor-not-allowed opacity-40"
+            : "",
+        )}
+      >
+        Назначить курьера
+      </button>
+    ) : onPayOrder != null ? (
+      <button
+        type="button"
+        disabled={payOrderDisabled}
+        onClick={onPayOrder}
+        className={cn(POS_RUNNER_CTA_CLASS, "flex-1 !w-auto")}
+      >
+        Принять оплату
+      </button>
+    ) : onRunnerSend != null ? (
+      <button
+        type="button"
+        disabled={runnerAlreadySent || runnerDisabled || runnerBusy}
+        onClick={() => void onRunnerSend()}
+        className={cn(POS_RUNNER_CTA_CLASS, "flex-1 !w-auto")}
+      >
+        {runnerAlreadySent ? (
+          "Бегунок отправлен"
+        ) : runnerBusy ? (
+          <span className="flex items-center gap-2">
+            <Loader2 className="size-4 shrink-0 animate-spin" />
+            Отправка…
+          </span>
+        ) : (
+          "Отправить бегунок"
+        )}
+      </button>
+    ) : null
+
+  const showActionRow = onPrintPrecheck != null || mainCta != null
+
   return (
     /* Серая полоса-отступ справа — часть родительского bg-[#f2f2f2] */
     <div className="flex h-full min-h-0 w-[300px] shrink-0 flex-col overflow-hidden p-3 pl-0">
@@ -661,133 +725,120 @@ function CartPanel({
 
         {/* Футер: сводка + CTA */}
         <div className="shrink-0 border-t border-border p-5">
-          {totalsSlot != null ? (
-            <div className="mb-3">{totalsSlot}</div>
+          {hasCollapsibleDetails ? (
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((prev) => !prev)}
+              className="flex w-full items-center justify-between gap-2 border-t border-border py-2 px-3 text-[13px] font-medium text-[#242424] transition-colors hover:bg-[#f2f2f2]/60"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <LayoutList className="size-4 shrink-0 text-[#808080]" />
+                Детали заказа
+              </span>
+              <ChevronDown
+                className={cn(
+                  "size-4 shrink-0 text-[#808080] transition-transform duration-200",
+                  detailsOpen && "rotate-180",
+                )}
+              />
+            </button>
           ) : null}
-          {(onCourierAssign || onChangeAssignedCourier) &&
-          courierContactWarnings.length > 0 ? (
-            <div className="mt-3 flex flex-col gap-1">
-              {courierContactWarnings.map((line, i) => (
+
+          {detailsOpen && hasCollapsibleDetails ? (
+            <div className="overflow-hidden">
+              {totalsSlot != null ? (
+                <div className="mt-3 space-y-3">{totalsSlot}</div>
+              ) : null}
+              {(onCourierAssign || onChangeAssignedCourier) &&
+              courierContactWarnings.length > 0 ? (
+                <div className="mt-3 flex flex-col gap-1">
+                  {courierContactWarnings.map((line, i) => (
+                    <p
+                      key={`${line}-${i}`}
+                      className="text-center text-[12px] font-medium leading-snug text-amber-800"
+                    >
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+              {assignedCourierId && onChangeAssignedCourier ? (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-[#f2f2f2] px-3 py-2">
+                    <span className="min-w-0 flex-1 truncate text-left text-[13px] text-[#242424]">
+                      <span className="font-normal text-[#808080]">Курьер · </span>
+                      <span className="font-bold">
+                        {assignedCourierName?.trim() || "—"}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={courierButtonDisabled}
+                      onClick={onChangeAssignedCourier}
+                      className={cn(
+                        "shrink-0 rounded-full border border-[#e0e0e0] bg-white px-2.5 py-1 text-[11px] font-bold text-[#242424] transition-colors hover:bg-[#f2f2f2]",
+                        courierButtonDisabled
+                          ? "pointer-events-none cursor-not-allowed opacity-40 hover:bg-white"
+                          : "",
+                      )}
+                    >
+                      Сменить
+                    </button>
+                  </div>
+                  {courierButtonDisabled && courierButtonHints.length > 0 ? (
+                    <div className="mt-1.5 flex flex-col gap-0.5 px-1">
+                      {courierButtonHints.map((line, i) => (
+                        <p
+                          key={`${line}-${i}`}
+                          className="text-center text-[11px] font-medium leading-snug text-[#808080]"
+                        >
+                          {line}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {orderTotalSlot != null ? (
+            <div className={cn(hasCollapsibleDetails ? "mt-3" : "")}>
+              {orderTotalSlot}
+            </div>
+          ) : null}
+
+          {showActionRow ? (
+            <div className="mt-3 flex items-stretch gap-2">
+              {onPrintPrecheck ? (
+                <button
+                  type="button"
+                  disabled={printPrecheckDisabled || printPrecheckBusy}
+                  onClick={() => void onPrintPrecheck()}
+                  aria-label="Печать предчека"
+                  className="flex w-[46px] shrink-0 items-center justify-center rounded-lg border border-[#242424] bg-white text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {printPrecheckBusy ? (
+                    <Loader2 className="size-4 shrink-0 animate-spin" />
+                  ) : (
+                    <Printer className="size-4 shrink-0" />
+                  )}
+                </button>
+              ) : null}
+              {mainCta}
+            </div>
+          ) : null}
+          {onCourierAssign && courierButtonDisabled && courierButtonHints.length > 0 ? (
+            <div className="mt-1.5 flex flex-col gap-0.5 px-1">
+              {courierButtonHints.map((line, i) => (
                 <p
-                  key={`${line}-${i}`}
-                  className="text-center text-[12px] font-medium leading-snug text-amber-800"
+                  key={`${line}-assign-${i}`}
+                  className="text-center text-[11px] font-medium leading-snug text-[#808080]"
                 >
                   {line}
                 </p>
               ))}
             </div>
-          ) : null}
-          {assignedCourierId && onChangeAssignedCourier ? (
-            <div className="mt-3">
-              <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-[#f2f2f2] px-3 py-2">
-                <span className="min-w-0 flex-1 truncate text-left text-[13px] text-[#242424]">
-                  <span className="font-normal text-[#808080]">Курьер · </span>
-                  <span className="font-bold">
-                    {assignedCourierName?.trim() || "—"}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  disabled={courierButtonDisabled}
-                  onClick={onChangeAssignedCourier}
-                  className={cn(
-                    "shrink-0 rounded-full border border-[#e0e0e0] bg-white px-2.5 py-1 text-[11px] font-bold text-[#242424] transition-colors hover:bg-[#f2f2f2]",
-                    courierButtonDisabled
-                      ? "pointer-events-none cursor-not-allowed opacity-40 hover:bg-white"
-                      : "",
-                  )}
-                >
-                  Сменить
-                </button>
-              </div>
-              {courierButtonDisabled && courierButtonHints.length > 0 ? (
-                <div className="mt-1.5 flex flex-col gap-0.5 px-1">
-                  {courierButtonHints.map((line, i) => (
-                    <p
-                      key={`${line}-${i}`}
-                      className="text-center text-[11px] font-medium leading-snug text-[#808080]"
-                    >
-                      {line}
-                    </p>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          {onPrintPrecheck ? (
-            <button
-              type="button"
-              disabled={printPrecheckDisabled || printPrecheckBusy}
-              onClick={() => void onPrintPrecheck()}
-              className={cn(
-                "mt-3 flex w-full items-center justify-center rounded-lg border-2 border-dashed border-[#242424] bg-white px-5 py-3 text-[14px] font-bold text-[#242424] transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-40",
-              )}
-            >
-              {printPrecheckBusy ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="size-4 shrink-0 animate-spin" />
-                  Печать…
-                </span>
-              ) : (
-                "Печать предчека"
-              )}
-            </button>
-          ) : null}
-          {onCourierAssign ? (
-            <div className="mt-3">
-              <button
-                type="button"
-                disabled={courierButtonDisabled}
-                onClick={onCourierAssign}
-                className={cn(
-                  POS_RUNNER_CTA_CLASS,
-                  courierButtonDisabled
-                    ? "pointer-events-none cursor-not-allowed opacity-40"
-                    : "",
-                )}
-              >
-                Назначить курьера
-              </button>
-              {courierButtonDisabled && courierButtonHints.length > 0 ? (
-                <div className="mt-1.5 flex flex-col gap-0.5 px-1">
-                  {courierButtonHints.map((line, i) => (
-                    <p
-                      key={`${line}-assign-${i}`}
-                      className="text-center text-[11px] font-medium leading-snug text-[#808080]"
-                    >
-                      {line}
-                    </p>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : onPayOrder ? (
-            <button
-              type="button"
-              disabled={payOrderDisabled}
-              onClick={onPayOrder}
-              className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
-            >
-              Принять оплату
-            </button>
-          ) : onRunnerSend ? (
-            <button
-              type="button"
-              disabled={runnerAlreadySent || runnerDisabled || runnerBusy}
-              onClick={() => void onRunnerSend()}
-              className={cn("mt-3", POS_RUNNER_CTA_CLASS)}
-            >
-              {runnerAlreadySent ? (
-                "Бегунок отправлен"
-              ) : runnerBusy ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="size-4 shrink-0 animate-spin" />
-                  Отправка…
-                </span>
-              ) : (
-                "Отправить бегунок"
-              )}
-            </button>
           ) : null}
         </div>
       </aside>
@@ -3655,8 +3706,15 @@ export function OrderForm({
                     deliveryZone={deliveryZoneForEngine}
                     bonusRedeemedBani={redeemBaniApplied}
                     excludedCategories={excludedCategoriesInCart}
+                    hideTotal
                   />
                 </>
+              }
+              orderTotalSlot={
+                <DiscountOrderTotal
+                  output={effectiveEngineOutput}
+                  bonusRedeemedBani={redeemBaniApplied}
+                />
               }
               onUpdateQty={updateQty}
               onRemove={removeLine}

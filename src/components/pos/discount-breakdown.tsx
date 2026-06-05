@@ -19,6 +19,31 @@ type DiscountBreakdownProps = {
   bonusRedeemedBani?: number
   excludedCategories?: Array<{ id: string; name_ru: string; name_ro: string }>
   lang?: 'ru' | 'ro'
+  /** Скрыть строку «Итого» (для сворачиваемой сводки в POS). */
+  hideTotal?: boolean
+}
+
+export function DiscountOrderTotal({
+  output,
+  bonusRedeemedBani = 0,
+}: Pick<DiscountBreakdownProps, 'output' | 'bonusRedeemedBani'>) {
+  if (output == null) return null
+
+  const safeBonusBani = Math.max(0, Math.round(bonusRedeemedBani))
+  const finalTotalBani =
+    output.totalBani === null ? null : Math.max(0, output.totalBani - safeBonusBani)
+
+  return (
+    <>
+      <div className="border-t-2 border-border" />
+      <div className="flex items-baseline justify-between gap-3 pt-0.5">
+        <span className="text-base font-bold text-[#242424]">Итого</span>
+        <span className="font-mono text-lg font-bold tabular-nums text-[#242424]">
+          {finalTotalBani === null ? '—' : `${formatMdl(finalTotalBani)} MDL`}
+        </span>
+      </div>
+    </>
+  )
 }
 
 export function DiscountBreakdown({
@@ -26,13 +51,12 @@ export function DiscountBreakdown({
   deliveryZone,
   bonusRedeemedBani = 0,
   excludedCategories,
+  hideTotal = false,
 }: DiscountBreakdownProps) {
   if (output == null) return null
 
   const hasDiscountLines = output.appliedDiscounts.length > 0
   const safeBonusBani = Math.max(0, Math.round(bonusRedeemedBani))
-  const finalTotalBani =
-    output.totalBani === null ? null : Math.max(0, output.totalBani - safeBonusBani)
 
   return (
     <div className="space-y-2 text-sm text-foreground">
@@ -122,14 +146,9 @@ export function DiscountBreakdown({
         </div>
       ) : null}
 
-      <div className="border-t-2 border-border" />
-
-      <div className="flex items-baseline justify-between gap-3 pt-0.5">
-        <span className="text-base font-bold text-[#242424]">Итого</span>
-        <span className="font-mono text-lg font-bold tabular-nums text-[#242424]">
-          {finalTotalBani === null ? '—' : `${formatMdl(finalTotalBani)} MDL`}
-        </span>
-      </div>
+      {hideTotal ? null : (
+        <DiscountOrderTotal output={output} bonusRedeemedBani={safeBonusBani} />
+      )}
     </div>
   )
 }

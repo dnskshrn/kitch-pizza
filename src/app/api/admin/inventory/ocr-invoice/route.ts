@@ -151,16 +151,21 @@ export async function POST(request: Request) {
 
     let extracted: OcrExtractedData
     try {
-      extracted = JSON.parse(extractJson(step1Text)) as OcrExtractedData
+      const parsed = JSON.parse(extractJson(step1Text)) as unknown
+      if (
+        parsed == null ||
+        typeof parsed !== "object" ||
+        !Array.isArray((parsed as OcrExtractedData).items)
+      ) {
+        console.error("[ocr-invoice] step1 invalid shape:", step1Text)
+        return NextResponse.json(
+          { error: "ocr_parse_failed", raw: step1Text },
+          { status: 500 }
+        )
+      }
+      extracted = parsed as OcrExtractedData
     } catch {
-      console.error("JSON parse failed. Raw response:", step1Text)
-      return NextResponse.json(
-        { error: "ocr_parse_failed", raw: step1Text },
-        { status: 500 }
-      )
-    }
-    if (!Array.isArray(extracted.items)) {
-      console.error("JSON parse failed. Raw response:", step1Text)
+      console.error("[ocr-invoice] step1 JSON parse failed:", step1Text)
       return NextResponse.json(
         { error: "ocr_parse_failed", raw: step1Text },
         { status: 500 }
@@ -235,16 +240,21 @@ Return ONLY valid JSON:
       items: OcrMatchedItem[]
     }
     try {
-      matched = JSON.parse(extractJson(step2Text)) as typeof matched
+      const parsed = JSON.parse(extractJson(step2Text)) as unknown
+      if (
+        parsed == null ||
+        typeof parsed !== "object" ||
+        !Array.isArray((parsed as { items?: unknown }).items)
+      ) {
+        console.error("[ocr-invoice] step2 invalid shape:", step2Text)
+        return NextResponse.json(
+          { error: "match_parse_failed", raw: step2Text },
+          { status: 500 }
+        )
+      }
+      matched = parsed as typeof matched
     } catch {
-      console.error("JSON parse failed. Raw response:", step2Text)
-      return NextResponse.json(
-        { error: "match_parse_failed", raw: step2Text },
-        { status: 500 }
-      )
-    }
-    if (!Array.isArray(matched.items)) {
-      console.error("JSON parse failed. Raw response:", step2Text)
+      console.error("[ocr-invoice] step2 JSON parse failed:", step2Text)
       return NextResponse.json(
         { error: "match_parse_failed", raw: step2Text },
         { status: 500 }
@@ -260,7 +270,11 @@ Return ONLY valid JSON:
     }
 
     return NextResponse.json(result)
-  } catch {
+  } catch (err) {
+    console.error(
+      "[ocr-invoice] unhandled error:",
+      err instanceof Error ? err.stack ?? err.message : err
+    )
     return NextResponse.json({ error: "internal" }, { status: 500 })
   }
 }

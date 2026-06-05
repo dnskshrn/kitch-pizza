@@ -90,9 +90,9 @@ export async function sendPosDraftToKitchen(
   const rawMdl = Math.max(0, Number(input.bonusesToRedeem ?? 0))
   const redeemBani = Math.round(rawMdl * 100)
   const maxPointsFromGross = Math.floor(grossBeforeRedeemBani / 100)
-  let redeemPoints = Math.min(Math.floor(redeemBani / 100), maxPointsFromGross)
+  const redeemPoints = Math.min(Math.floor(redeemBani / 100), maxPointsFromGross)
   const appliedBani = redeemPoints * 100
-  let newTotalBani = Math.max(0, grossBeforeRedeemBani - appliedBani)
+  const newTotalBani = Math.max(0, grossBeforeRedeemBani - appliedBani)
 
   const profileIdForRedeem =
     typeof input.profileId === "string" && input.profileId.trim()

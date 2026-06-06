@@ -81,23 +81,10 @@ export async function GET(req: NextRequest) {
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 
-  const { data: existingFeedback, error: feedbackListError } = await (
-    supabase.from("order_feedback") as ReturnType<typeof supabase.from>
-  ).select("order_id")
-
-  if (feedbackListError) {
-    console.error("feedback-sms list feedback error:", feedbackListError.message)
-    return NextResponse.json({ error: feedbackListError.message }, { status: 500 })
-  }
-
-  const feedbackOrderIds = new Set(
-    (existingFeedback ?? []).map((r) => String((r as { order_id: string }).order_id)),
-  )
-
-  let ordersQuery = supabase
+  const { data: rawOrders, error: ordersError } = await supabase
     .from("orders")
     .select(
-      "id, brand_id, courier_id, done_at, profile_id, profiles(phone, id), brands(slug)",
+      "id, brand_id, courier_id, done_at, profile_id, profiles(phone, id), brands(slug), order_feedback!left(order_id)",
     )
     .eq("status", "done")
     .neq("delivery_mode", "aggregator")
@@ -105,16 +92,8 @@ export async function GET(req: NextRequest) {
     .gte("done_at", fortyEightHoursAgo)
     .not("profile_id", "is", null)
     .not("brand_id", "is", null)
-
-  if (feedbackOrderIds.size > 0) {
-    ordersQuery = ordersQuery.not(
-      "id",
-      "in",
-      `(${[...feedbackOrderIds].join(",")})`,
-    )
-  }
-
-  const { data: rawOrders, error: ordersError } = await ordersQuery.limit(50)
+    .is("order_feedback.order_id", null)
+    .limit(50)
 
   if (ordersError) {
     console.error("feedback-sms orders query error:", ordersError.message)
@@ -146,20 +125,28 @@ export async function GET(req: NextRequest) {
     const { data: inserted, error: insertError } = await (
       supabase.from("order_feedback") as ReturnType<typeof supabase.from>
     )
-      .insert({
-        order_id: row.id,
-        brand_id: row.brand_id,
-        token,
-        short_code: shortCode,
-        token_expires_at: tokenExpiresAt,
-        sms_sent_at: smsSentAt,
-      })
+      .insert(
+        {
+          order_id: row.id,
+          brand_id: row.brand_id,
+          token,
+          short_code: shortCode,
+          token_expires_at: tokenExpiresAt,
+          sms_sent_at: smsSentAt,
+        },
+        { onConflict: "order_id", ignoreDuplicates: true },
+      )
       .select("id")
-      .single()
+      .maybeSingle()
 
-    if (insertError || !inserted) {
-      console.error("feedback-sms insert error:", insertError?.message)
-      errors.push(`${row.id}: ${insertError?.message ?? "insert failed"}`)
+    if (insertError) {
+      console.error("feedback-sms insert error:", insertError.message)
+      errors.push(`${row.id}: ${insertError.message}`)
+      continue
+    }
+
+    if (!inserted) {
+      skipped += 1
       continue
     }
 

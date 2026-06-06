@@ -1271,13 +1271,15 @@ export function OrderForm({
   }, [deliveryMode, deliveryAddress, userPhoneWatched])
 
   const cartForEngine = useMemo((): CartItemForEngine[] => {
-    return cart.map((it) => ({
-      menu_item_id: it.menuItemId,
-      category_id: it.category_id,
-      variant_id: it.variantId ?? null,
-      quantity: it.qty,
-      unit_price_bani: it.price,
-    }))
+    return cart
+      .filter((it) => !it.is_gift)
+      .map((it) => ({
+        menu_item_id: it.menuItemId,
+        category_id: it.category_id,
+        variant_id: it.variantId ?? null,
+        quantity: it.qty,
+        unit_price_bani: it.price,
+      }))
   }, [cart])
 
   const excludedCategoryIds = useMemo(() => {
@@ -2210,6 +2212,7 @@ export function OrderForm({
             quantity: number
             price: number
             toppings: unknown
+            is_gift?: boolean | null
             menu_items:
               | { image_url: string | null; category_id?: string | null }
               | { image_url: string | null; category_id?: string | null }[]

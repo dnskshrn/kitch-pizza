@@ -11,6 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { discountRateFromEffectValue } from "@/lib/discount"
+import { isRuleScheduleActive } from "@/lib/discount-engine"
 import { calcPosToppingsCharge, getPosCartItemUnitPriceBani } from "@/lib/pos-cart-helpers"
 import {
   cartToppingFromTopping,
@@ -25,6 +27,7 @@ import {
 } from "@/lib/topping-pricing"
 import type { MenuItem, MenuItemVariant } from "@/types/database"
 import type { PosCartItem, PosCartTopping } from "@/types/pos"
+import type { DiscountRule } from "@/types/promotions"
 import { createBrowserClient } from "@supabase/ssr"
 import { Loader2, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -70,6 +73,28 @@ function formatLei(bani: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
+}
+
+function itemPercentDisplayPriceBani(
+  menuItemId: string,
+  variantPriceBani: number,
+  discountRules: DiscountRule[],
+  now: Date = new Date(),
+): number {
+  const rule = [...discountRules]
+    .sort((a, b) => b.priority - a.priority)
+    .find(
+      (r) =>
+        r.effect_type === "item_percent" &&
+        r.effect_value != null &&
+        isRuleScheduleActive(r, now) &&
+        r.target_item_ids?.includes(menuItemId),
+    )
+  if (rule?.effect_value != null) {
+    const rate = discountRateFromEffectValue(rule.effect_value)
+    return Math.round(variantPriceBani * (1 - rate))
+  }
+  return variantPriceBani
 }
 
 function resolvePosCatalogUnitPriceBani(
@@ -149,6 +174,7 @@ type PosProductModalProps = {
     cartIndex: number,
     cartItem: PosCartItem,
   ) => void | Promise<void>
+  discountRules?: DiscountRule[]
 }
 
 export function PosProductModal({
@@ -160,6 +186,7 @@ export function PosProductModal({
   onEditSave,
   cartEditDraft,
   onCartEditSave,
+  discountRules = [],
 }: PosProductModalProps) {
   const [qty, setQty] = useState(1)
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
@@ -640,7 +667,12 @@ export function PosProductModal({
                       className="h-auto min-h-14 w-full min-w-0 justify-center whitespace-normal px-3 py-3 text-center text-sm leading-snug sm:min-h-[3.25rem] sm:text-base"
                       onClick={() => setSelectedVariantId(v.id)}
                     >
-                      {v.name_ru} — {(v.price / 100).toFixed(2)} MDL
+                      {v.name_ru} —{" "}
+                      {(
+                        itemPercentDisplayPriceBani(item.id, v.price, discountRules) /
+                        100
+                      ).toFixed(2)}{" "}
+                      MDL
                     </Button>
                   ))}
                 </div>

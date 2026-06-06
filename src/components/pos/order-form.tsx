@@ -72,7 +72,9 @@ import {
   posSaveCustomer,
   posSaveCustomerAddress,
 } from "@/lib/actions/pos/customers-pos-actions"
-import { evaluateDiscounts } from "@/lib/discount-engine"
+import { getActiveDiscountRules } from "@/lib/actions/discounts"
+import { discountRateFromEffectValue } from "@/lib/discount"
+import { evaluateDiscounts, isRuleScheduleActive } from "@/lib/discount-engine"
 import type { CustomerWithAddresses } from "@/lib/customers"
 import type { CustomerAddress } from "@/types/database"
 import { usePosMenuCache } from "@/lib/store/pos-menu-cache"
@@ -102,6 +104,7 @@ import type {
   CartItemForEngine,
   DeliveryZoneForEngine,
   DiscountEngineOutput,
+  DiscountRule,
 } from "@/types/promotions"
 import type { PosCartItem, PosOrder, PosWizardBrandOption } from "@/types/pos"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -370,16 +373,47 @@ function formatMdl(bani: number): string {
   return `${formatMdlAmount(bani)} MDL`
 }
 
-function formatProductCardPrice(item: MenuItemRow): string {
+function itemPercentDisplayPriceBani(
+  menuItemId: string,
+  variantPriceBani: number,
+  discountRules: DiscountRule[],
+  now: Date = new Date(),
+): number {
+  const rule = [...discountRules]
+    .sort((a, b) => b.priority - a.priority)
+    .find(
+      (r) =>
+        r.effect_type === "item_percent" &&
+        r.effect_value != null &&
+        isRuleScheduleActive(r, now) &&
+        r.target_item_ids?.includes(menuItemId),
+    )
+  if (rule?.effect_value != null) {
+    const rate = discountRateFromEffectValue(rule.effect_value)
+    return Math.round(variantPriceBani * (1 - rate))
+  }
+  return variantPriceBani
+}
+
+function formatProductCardPrice(
+  item: MenuItemRow,
+  discountRules: DiscountRule[],
+): string {
   const variants = posVariantsFromMenuEmbed(item)
   if (!item.has_sizes) {
     return `от ${formatMdlAmount(item.price ?? 0)} MDL`
   }
   const minFromV = variants.length
-    ? Math.min(...variants.map((v) => v.price))
+    ? Math.min(
+        ...variants.map((v) =>
+          itemPercentDisplayPriceBani(item.id, v.price, discountRules),
+        ),
+      )
     : null
   const fallback = typeof item.price === "number" ? item.price : 0
-  const minBani = minFromV ?? fallback
+  const minBani =
+    minFromV ??
+    itemPercentDisplayPriceBani(item.id, fallback, discountRules)
   return `от ${formatMdlAmount(minBani)} MDL`
 }
 
@@ -402,9 +436,11 @@ function unitPriceBani(row: MenuItemRow): number {
 function ProductCard({
   item,
   onAdd,
+  discountRules,
 }: {
   item: MenuItemRow
   onAdd: () => void
+  discountRules: DiscountRule[]
 }) {
   return (
     <button
@@ -429,7 +465,7 @@ function ProductCard({
           {item.name_ru}
         </p>
         <p className="text-xs text-muted-foreground">
-          {formatProductCardPrice(item)}
+          {formatProductCardPrice(item, discountRules)}
         </p>
       </div>
       <span
@@ -1032,6 +1068,9 @@ export function OrderForm({
   const [engineOutput, setEngineOutput] = useState<DiscountEngineOutput | null>(
     null,
   )
+  const [activeDiscountRules, setActiveDiscountRules] = useState<DiscountRule[]>(
+    [],
+  )
   const [appliedPromoCode, setAppliedPromoCode] = useState<string | null>(null)
 
   const [posCustomerData, setPosCustomerData] = useState<CustomerWithAddresses | null>(
@@ -1247,6 +1286,21 @@ export function OrderForm({
       .filter((c) => c.exclude_from_discounts)
       .map((c) => c.id)
   }, [posMenuCategories])
+
+  useEffect(() => {
+    if (!brandId) {
+      setActiveDiscountRules([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const rules = await getActiveDiscountRules(brandId)
+      if (!cancelled) setActiveDiscountRules(rules)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [brandId])
 
   const deliveryZoneForEngine = useMemo((): DeliveryZoneForEngine | null => {
     if (deliveryMode === "pickup") {
@@ -3802,6 +3856,7 @@ export function OrderForm({
                                 <ProductCard
                                   key={item.id}
                                   item={item}
+                                  discountRules={activeDiscountRules}
                                   onAdd={() => handleProductClick(item)}
                                 />
                               ))}
@@ -3920,6 +3975,7 @@ export function OrderForm({
           onClose={closeProductModal}
           onAdd={(c) => void addCartItem(c)}
           isAggregator={deliveryMode === "aggregator"}
+          discountRules={activeDiscountRules}
           cartEditDraft={
             cartEditIndex !== null &&
             modalItem &&
@@ -4733,6 +4789,7 @@ export function OrderForm({
         onClose={closeProductModal}
         onAdd={(c) => void addCartItem(c)}
         isAggregator={deliveryMode === "aggregator"}
+        discountRules={activeDiscountRules}
         cartEditDraft={
           cartEditIndex !== null &&
           modalItem &&

@@ -42,7 +42,7 @@ src/
 │   └── layout.tsx       # root, <html lang="ro">
 ├── brands/              # BrandConfig + host→brand
 ├── components/
-│   ├── client/          # витрина, корзина (CartRoot/Sheet/Panel, CartItemCard), checkout, auth, welcome-bonus-modal, storefront-campaign-rules-context
+│   ├── client/          # витрина, корзина (CartRoot/Sheet/Panel, CartItemCard, cart-line-price), checkout, auth, welcome-bonus-modal, storefront-campaign-rules-context
 │   ├── admin/           # AdminShell, sidebar, finances/, analytics, inventory, customers/, feedback/, cash-sessions/
 │   ├── feedback/        # FeedbackForm (публичная форма отзыва, client)
 │   ├── pos/             # PosAppShell, OrderForm, KdsScreen, discount-breakdown; order-form/pos-address-cards.tsx
@@ -86,7 +86,7 @@ src/
 .github/workflows/feedback-sms-cron.yml   # */10 → GET /api/cron/feedback-sms
 ```
 
-Корень репозитория: `vercel.json` (только 301 `/ru`, `/ro` → `/`), `.github/workflows/`, `supabase/migrations/`.
+Корень репозитория: `vercel.json` (`regions: ["fra1"]` + 301 `/ru`, `/ro` → `/`), `.github/workflows/`, `supabase/migrations/`.
 
 ## Контракты
 
@@ -300,7 +300,8 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 **Меню в мастере:** `usePosMenuCache` (на время браузерной POS-сессии: категории, items с вариантами и группами топпингов, индексы). Выборка `POS_MENU_ITEM_FOR_MODAL_SELECT` (`lib/pos/menu-item-modal-row.ts`) включает `aggregator_price_bani` для `menu_items`, `menu_item_variants` и nested `toppings`. Fallback — Supabase запрос с той же константой. Cookie `pos-brand-slug` обновляется при выборе бренда (синхронизация с KDS).
 
 **Шаг «Оформление» (меню + корзина):**
-- **`CartPanel`** (правая колонка, шаг 2): футер со сворачиваемым блоком **«Детали заказа»** (по умолчанию скрыт) — промокод (`PromoPanel`), строка назначенного курьера («Сменить»), разбивка скидок (`DiscountBreakdown` с `hideTotal`); всегда видны строка **«Итого»** (`DiscountOrderTotal`) и ряд CTA. Печать предчека — **иконка `Printer`** (~46px) слева от основной кнопки («Принять оплату» / «Назначить курьера» / «Отправить бегунок»), `aria-label="Печать предчека"`. Перед печатью — best-effort `persistCartToServer().catch()` + пауза 150 мс; offscreen `<ReceiptTemplate ref={receiptRef} {...receiptProps} />` (`position:absolute; left:-9999px`) → `printReceipt(node)` из `lib/receipt-print.ts`. Данные чека (`receiptProps` в `order-form.tsx`): номер заказа, дата, позиции корзины (имя, размер, топпинги; цена строки через **`getPosCartItemUnitPriceBani(item, isAggregator)`**), **`pricing`** через `buildReceiptPricingBreakdown` (`lib/receipt-pricing-breakdown.ts`): сумма без скидок / скидка на сеты / промокод / бонусы / доставка / итого; источник — `listOrder.subtotal|item_discount|promo_discount` (если в БД) или split `effectiveEngineOutput.appliedDiscounts` + legacy `discount`. Расчёт начисляемых бонусов (`accrual_rate` 5% × `bonusMultiplier`), баланс клиента, канал (`delivery` / `pickup` / Glovo). Disabled при пустой корзине.
+- **`CartPanel`** (`order-form.tsx`, правая колонка шаг 2, заголовок «Корзина»): футер со сворачиваемым блоком **«Детали заказа»** (`bg-muted/60`, `rounded-lg`, по умолчанию скрыт) — промокод (`PromoPanel`), предупреждения/строка курьера («Сменить»), разбивка скидок (`DiscountBreakdown` с `hideTotal`); всегда видны строка **«Итого»** (`DiscountOrderTotal`) и ряд CTA. **`DiscountOrderTotal`:** если `totalBani === null` (доставка ещё без адреса), но в корзине есть товары — показывает `discountedSubtotal − бонусы`, не «—»; «—» только при пустой корзине. Разделитель в футере — один `border-t` между списком позиций и блоком сводки (без лишних линий вокруг toggle и между итогом и CTA).
+- **Печать предчека:** пока видна кнопка «Отправить бегунок» (`onRunnerSend` / `runnerFormId`) — компактная кнопка `h-12 w-[52px]`, только иконка `Printer`, `aria-label="Печать предчека"`. Когда бегунок скрыт (статус уже не `draft`/`new`/`confirmed`) — `flex-1` кнопка «Печать чека» + иконка рядом с «Принять оплату». Перед печатью — best-effort `persistCartToServer().catch()` + пауза 150 мс; offscreen `<ReceiptTemplate ref={receiptRef} {...receiptProps} />` → `printReceipt(node)` из `lib/receipt-print.ts`. Данные чека: номер, дата, позиции (`getPosCartItemUnitPriceBani`), breakdown через `buildReceiptPricingBreakdown`; начисляемые бонусы (`accrual_rate` × `bonusMultiplier`), баланс, канал. Disabled при пустой корзине / без номера заказа.
 
 **Корзина — optimistic:**
 - `PosCartItem` / `PosCartTopping` (`src/types/pos.ts`): quantity-aware топпинги + `toppingGroupFreeCounts` (snapshot `free_count` из `menu_item_topping_groups`). Опционально `PosCartItem.aggregatorUnitPriceBani` (база позиции без топпингов) и `PosCartTopping.aggregator_price_bani` — заполняются из каталога при добавлении в модалке.
@@ -312,6 +313,7 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 - Realtime подписки — финальная сверка.
 
 **Шаг «Детали»:**
+- Правая колонка — тот же **`CartPanel`** (`panelTitle="Сводка"`, без печати): сворачиваемый блок «Детали заказа» (промо + `DiscountBreakdown` с `hideTotal`), всегда видимые «Итого» и CTA. «Отправить бегунок» — `type="submit"` через `runnerFormId="pos-wizard-details-form"`; «Принять оплату» — как на шаге 2.
 - Контакт: телефон **обязателен** для не-агрегатора, имя необязательно. Для Glovo контакты/адрес не требуются (Zod + `detailsArePersistable`).
 - Адрес при `delivery`: `delivery_address` + структурные `address_*`; зона через `checkDeliveryZoneByAddress` (Nominatim + viewbox по полигонам активных зон бренда, `bounded=1`, `countrycodes=md`, `findZoneForPoint`).
 - Время доставки (`ScheduledTimePicker`, `generateScheduledSlots`): `asap` или `HH:MM` → `orders.scheduled_time`. Слоты по `BrandConfig.openHour/closeHour`.
@@ -319,7 +321,7 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 - Дополнительно: `comment` (общий) и опционально `kitchen_note` (только для KDS).
 - **Lookup клиента** (`posLookupCustomer`): по телефону, debounce 500 мс + дедупликация. Возвращает `customer` (профиль + `addresses[]`), отдельное поле `addresses: CustomerAddress[]`, баланс бонусов, `bonus_settings.max_redemption_rate` (id=1, дефолт 0.3 при сбое). Адреса подгружаются в `getCustomerByPhone` одним JOIN на `customer_addresses`.
 - **Адрес на «Деталях» (delivery):** при найденном клиенте с сохранёнными адресами — карточки `PosAddressCards` (`components/pos/order-form/pos-address-cards.tsx`) вместо полей ввода; выбор карточки заполняет `delivery_address`, `address_*`, координаты и вызывает `checkDeliveryZoneByAddress`. «+ Новый адрес» — ручной ввод; после успешного «Отправить бегунок» новый адрес сохраняется через `posSaveCustomerAddress` (ошибка — `console.error`, отправку не блокирует). Состояние: `selectedAddressId`, `showNewAddressForm`.
-- **Списание бонусов:** поле при найденном клиенте, `total > 0`, `balance > 0`. Потолок считается от **subtotal после скидок движка** (`effectiveSubtotalBani` = `itemSubtotal − totalDiscount − giftItemsValue` с учётом overlap `cheapest_item_free`), не от gross: `floor(min(balance, effectiveSubtotal_mdl × max_redemption_rate))`. При активной акции (`promotionActive`: любой `appliedDiscounts` с `effect_type ≠ bonus_multiplier` или непустой `giftItems`) — инпут disabled, подпись «Бонусы недоступны при активной акции», локальное списание = 0.
+- **Списание бонусов:** поле при найденном клиенте, `total > 0`, `balance > 0`. Потолок: `floor(min(balance, grandTotal_mdl × max_redemption_rate))`, где `grandTotalBani` = `effectiveEngineOutput.totalBani` или `discountedSubtotal + deliveryFee`. Акции и подарки движка **не блокируют** списание; clamp по `posBonusMaxRedeemable` в UI и при сохранении.
 - Все правки на «Деталях» уходят через `updateOrderDetailsPos` с **debounce 600 мс** (контакт, адрес, координаты, comment, kitchen_note, profile_id, скидки, промо, синхронизация подарочных строк).
 
 **Скидки в мастере:** `getActiveDiscountRules` (`trigger_type='auto'`) загружается на сервере; промокод через `PromoPanel` + `resolvePromoCode` (`discounts.ts`); финальный расчёт через `evaluateDiscounts` (`src/lib/discount-engine.ts`) с `excludedCategoryIds` из `usePosMenuCache`. UI разбивки — `discount-breakdown.tsx` (`DiscountBreakdown`, `DiscountOrderTotal`, проп `hideTotal` для сворачиваемого футера `CartPanel`). Для заказов с сайта с непустым `promo_code` — флаг `skipSeedResolve` (быстрый показ без асинхронного `resolvePromoCode`).
@@ -328,8 +330,7 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 
 **«Отправить бегунок»** — `sendPosDraftToKitchen`:
 - Действует для `draft` / `new` / `confirmed` → `cooking`. Идемпотентно: уже в `cooking` — успех с тем же id. POS-черновики создаются со статусом **`new`** (`createDraftOrderPos`), не `draft`.
-- **До** UPDATE статуса: проверка активных авто-правил (`discount_rules`, `trigger_type='auto'`, `is_active`, `isRuleScheduleActive`, `effect_type ≠ bonus_multiplier`). При активной акции — `UPDATE bonuses_redeemed = 0`, `redeemBonus` **не** вызывается (`console.warn '[POS] bonuses cleared: active promotion'`), итог пересчитывается без бонусов; ошибка оператору не показывается.
-- Иначе, если `bonuses_redeemed > 0` и есть `profile_id` — свежий fetch заказа; списание через `redeemBonus` только пока статус ещё в `SENDABLE_POS_STATUSES` (`draft` / `new` / `confirmed`). Повторный клик после перехода в `cooking` — guard + идемпотентность в `redeemBonus`, двойного списания нет.
+- Если `bonuses_redeemed > 0` и есть `profile_id` — свежий fetch заказа; списание через `redeemBonus` только пока статус ещё в `SENDABLE_POS_STATUSES` (`draft` / `new` / `confirmed`). Повторный клик после перехода в `cooking` — guard + идемпотентность в `redeemBonus`, двойного списания нет. Активные акции **не** обнуляют бонусы на сервере.
 - UPDATE: `cooking_started_at`, `updated_at`. Пересчёт `total` только под **списание бонусов**: берёт уже сохранённый `orders.total` (нетто), восстанавливает gross (`+ bonuses_redeemed × 100`), вычитает новое списание → `bonuses_redeemed`. **Не** пересчитывает subtotal из каталога/`aggregator_price_bani` — агрегаторные цены должны быть записаны в `order_items` на шаге «Оформление» (`replaceOrderItemsPos` / `addOrderItemsPos`). Ошибки `redeemBonus` — только в `console.error`, заказ не откатывается.
 - После успеха на шаге «Детали»: если введён **новый** адрес (`showNewAddressForm`) и есть `profile_id` — best-effort `posSaveCustomerAddress` (не блокирует отправку).
 - Мастер остаётся открытым на том же `orderId`.
@@ -429,9 +430,9 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 1. Цены из `menu_items` / `menu_item_variants`; `original_price` через `calcCompareAt(price, discount_percent)`; при `discount_percent = 0` → `original_price = price`.
 2. `subtotal_bani` = Σ(original × qty); `item_discount_bani` = Σ((original − price) × qty) из `discount_percent`.
 2b. **Кампании `item_percent`:** fetch `discount_rules` (`.eq('brand_id', brandId)`, `trigger_type='auto'`, `effect_type='item_percent'`, `is_active`); фильтр `isRuleScheduleActive`. Для каждой строки — правило с `brand_id === brandId` и `target_item_ids.includes(menu_item_id)` (по приоритету) **заменяет** скидку строки (не суммирует с `discount_percent`): `rate = discountRateFromEffectValue(effect_value)` (`lib/discount.ts`; доля 0.2 или legacy-процент 20 → 0.2), `item_discount_bani = round(original × rate) × qty`. Пересчёт `subtotal_bani` / `item_discount_bani`. В `discount_rules_applied` — отдельные строки с `label` = `rule.name` / `label_ru`; legacy «Скидка на товары» — только для позиций без кампании.
-3. Флаг **`active_promotion`**: любое schedule-active авто-правило с `effect_type ≠ bonus_multiplier` (не только `item_percent`).
-4. Промокод — валидация как в `validate-promo-code.ts` (в т.ч. `min_order_bani` по **полному** `subtotal_bani`); **`promo_discount`** через `calcPromoDiscount` только по **eligible subtotal** — сумма `original_price × qty` строк, чья `menu_items.category_id` **не** в категориях с `exclude_from_discounts = true` (fetch `menu_categories` по `brand_id`). Если eligible subtotal = 0 → `promo_discount_bani = 0`. При промокоде **или** `active_promotion`: **`bonuses_blocked = true`**, `bonuses_redeemed = 0`.
-5. Без блокировки бонусов: `max_bonuses_redeemable = floor(subtotal_mdl × max(0, 30 − item_discount_pct) / 100)` (MDL); списание = `min(requested, balance, max)`.
+3. Флаг **`active_promotion`**: любое schedule-active авто-правило с `effect_type ≠ bonus_multiplier` (информационно в ответе; **не** блокирует бонусы).
+4. Промокод — валидация как в `validate-promo-code.ts` (в т.ч. `min_order_bani` по **полному** `subtotal_bani`); **`promo_discount`** через `calcPromoDiscount` только по **eligible subtotal** — сумма `original_price × qty` строк, чья `menu_items.category_id` **не** в категориях с `exclude_from_discounts = true`. Если eligible subtotal = 0 → `promo_discount_bani = 0`.
+5. **Списание бонусов:** `grandTotalAfterDiscounts = subtotal − item_discount − promo_discount + delivery_fee`; `max_bonuses_redeemable = floor(min(balance, grandTotal_mdl × max_redemption_rate))` из `getBonusSettings()` (fallback rate 0.3); `bonuses_redeemed = min(requested, balance, max)`. `bonuses_blocked` всегда `false` на сервере; в UI checkout бонусы disabled **только** при активном промокоде.
 6. `total_bani = subtotal − item_discount − promo_discount − bonuses×100 + delivery_fee`.
 7. `discount_rules_applied` — JSON `[{ type: 'item_discount'|'promo_code'|'bonus_redemption', label, amount_bani }]`.
 
@@ -443,7 +444,7 @@ Read-only + мутации админки: `src/lib/actions/admin/cash-sessions.
 
 **API:** `POST /api/[brandSlug]/checkout/pricing` — тело `{ items, delivery_fee, delivery_mode, promo_code?, bonuses_to_redeem? }`; ответ — `PricingResult`. Сессия опциональна: без auth → `bonuses_available = 0`, `bonuses_redeemed = 0`. Хелпер бренда — `resolveBrandIdBySlug` (`lib/resolve-brand-id.ts`).
 
-**Checkout UI:** `useCheckoutPricing` (debounce 300 ms) → breakdown в `OrderSummary` (`pricingBreakdown` + `discountRulesApplied` из `discount_rules_applied`). Строки скидки на товары — **по `label` кампании** из сервера; i18n `pricingItemDiscount` («Скидка на сеты») — только fallback для legacy `discount_percent` без кампании. `BonusRedeemBlock` — числовой ввод MDL, «Макс. списание…»; disabled + tooltip при промокоде («Промокод и бонусы нельзя совмещать») или при `active_promotion` («Бонусы недоступны при активной акции» / RO-аналог).
+**Checkout UI:** `useCheckoutPricing` (debounce 300 ms) → breakdown в `OrderSummary` (`pricingBreakdown` + `discountRulesApplied`). Per-item цены в списке позиций — **`CartLinePrice`** + `getItemCampaignDiscount` (как в drawer корзины: зачёркнутая `text-xs` + цена со скидкой). Строки скидки в breakdown — **по `label` кампании**; i18n `pricingItemDiscount` — fallback для legacy `discount_percent`. `BonusRedeemBlock` — числовой ввод MDL; disabled + tooltip **только** при промокоде («Промокод и бонусы нельзя совмещать»).
 
 **Создание заказа с витрины:** `create-order.ts` → `executeCreateOrder` вызывает `calculateOrderPricing` перед insert; **`total`, `subtotal`, `item_discount`, `promo_discount`, `discount`, `discount_rules_applied`, `bonuses_redeemed`** — только с сервера; значения с фронта не доверяются.
 
@@ -469,7 +470,7 @@ Bootstrap для витрины — `getStorefrontCartPricingBootstrap` в `disc
 
 Сборка корзины витрины — `src/components/client/cart/storefront-cart-pricing.ts` (`CartItemForEngine` + `evaluateStorefrontCartDiscount` → `evaluateDiscounts`; **`allocateGiftFreeUnitsByCartLineId`** — раздаёт `giftItems.quantity` по строкам корзины в порядке `items`). Подсказки: `storefront-discount-excluded-notice.tsx`, `storefront-promo-excluded-warning.tsx`.
 
-**Цены строк в корзине витрины (`CartItemCard`):** per-item кампания — зачёркнутая оригинальная сумма строки + цена со скидкой (`getItemCampaignDiscount` на `getCartItemPrice`, incl. топпинги). Подарки (`giftFreeUnits` из `allocateGiftFreeUnitsByCartLineId`) — зачёркнутая бесплатная часть + зелёное «0 лей»; при частично платной строке — сумма за платные единицы (с учётом item_percent, если есть). Итоговая строка «Reducere» / `totalDiscountBani` внизу `CartContent` — без изменений (движок `evaluateDiscounts`).
+**Цены строк в корзине и checkout (`CartLinePrice`, `components/client/cart/cart-line-price.tsx`):** общий компонент для `CartItemCard` (drawer/panel) и `OrderSummary` (checkout). Per-item кампания — зачёркнутая сумма (`text-xs`, `text-muted-foreground`, `line-through`, `mr-1`) + цена со скидкой (`font-bold`, `text-[16px]`); логика — `getItemCampaignDiscount` на `getCartItemPrice`. Подарки (`giftFreeUnits`) — зачёркнутая бесплатная часть + зелёное «0 лей». Итог «Reducere» / `totalDiscountBani` в `CartContent` — движок `evaluateDiscounts`.
 
 В POS-мастере: `mergePersistedWebsitePromoDiscount` подмешивает сохранённое `listOrder.promo_code` / `discount` пока движок ещё не дал полный выход.
 
@@ -529,7 +530,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - **API** `POST /api/admin/inventory/ocr-invoice` (`route.ts`, `force-dynamic`): auth — `getAdminSession()` → 401 без сессии; body — `multipart/form-data`, поле `image`. OpenAI Chat Completions через `fetch()` (без SDK), env **`OPENAI_API_KEY`**.
   - **Шаг 1** — `gpt-5.4-mini`, image + prompt: извлечение позиций (FACTURA / чеки супермаркета). `image_url.detail: "high"`. `unit_price` и `total_price` — **без НДС** (фактура: колонка Pret fara TVA; чек: shelf price ÷ (1 + vat_rate/100)); `vat_rate` 20/8/0 (буквы A/B/C на чеке, Cota TVA % на фактуре).
   - **Шаг 2** — `gpt-5.4-nano`, text-only: матчинг к `ingredients` + `suppliers` из БД (service role), `display_quantity` в display-единицах накладной (кг/л/шт, без ×1000).
-  - Ответы JSON: `extractJson()` (снятие markdown fences), при ошибке parse — `ocr_parse_failed` / `match_parse_failed` (+ `raw`); ошибки OpenAI — `openai_error` с `console.error` тела ответа.
+  - Ответы JSON: `extractJson()` (снятие markdown fences); после parse — проверка shape (`parsed != null`, `typeof object`, `Array.isArray(items)`), иначе `ocr_parse_failed` / `match_parse_failed` (+ `raw`); пустой `choices[0].message.content` → `openai_error`; unhandled — `internal` + `console.error` stack в runtime logs.
 - **Типы** — `src/lib/admin/inventory/invoice-ocr-types.ts`: `OcrRawItem`, `OcrMatchedItem` (`vat_rate`, `display_quantity`, `confidence`), `OcrInvoiceResult`.
 - **Модалка** `invoice-ocr-modal.tsx` (Vaul ≤768px / Dialog desktop): шаги `capture` → `processing` → `review` → `confirm`. Съёмка/галерея; сжатие только если файл **>8 MB** (canvas max 2400px, JPEG 92%). Review: карточки с confidence, `IngredientCombobox`, `InvoiceNumberInput` (text + `inputMode=decimal`), селектор НДС, итого с НДС по строке; прокручиваемый список + фиксированный footer с **итогом по поставке**. Confirm → `onComplete(InvoiceOcrCompletePayload)`.
 - **Создание поставки** (`supplies-table.tsx` → `handleOcrComplete`): `createSupplyOrder` с `note: "Создано из фото накладной"`; `quantity` = `toStorageQty(display_quantity, unit)`; `price_per_unit` = `toStoragePrice(unit_price, unit)` (unit_price уже ex-VAT); `vat_rate` из OCR/редактирования.
@@ -681,7 +682,7 @@ Lib: `src/lib/bonus.ts`. Все функции — service role (`createServiceS
 - Корзина: `cart-store` (`CART_STORAGE_KEY` = `kitch-cart` в persist; брендовые ключи в `BrandConfig.cartKey` / `deliveryKey` — см. TODO). `cartToppings` + legacy `selectedToppingIds` синхронизируются при записи; `toppingGroupFreeCounts` / `toppingGroupLabels` — snapshot при добавлении из модалки. Детали топпингов в UI — `CartItemToppingDetails`.
 - **Pricing checkout:** `checkout-view.tsx` → `useCheckoutPricing` → `POST /api/[brandSlug]/checkout/pricing` при изменении корзины, промокода, бонусов, доставки. `OrderSummary` показывает breakdown: сумма без скидок → скидка на сеты → промокод → бонусы → доставка → итого. Submit блокируется до ответа pricing.
 - **Способы оплаты checkout (`checkout-view.tsx`):** всегда видны **наличные** (`cash`) и **«Картой курьеру»** (`card`, i18n `t.checkout.card` — терминал у курьера, без редиректа). **`online_card`** (Card online / Apple Pay / Google Pay → MAIB) — **только** при `NEXT_PUBLIC_CARD_PAYMENT_ENABLED=true`; иначе кнопка скрыта, а выбранный `online_card` сбрасывается на `cash` (`card` не затрагивается). Сервер: `CARD_PAYMENT_ENABLED=true` для `POST /api/[brandSlug]/checkout/pay`, иначе **503**. После успешного `createOrder` с `online_card` → `POST /api/[brandSlug]/checkout/pay` `{ orderId }` → `{ payUrl }` → `window.location.href` (корзина очищается перед редиректом). Ошибка pay API — `toast` (Sonner в `(client)/layout.tsx`), корзина не сбрасывается. Редиректы MAIB: **`/payment/success`**, **`/payment/fail`** (`?orderId=&payId=`). Кнопки оплаты: неактивные — белый фон; активная — `var(--color-accent)` + `var(--color-accent-text)` (чёрный текст на Kitch, белый на Losos/The Spot).
-- **Списание бонусов в checkout:** `BonusRedeemBlock` — числовой ввод MDL, «Макс. списание бонусами: X MDL» из API; disabled при промокоде или `pricing.active_promotion` (разные tooltip RU/RO). Баланс и лимиты — из `PricingResult`, не отдельные fetch.
+- **Списание бонусов в checkout:** `BonusRedeemBlock` — числовой ввод MDL, «Макс. списание бонусами: X MDL» из `max_bonuses_redeemable`; disabled только при промокоде. Баланс и лимиты — из `PricingResult`.
 - Вне часов работы бренда — см. **«Модалка „магазин закрыт"»**.
 
 ### /account
@@ -931,7 +932,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `cash-session.ts` — `openCashSession`, `getCashSession` (`payment_breakdown`, `manual_breakdown`, `recent_manual_transactions`), `getExpectedInDrawerBani`, `getActiveOrdersCountForShift`, `createCashTransaction`, `closeCashSession`, **`payOrder`** (см. инварианты в разделе POS / Касса).
 - `create-draft-order.ts` — `createDraftOrderPos`.
 - `update-order-brand-pos`, `update-order-details-pos`, `update-order-items`, `updateOrderDeliveryModePos`.
-- `send-pos-draft-to-kitchen.ts` — `draft`/`new`/`confirmed` → `cooking`, `cooking_started_at`; при активной акции (`discount_rules` auto + schedule, `effect_type ≠ bonus_multiplier`) — обнуление `bonuses_redeemed`, `redeemBonus` пропускается; иначе `redeemBonus` **до** UPDATE (guard по свежему статусу); пересчёт `total`/`bonuses_redeemed` только под списание бонусов (не из каталога).
+- `send-pos-draft-to-kitchen.ts` — `draft`/`new`/`confirmed` → `cooking`, `cooking_started_at`; `redeemBonus` **до** UPDATE при `bonuses_redeemed > 0` (guard по свежему статусу, идемпотентность в `redeemBonus`); пересчёт `total`/`bonuses_redeemed` только под списание бонусов (не из каталога).
 - `accept-order-pos`, `reject-order-pos` — для `new` + `source='website'`.
 - `cancel-order-pos`, `delete-draft-order-pos`.
 - `assign-courier-pos.ts` — `assignCourierPos`, `changeCourierPos`. После — `sendCourierAssignmentTelegram`.
@@ -954,7 +955,7 @@ SQL в `supabase/migrations/`. Применять через Supabase MCP / CLI 
 - `lib/delivery-zone-schedule.ts` — `getActiveSchedule`, `isZoneAvailableNow`, `resolveZoneParams`, `attachResolvedZoneParams`.
 - `lib/actions/admin/delivery-zone-schedules.ts` — CRUD слотов расписания зоны.
 - `lib/discount.ts` — `calcCompareAt`, `calcPromoDiscount`, **`discountRateFromEffectValue`** (нормализация `effect_value` для `item_percent`).
-- `lib/pricing.ts` — **`calculateOrderPricing`** (server-side расчёт витрины; шаг 2b `item_percent`, `active_promotion`, `.eq('brand_id')`; см. раздел «Скидки»).
+- `lib/pricing.ts` — **`calculateOrderPricing`** (server-side расчёт витрины; шаг 2b `item_percent`, cap бонусов через `getBonusSettings`, `.eq('brand_id')`; см. раздел «Скидки»).
 - `lib/storefront-item-campaign-discount.ts` — **`getItemCampaignDiscount`** (отображение зачёркнутой цены в меню; не корзина).
 - `lib/resolve-brand-id.ts` — `resolveBrandIdBySlug` для API по slug бренда.
 - **`lib/maib/token.ts`** — кэш OAuth MAIB в `maib_tokens` (singleton `id=1`), `getMaibAccessToken()` (refresh / project credentials).
@@ -1101,7 +1102,7 @@ npx tsx -r dotenv/config scripts/send-campaign.ts dotenv_config_path=.env.local
 
 ## Deploy
 
-Корневой `vercel.json`: только **301-редиректы** `/ru`, `/ru/*`, `/ro`, `/ro/*` → корень сайта (`permanent: true`).
+Корневой `vercel.json`: **`"regions": ["fra1"]`** (serverless functions ближе к EU) + **301-редиректы** `/ru`, `/ru/*`, `/ro`, `/ro/*` → корень сайта (`permanent: true`). Middleware по-прежнему на Edge (`fra1` в runtime logs).
 
 **Cron feedback-sms:** GitHub Actions `feedback-sms-cron.yml` (каждые 10 мин) → `curl` на `https://losos.md/api/cron/feedback-sms` с `Authorization: Bearer $CRON_SECRET`. Секрет `CRON_SECRET` — в Vercel env **и** в GitHub Actions secrets. На Vercel Hobby нельзя ставить cron `*/10` в `vercel.json`.
 

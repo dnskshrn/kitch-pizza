@@ -52,6 +52,8 @@ export type PosCartItem = {
   toppingGroupFreeCounts?: Record<string, number>
   /** Строка `order_items`, если позиция уже сохранена в БД. */
   orderItemId?: string
+  /** Подарок клиенту — цена 0, не участвует в скидках. */
+  is_gift?: boolean
 }
 
 export type PosOrder = {

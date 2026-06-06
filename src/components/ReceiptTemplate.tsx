@@ -10,7 +10,13 @@ export interface ReceiptProps {
   brandSlug: string
   orderNumber: string
   createdAt: string
-  items: { name: string; subtitle?: string; qty: number; price: number }[]
+  items: {
+    name: string
+    subtitle?: string
+    qty: number
+    price: number
+    is_gift?: boolean
+  }[]
   total: number
   bonusEarned: number
   bonusBalance: number
@@ -284,6 +290,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 22 }}>
                     {item.qty} × {item.name}
+                    {item.is_gift ? " (Подарок)" : ""}
                   </div>
                   {item.subtitle ? (
                     <div
@@ -308,7 +315,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptProps>(
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {formatMdl(item.price)}
+                  {formatMdl(item.is_gift ? 0 : item.price)}
                 </div>
               </div>
             </div>

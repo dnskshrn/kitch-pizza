@@ -16,6 +16,7 @@ export type FeedbackMetrics = {
 export type FeedbackRow = OrderFeedback & {
   brand_name: string
   brand_slug: string
+  profile_id: string | null
   customer_phone: string | null
   customer_name: string | null
   courier_name: string | null
@@ -53,17 +54,32 @@ function applyDateFilters<
   return q
 }
 
+function applySmsDateFilters<
+  Q extends {
+    gte: (col: string, val: string) => Q
+    lte: (col: string, val: string) => Q
+  },
+>(query: Q, from?: string, to?: string): Q {
+  let q = query
+  if (from) {
+    q = q.gte("sms_sent_at", startOfDay(parseISO(from.slice(0, 10))).toISOString())
+  }
+  if (to) {
+    q = q.lte("sms_sent_at", endOfDay(parseISO(to.slice(0, 10))).toISOString())
+  }
+  return q
+}
+
 function computeMetrics(
   rows: Array<{
     food_rating: number | null
     service_rating: number | null
     submitted_at: string | null
-    sms_sent_at: string | null
   }>,
+  total_sms_sent: number,
 ): FeedbackMetrics {
   const submitted = rows.filter((r) => r.submitted_at != null)
   const total_submitted = submitted.length
-  const total_sms_sent = rows.filter((r) => r.sms_sent_at != null).length
 
   const foodRatings = submitted
     .map((r) => r.food_rating)
@@ -119,7 +135,7 @@ export async function fetchFeedbackPageData(
   const brandSlug = brandFilter?.trim() || undefined
 
   let metricsQuery = orderFeedbackTable(supabase).select(
-    "food_rating, service_rating, submitted_at, sms_sent_at, brands!inner(slug)",
+    "food_rating, service_rating, submitted_at, brands!inner(slug)",
   )
 
   if (brandSlug) {
@@ -127,10 +143,25 @@ export async function fetchFeedbackPageData(
   }
   metricsQuery = applyDateFilters(metricsQuery, from, to)
 
-  const { data: metricsRows, error: metricsError } = await metricsQuery
+  let smsCountQuery = orderFeedbackTable(supabase)
+    .select("id, brands!inner(slug)", { count: "exact", head: true })
+    .not("sms_sent_at", "is", null)
+
+  if (brandSlug) {
+    smsCountQuery = smsCountQuery.eq("brands.slug", brandSlug)
+  }
+  smsCountQuery = applySmsDateFilters(smsCountQuery, from, to)
+
+  const [
+    { data: metricsRows, error: metricsError },
+    { count: smsSentCount, error: smsCountError },
+  ] = await Promise.all([metricsQuery, smsCountQuery])
 
   if (metricsError) {
     throw new Error(metricsError.message)
+  }
+  if (smsCountError) {
+    throw new Error(smsCountError.message)
   }
 
   let feedbacksQuery = orderFeedbackTable(supabase)
@@ -139,6 +170,7 @@ export async function fetchFeedbackPageData(
       *,
       brands!inner(name, slug),
       orders!inner(
+        profile_id,
         profiles(phone, name),
         courier:staff!orders_courier_id_fkey(name)
       )
@@ -163,6 +195,7 @@ export async function fetchFeedbackPageData(
     const r = row as OrderFeedback & {
       brands?: MaybeJoin<{ name?: string; slug?: string }>
       orders?: MaybeJoin<{
+        profile_id?: string | null
         profiles?: MaybeJoin<{ phone?: string | null; name?: string | null }>
         courier?: MaybeJoin<{ name?: string }>
       }>
@@ -172,10 +205,16 @@ export async function fetchFeedbackPageData(
     const profile = unwrapOne(order?.profiles)
     const courier = unwrapOne(order?.courier)
 
+    const profileId =
+      typeof order?.profile_id === "string" && order.profile_id.trim()
+        ? order.profile_id.trim()
+        : null
+
     return {
       ...r,
       brand_name: brand?.name?.trim() || "—",
       brand_slug: brand?.slug?.trim() || "",
+      profile_id: profileId,
       customer_phone:
         typeof profile?.phone === "string" && profile.phone.trim()
           ? profile.phone.trim()
@@ -197,8 +236,8 @@ export async function fetchFeedbackPageData(
         food_rating: number | null
         service_rating: number | null
         submitted_at: string | null
-        sms_sent_at: string | null
       }>,
+      smsSentCount ?? 0,
     ),
     feedbacks,
   }

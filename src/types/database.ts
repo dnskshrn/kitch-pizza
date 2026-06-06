@@ -571,6 +571,28 @@ export interface CustomerAddress {
   is_default: boolean
 }
 
+export type CustomerGiftStatus = "pending" | "given" | "cancelled"
+
+export type CustomerGift = {
+  id: string
+  profile_id: string
+  brand_id: string
+  menu_item_id: string
+  item_name: string
+  quantity: number
+  reason: string
+  status: CustomerGiftStatus
+  source_order_id: string | null
+  source_feedback_id: string | null
+  fulfilled_order_id: string | null
+  fulfilled_at: string | null
+  fulfilled_by: string | null
+  created_by: string
+  created_at: string
+  expires_at: string | null
+  cancelled_reason: string | null
+}
+
 export type OrderFeedback = {
   id: string
   order_id: string

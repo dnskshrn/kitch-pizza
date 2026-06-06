@@ -574,6 +574,7 @@ function CartPanel({
   onRemove,
   onOpenLine,
   errorBanner,
+  giftsBanner,
   cartInteractionDisabled,
   onRunnerSend,
   runnerFormId,
@@ -604,6 +605,7 @@ function CartPanel({
   onRemove: (idx: number) => void | Promise<void>
   onOpenLine: (idx: number) => void
   errorBanner?: string | null
+  giftsBanner?: ReactNode
   cartInteractionDisabled: boolean
   onRunnerSend?: () => void | Promise<void>
   /** Отправка бегунка через submit внешней формы (шаг 3). */
@@ -735,6 +737,9 @@ function CartPanel({
 
         {/* Список позиций */}
         <div className="min-h-0 flex-1 overflow-y-auto">
+          {giftsBanner ? (
+            <div className="space-y-2 p-3 pb-0">{giftsBanner}</div>
+          ) : null}
           {cart.length === 0 ? (
             <p className="p-5 text-center text-sm text-muted-foreground">
               Корзина пуста
@@ -907,6 +912,14 @@ function phoneInputFromStored(phone: string): string {
   return t
 }
 
+type PendingCustomerGift = {
+  id: string
+  item_name: string
+  quantity: number
+  reason: string
+  menu_item_id: string
+}
+
 function posCartFromOrderLine(line: {
   id: string
   item_name: string
@@ -916,6 +929,7 @@ function posCartFromOrderLine(line: {
   quantity: number
   price: number
   toppings: unknown
+  is_gift?: boolean | null
   menu_items:
     | { image_url: string | null; category_id?: string | null }
     | { image_url: string | null; category_id?: string | null }[]
@@ -925,7 +939,8 @@ function posCartFromOrderLine(line: {
   const plus = rawName.indexOf(" + ")
   const baseName = plus >= 0 ? rawName.slice(0, plus).trim() : rawName
   const qty = Math.max(1, line.quantity)
-  const unit = qty > 0 ? Math.round(line.price / qty) : 0
+  const isGift = line.is_gift === true
+  const unit = isGift ? 0 : qty > 0 ? Math.round(line.price / qty) : 0
   const rawTops = Array.isArray(line.toppings) ? line.toppings : []
   const toppings = migratePosCartToppingsFromLegacy(
     rawTops as Parameters<typeof migratePosCartToppingsFromLegacy>[0],
@@ -948,6 +963,7 @@ function posCartFromOrderLine(line: {
     qty,
     imageUrl: embed?.image_url ?? undefined,
     toppings,
+    is_gift: isGift || undefined,
   }
 }
 
@@ -1043,6 +1059,7 @@ export function OrderForm({
     string | null
   >(null)
   const [bonusRedeemTouched, setBonusRedeemTouched] = useState(false)
+  const [pendingGifts, setPendingGifts] = useState<PendingCustomerGift[]>([])
 
   /** Время доставки: `asap` или `HH:MM` (только режим доставки). */
   const [scheduledTime, setScheduledTime] = useState("asap")
@@ -1471,6 +1488,7 @@ export function OrderForm({
           qty: line.qty,
           price:
             (getPosCartItemUnitPriceBani(line, isAggregator) * line.qty) / 100,
+          is_gift: line.is_gift,
         }
       }),
       total: receiptPricing.totalMdl,
@@ -1648,6 +1666,7 @@ export function OrderForm({
     setSelectedAddressId(null)
     setShowNewAddressForm(false)
     setLinkedProfileId(undefined)
+    setPendingGifts([])
     setBonusRedeemFieldError(null)
     setPosMaxRedemptionRate(null)
     setBonusRedeemTouched(false)
@@ -1664,6 +1683,40 @@ export function OrderForm({
     if (!pid) return
     setLinkedProfileId((prev) => (prev === undefined ? pid : prev))
   }, [listOrder?.profile_id, listOrder?.id, posOrderId])
+
+  useEffect(() => {
+    const profileId =
+      typeof linkedProfileId === "string" ? linkedProfileId.trim() : ""
+    const activeBrandId = brandId ?? listOrder?.brand_id ?? ""
+    if (!profileId || !activeBrandId) {
+      setPendingGifts([])
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/gifts?profile_id=${encodeURIComponent(profileId)}&brand_id=${encodeURIComponent(activeBrandId)}&status=pending`,
+        )
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as Array<{
+          id: string
+          item_name: string
+          quantity: number
+          reason: string
+          menu_item_id: string
+        }>
+        if (!cancelled) {
+          setPendingGifts(Array.isArray(data) ? data : [])
+        }
+      } catch {
+        if (!cancelled) setPendingGifts([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [linkedProfileId, brandId, listOrder?.brand_id])
 
   const posBonusRedeemAllowed =
     typeof linkedProfileId === "string" &&
@@ -1790,7 +1843,7 @@ export function OrderForm({
       const { data, error } = await supabase
         .from("orders")
         .select(
-          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, cash_amount, card_amount, comment, kitchen_note, scheduled_time, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
+          "delivery_fee, discount, order_number, user_name, user_phone, delivery_mode, delivery_address, payment_method, change_from, cash_amount, card_amount, comment, kitchen_note, scheduled_time, promo_code, address_entrance, address_floor, address_apartment, address_intercom, aggregator, prep_deadline_at, brands(slug), order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, is_gift, menu_items(image_url, category_id))",
         )
         .eq("id", posOrderId)
         .maybeSingle()
@@ -1834,6 +1887,7 @@ export function OrderForm({
           quantity: number
           price: number
           toppings: unknown
+          is_gift?: boolean | null
           menu_items:
             | { image_url: string | null; category_id?: string | null }
             | { image_url: string | null; category_id?: string | null }[]
@@ -2081,7 +2135,7 @@ export function OrderForm({
     const { data, error } = await supabase
       .from("orders")
       .select(
-        "order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, menu_items(image_url, category_id))",
+        "order_items(id, item_name, menu_item_id, variant_id, size, quantity, price, toppings, is_gift, menu_items(image_url, category_id))",
       )
       .eq("id", posOrderId)
       .maybeSingle()
@@ -2265,12 +2319,13 @@ export function OrderForm({
   }, [])
 
   const addCartItem = useCallback(
-    async (entry: PosCartItem) => {
-      if (entry.price <= 0 || entry.qty < 1) return
-      if (cartInteractionDisabled) return
+    async (entry: PosCartItem): Promise<boolean> => {
+      if ((!entry.is_gift && entry.price <= 0) || entry.qty < 1) return false
+      if (cartInteractionDisabled) return false
       const snapshot = cart
       const idx = cart.findIndex(
         (x) =>
+          Boolean(x.is_gift) === Boolean(entry.is_gift) &&
           x.menuItemId === entry.menuItemId &&
           (x.variantId ?? null) === (entry.variantId ?? null) &&
           (x.size ?? "") === (entry.size ?? "") &&
@@ -2295,11 +2350,11 @@ export function OrderForm({
             })
             if (!res.success) {
               rollbackOptimisticCart(snapshot, "Не удалось обновить количество")
-              return
+              return false
             }
           } else {
             rollbackOptimisticCart(snapshot, "Некорректное состояние корзины")
-            return
+            return false
           }
         } else {
           const res = await addOrderItemsPos({
@@ -2308,11 +2363,12 @@ export function OrderForm({
           })
           if (!res.success) {
             rollbackOptimisticCart(snapshot, "Не удалось добавить позицию")
-            return
+            return false
           }
           void refreshCartFromDb()
         }
         lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
+        return true
       } finally {
         setCartActionBusy(false)
       }
@@ -2327,6 +2383,66 @@ export function OrderForm({
       toppingsSignature,
     ],
   )
+
+  const addPendingGiftToCart = useCallback(
+    async (gift: PendingCustomerGift) => {
+      if (cartInteractionDisabled) return
+      const entry: PosCartItem = {
+        menuItemId: gift.menu_item_id,
+        category_id: "",
+        name: gift.item_name,
+        size: null,
+        variantId: null,
+        price: 0,
+        qty: gift.quantity,
+        toppings: [],
+        is_gift: true,
+      }
+      const added = await addCartItem(entry)
+      if (!added) return
+      try {
+        const res = await fetch(`/api/admin/gifts/${gift.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status: "given",
+            fulfilled_by: "POS",
+            fulfilled_order_id: posOrderId,
+          }),
+        })
+        if (res.ok) {
+          setPendingGifts((prev) => prev.filter((g) => g.id !== gift.id))
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+    [addCartItem, cartInteractionDisabled, posOrderId],
+  )
+
+  const giftsBanner = useMemo(() => {
+    if (pendingGifts.length === 0) return null
+    return pendingGifts.map((gift) => (
+      <div
+        key={gift.id}
+        className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-[#242424]"
+      >
+        <p className="font-medium">
+          🎁 Клиенту положен подарок: {gift.item_name} × {gift.quantity}
+        </p>
+        <p className="mt-1 text-muted-foreground">{gift.reason}</p>
+        <Button
+          type="button"
+          size="sm"
+          className="mt-2"
+          disabled={cartInteractionDisabled}
+          onClick={() => void addPendingGiftToCart(gift)}
+        >
+          Добавить в заказ
+        </Button>
+      </div>
+    ))
+  }, [pendingGifts, addPendingGiftToCart, cartInteractionDisabled])
 
   const handleProductClick = useCallback(
     (row: MenuItemRow) => {
@@ -3668,6 +3784,7 @@ export function OrderForm({
             <CartPanel
               cart={cart}
               cartCount={cartCount}
+              giftsBanner={giftsBanner}
               totalsSlot={
                 <>
                   {brandId ? (
@@ -4518,6 +4635,7 @@ export function OrderForm({
           panelTitle="Сводка"
           cart={cart}
           cartCount={cartCount}
+          giftsBanner={giftsBanner}
           totalsSlot={
             <>
               {brandId ? (

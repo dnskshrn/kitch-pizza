@@ -148,6 +148,7 @@ export function getPosCartItemUnitPriceBani(
   item: PosCartItem,
   isAggregator: boolean,
 ): number {
+  if (item.is_gift) return 0
   if (isAggregator && item.aggregatorUnitPriceBani != null) {
     return (
       Math.round(item.aggregatorUnitPriceBani) +

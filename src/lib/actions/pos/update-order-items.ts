@@ -193,6 +193,20 @@ function orderItemInsertsFromCartLines(
   isAggregator: boolean,
 ) {
   return lines.map((cartItem) => {
+    if (cartItem.is_gift) {
+      return {
+        order_id: orderId,
+        menu_item_id: cartItem.menuItemId,
+        variant_id: cartItem.variantId ?? null,
+        lunch_set_id: null as string | null,
+        item_name: cartItem.name,
+        size: cartItem.size,
+        quantity: cartItem.qty,
+        toppings: [] as { name: string; price: number }[],
+        price: 0,
+        is_gift: true,
+      }
+    }
     const line = posLinePayloadFromCartItem(cartItem, isAggregator)
     return {
       order_id: orderId,

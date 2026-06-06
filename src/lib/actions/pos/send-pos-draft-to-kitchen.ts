@@ -13,6 +13,22 @@ export type SendPosDraftToKitchenInput = {
   bonusesToRedeem?: number
   /** Профиль для redeemBonus; если не передан — берётся orders.profile_id */
   profileId?: string | null
+  discountPayload?: {
+    discountBani: number
+    discountRulesApplied: {
+      rule_id: string
+      effect_type: string
+      label_ru: string
+      discount_bani: number
+    }[]
+    giftItems: {
+      menu_item_id: string
+      variant_id: string | null
+      quantity: number
+      rule_id: string
+      label_ru: string
+    }[]
+  }
 }
 
 export type SendPosDraftToKitchenResult =
@@ -173,6 +189,52 @@ export async function sendPosDraftToKitchen(
     return {
       success: false,
       error: "Заказ уже отправлен или недоступен",
+    }
+  }
+
+  if (input.discountPayload && input.discountPayload.discountBani > 0) {
+    const discountPayload = input.discountPayload
+
+    const { error: delGiftError } = await (supabase.from("order_items") as any)
+      .delete()
+      .eq("order_id", input.orderId)
+      .eq("is_gift", true)
+    if (delGiftError) {
+      console.error(
+        "[sendPosDraftToKitchen] delete gift items",
+        delGiftError.message,
+      )
+    }
+
+    if (discountPayload.giftItems.length > 0) {
+      const giftRows = discountPayload.giftItems.map((item) => ({
+        order_id: input.orderId,
+        menu_item_id: item.menu_item_id,
+        variant_id: item.variant_id,
+        item_name: item.label_ru,
+        price: 0,
+        quantity: item.quantity,
+        is_gift: true,
+        gift_rule_id: item.rule_id,
+      }))
+      const { error: giftInsErr } = await (supabase.from("order_items") as any).insert(
+        giftRows,
+      )
+      if (giftInsErr) {
+        console.error("[sendPosDraftToKitchen] gift items", giftInsErr.message)
+      }
+    }
+
+    const { error: discountError } = await (supabase.from("orders") as any)
+      .update({
+        discount: discountPayload.discountBani,
+        discount_rules_applied: discountPayload.discountRulesApplied,
+        total: newTotalBani - discountPayload.discountBani,
+      })
+      .eq("id", input.orderId)
+      .eq("discount", 0)
+    if (discountError) {
+      console.error("[sendPosDraftToKitchen] discount", discountError.message)
     }
   }
 

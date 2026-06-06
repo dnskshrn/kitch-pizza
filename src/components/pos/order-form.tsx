@@ -3312,6 +3312,22 @@ export function OrderForm({
       const cartOk = await persistCartToServer()
       if (!cartOk) return
 
+      const discountPayload =
+        effectiveEngineOutput && effectiveEngineOutput.totalDiscountBani > 0
+          ? {
+              discountBani: effectiveEngineOutput.totalDiscountBani,
+              discountRulesApplied: effectiveEngineOutput.appliedDiscounts.map(
+                (r) => ({
+                  rule_id: r.rule_id,
+                  effect_type: r.effect_type,
+                  label_ru: r.label_ru ?? "",
+                  discount_bani: r.discount_bani,
+                }),
+              ),
+              giftItems: effectiveEngineOutput.giftItems ?? [],
+            }
+          : undefined
+
       const res = await sendPosDraftToKitchen({
         orderId: posOrderId,
         bonusesToRedeem: detailsPricingRef.current.bonusesToRedeem,
@@ -3319,6 +3335,7 @@ export function OrderForm({
           typeof detailsPricingRef.current.linkedProfileId === "string"
             ? detailsPricingRef.current.linkedProfileId
             : undefined,
+        discountPayload,
       })
       if (!res.success) {
         toast.error(res.error)
@@ -3387,6 +3404,22 @@ export function OrderForm({
         return
       }
 
+      const discountPayload =
+        effectiveEngineOutput && effectiveEngineOutput.totalDiscountBani > 0
+          ? {
+              discountBani: effectiveEngineOutput.totalDiscountBani,
+              discountRulesApplied: effectiveEngineOutput.appliedDiscounts.map(
+                (r) => ({
+                  rule_id: r.rule_id,
+                  effect_type: r.effect_type,
+                  label_ru: r.label_ru ?? "",
+                  discount_bani: r.discount_bani,
+                }),
+              ),
+              giftItems: effectiveEngineOutput.giftItems ?? [],
+            }
+          : undefined
+
       const res = await sendPosDraftToKitchen({
         orderId: posOrderId,
         bonusesToRedeem: detailsPricingRef.current.bonusesToRedeem,
@@ -3394,6 +3427,7 @@ export function OrderForm({
           typeof detailsPricingRef.current.linkedProfileId === "string"
             ? detailsPricingRef.current.linkedProfileId
             : undefined,
+        discountPayload,
       })
 
       if (!res.success) {

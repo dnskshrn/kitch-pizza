@@ -125,7 +125,7 @@ export async function GET(req: NextRequest) {
     const { data: inserted, error: insertError } = await (
       supabase.from("order_feedback") as ReturnType<typeof supabase.from>
     )
-      .insert(
+      .upsert(
         {
           order_id: row.id,
           brand_id: row.brand_id,

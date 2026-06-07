@@ -19,6 +19,52 @@ function cartItemMatchesGift(gift: GiftCartItem, cartItem: CartItem): boolean {
   return true
 }
 
+function engineItemMatchesGift(
+  gift: GiftCartItem,
+  engineItem: CartItemForEngine,
+): boolean {
+  if (gift.menu_item_id !== engineItem.menu_item_id) return false
+  const cartVariantId = engineItem.variant_id
+  if (gift.variant_id != null && cartVariantId != null) {
+    return gift.variant_id === cartVariantId
+  }
+  return true
+}
+
+/**
+ * cartLineId = String(index) в engineItems (порядок cartForEngine / pricing.items).
+ * Тот же алгоритм, что в `allocateGiftUnitsByCartLineId` (pricing.ts).
+ */
+export function allocateGiftUnitsByEngineLineIndex(
+  engineItems: CartItemForEngine[],
+  giftItems: GiftCartItem[],
+): Array<{ cartLineId: string; quantity: number }> {
+  const remaining = giftItems.map((g) => ({ ...g }))
+  const result: Array<{ cartLineId: string; quantity: number }> = []
+
+  for (let i = 0; i < engineItems.length; i++) {
+    const engineItem = engineItems[i]
+    let freeOnLine = 0
+    let need = engineItem.quantity
+
+    for (const gift of remaining) {
+      if (gift.quantity <= 0) continue
+      if (!engineItemMatchesGift(gift, engineItem)) continue
+      const take = Math.min(need, gift.quantity)
+      freeOnLine += take
+      gift.quantity -= take
+      need -= take
+      if (need <= 0) break
+    }
+
+    if (freeOnLine > 0) {
+      result.push({ cartLineId: String(i), quantity: freeOnLine })
+    }
+  }
+
+  return result
+}
+
 /** Сколько единиц на строке корзины покрыты giftItems (порядок строк = порядок в items). */
 export function allocateGiftFreeUnitsByCartLineId(
   items: CartItem[],

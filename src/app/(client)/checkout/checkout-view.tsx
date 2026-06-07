@@ -452,6 +452,7 @@ export function CheckoutView({
         totalBani: pricing.total_bani,
         loading: pricingLoading,
         discountRulesApplied: pricing.discount_rules_applied,
+        giftUnits: pricing.giftUnits,
       }
     : null
 

@@ -190,6 +190,10 @@ function aggregateGiftsFromKeys(
   return out
 }
 
+/**
+ * Скидочный движок. Не переупорядочивает `input.items`: per-line маппинг у вызывающего
+ * по индексу входного массива остаётся валидным (item_percent идёт в порядке items).
+ */
 export function evaluateDiscounts(
   input: DiscountEngineInput,
   currentTime?: Date

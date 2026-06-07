@@ -1,12 +1,12 @@
 import { getBonusSettings } from "@/lib/bonus"
-import {
-  calcCompareAt,
-  calcPromoDiscount,
-  discountRateFromEffectValue,
-} from "@/lib/discount"
-import { isRuleScheduleActive } from "@/lib/discount-engine"
+import { calcCompareAt, discountRateFromEffectValue } from "@/lib/discount"
+import { evaluateDiscounts, isRuleScheduleActive } from "@/lib/discount-engine"
 import type { PromoCode, PromoCodeValidationError } from "@/types/database"
-import type { DiscountRule } from "@/types/promotions"
+import type {
+  CartItemForEngine,
+  DiscountRule,
+  GiftCartItem,
+} from "@/types/promotions"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 export interface CartItem {
@@ -47,6 +47,10 @@ export interface PricingResult {
     label: string
     amount_bani: number
   }>
+
+  /** cartLineId — индекс строки корзины ("0", "1", …), тот же порядок, что cartItems/pricing.items. */
+  giftUnits: Array<{ cartLineId: string; quantity: number }>
+  giftItems: GiftCartItem[]
 }
 
 export interface CalculateOrderPricingInput {
@@ -119,29 +123,129 @@ async function fetchExcludedDiscountCategoryIds(
   return new Set((data ?? []).map((row) => row.id as string))
 }
 
-function eligiblePromoSubtotalBani(
-  cartItems: CartItem[],
-  pricedItems: PricingResult["items"],
-  menuById: Map<string, MenuItemRow>,
+/** Как `resolvePromoCode` / `appliedPromoToDiscountEngineRule`. */
+function promoCodeToDiscountEngineRule(
+  promo: PromoCode,
+  brandId: string,
+): DiscountRule {
+  const isPercent = promo.discount_type === "percent"
+  return {
+    id: promo.id,
+    brand_id: brandId,
+    name: promo.code,
+    label_ru: promo.description ?? promo.code,
+    label_ro: null,
+    effect_type: isPercent ? "order_percent" : "order_fixed",
+    effect_value: isPercent ? promo.discount_value / 100 : promo.discount_value,
+    gift_item_id: null,
+    gift_item_variant_id: null,
+    target_item_ids: null,
+    target_category_ids: null,
+    free_every_n: null,
+    trigger_type: "promo_code",
+    promo_code_id: promo.id,
+    min_order_bani: promo.min_order_bani ?? null,
+    required_item_ids: null,
+    required_item_min_qty: null,
+    days_of_week: null,
+    active_from: null,
+    active_to: null,
+    max_uses: promo.max_uses ?? null,
+    uses_count: promo.uses_count,
+    valid_from: promo.valid_from ?? null,
+    valid_until: promo.valid_until ?? null,
+    priority: 0,
+    is_active: true,
+    created_at: promo.created_at ?? new Date().toISOString(),
+  }
+}
+
+function isRuleEligibleForEngine(rule: DiscountRule, now: Date): boolean {
+  if (!rule.is_active) return false
+  if (rule.max_uses != null && rule.uses_count >= rule.max_uses) return false
+  if (rule.valid_from != null && now < new Date(rule.valid_from)) return false
+  if (rule.valid_until != null && now > new Date(rule.valid_until)) return false
+  if (!isRuleScheduleActive(rule, now)) return false
+  return true
+}
+
+function skipExcludedCategoryItem(
+  item: CartItemForEngine,
+  rule: DiscountRule,
+  excludedCategoryIds: Set<string>,
+): boolean {
+  if (!excludedCategoryIds.has(item.category_id)) return false
+  if (
+    rule.effect_type === "item_percent" &&
+    rule.target_item_ids?.includes(item.menu_item_id)
+  ) {
+    return false
+  }
+  return true
+}
+
+function matchesTargets(item: CartItemForEngine, rule: DiscountRule): boolean {
+  const ti = rule.target_item_ids
+  const tc = rule.target_category_ids
+  const hasItems = ti != null && ti.length > 0
+  const hasCats = tc != null && tc.length > 0
+  if (!hasItems && !hasCats) return true
+  if (hasItems && hasCats) {
+    return ti!.includes(item.menu_item_id) || tc!.includes(item.category_id)
+  }
+  if (hasItems) return ti!.includes(item.menu_item_id)
+  return tc!.includes(item.category_id)
+}
+
+function lineItemPercentDiscountBani(
+  item: CartItemForEngine,
+  rules: DiscountRule[],
   excludedCategoryIds: Set<string>,
 ): number {
-  if (excludedCategoryIds.size === 0) {
-    return pricedItems.reduce(
-      (sum, line) => sum + line.original_price_bani * line.quantity,
-      0,
-    )
+  let total = 0
+  for (const rule of rules) {
+    if (rule.effect_value == null) continue
+    if (skipExcludedCategoryItem(item, rule, excludedCategoryIds)) continue
+    if (!matchesTargets(item, rule)) continue
+    const rate = discountRateFromEffectValue(rule.effect_value)
+    total += Math.round(item.unit_price_bani * item.quantity * rate)
+  }
+  return total
+}
+
+/** cartLineId в результате = String(index) в engineItems (порядок входа сохраняется). */
+function allocateGiftUnitsByCartLineId(
+  engineItems: CartItemForEngine[],
+  giftItems: GiftCartItem[],
+): PricingResult["giftUnits"] {
+  const remaining = giftItems.map((gift) => ({ ...gift }))
+  const result: PricingResult["giftUnits"] = []
+
+  for (let i = 0; i < engineItems.length; i++) {
+    const engineItem = engineItems[i]
+    let freeOnLine = 0
+    let need = engineItem.quantity
+
+    for (const gift of remaining) {
+      if (gift.quantity <= 0) continue
+      if (gift.menu_item_id !== engineItem.menu_item_id) continue
+      const cartVariantId = engineItem.variant_id
+      if (gift.variant_id != null && cartVariantId != null) {
+        if (gift.variant_id !== cartVariantId) continue
+      }
+      const take = Math.min(need, gift.quantity)
+      freeOnLine += take
+      gift.quantity -= take
+      need -= take
+      if (need <= 0) break
+    }
+
+    if (freeOnLine > 0) {
+      result.push({ cartLineId: String(i), quantity: freeOnLine })
+    }
   }
 
-  let sum = 0
-  for (let i = 0; i < cartItems.length; i++) {
-    const menuItem = menuById.get(cartItems[i].menu_item_id)
-    const categoryId = menuItem?.category_id
-    if (!categoryId || excludedCategoryIds.has(categoryId)) continue
-    const line = pricedItems[i]
-    if (!line) continue
-    sum += line.original_price_bani * line.quantity
-  }
-  return sum
+  return result
 }
 
 async function validatePromoCodeWithClient(
@@ -229,6 +333,8 @@ export async function calculateOrderPricing(
       total_bani: deliveryFeeBani,
       active_promotion: false,
       discount_rules_applied: [],
+      giftUnits: [],
+      giftItems: [],
     }
   }
 
@@ -274,8 +380,6 @@ export async function calculateOrderPricing(
   )
 
   const items: PricingResult["items"] = []
-  let subtotalBani = 0
-  let itemDiscountBani = 0
 
   for (const cartItem of cartItems) {
     const menuItem = menuById.get(cartItem.menu_item_id)
@@ -303,9 +407,6 @@ export async function calculateOrderPricing(
     const lineItemDiscountBani =
       (unitOriginalBani - unitPriceBani) * cartItem.quantity
 
-    subtotalBani += unitOriginalBani * cartItem.quantity
-    itemDiscountBani += lineItemDiscountBani
-
     items.push({
       menu_item_id: cartItem.menu_item_id,
       quantity: cartItem.quantity,
@@ -316,81 +417,44 @@ export async function calculateOrderPricing(
     })
   }
 
-  const now = new Date()
-  const { data: itemPercentRules } = await (supabase.from("discount_rules") as any)
-    .select("*")
-    .eq("brand_id", brandId)
-    .eq("trigger_type", "auto")
-    .eq("effect_type", "item_percent")
-    .eq("is_active", true)
-
-  const activeItemPercentRules = (itemPercentRules ?? [])
-    .filter((rule: DiscountRule) => isRuleScheduleActive(rule, now))
-    .sort((a: DiscountRule, b: DiscountRule) => b.priority - a.priority)
-
-  const campaignDiscountByRule = new Map<
-    string,
-    { label: string; amount_bani: number }
-  >()
-  let menuDerivedItemDiscountBani = 0
-
-  for (let i = 0; i < items.length; i++) {
-    const line = items[i]
-    const rule = activeItemPercentRules.find(
-      (r: DiscountRule) =>
-        r.brand_id === brandId &&
-        r.target_item_ids?.includes(line.menu_item_id),
-    )
-
-    if (rule?.effect_value != null) {
-      const rate = discountRateFromEffectValue(rule.effect_value)
-      const campaignDiscountPerUnit = Math.round(
-        line.original_price_bani * rate,
-      )
-      const lineCampaignDiscountBani = campaignDiscountPerUnit * line.quantity
-      const campaignPct = Math.round(rate * 100)
-
-      items[i] = {
-        ...line,
-        item_discount_pct: campaignPct,
-        item_discount_bani: lineCampaignDiscountBani,
-      }
-
-      const tracked = campaignDiscountByRule.get(rule.id) ?? {
-        label: rule.label_ru?.trim() || rule.name,
-        amount_bani: 0,
-      }
-      tracked.amount_bani += lineCampaignDiscountBani
-      campaignDiscountByRule.set(rule.id, tracked)
-    } else {
-      menuDerivedItemDiscountBani += line.item_discount_bani
-    }
-  }
-
-  subtotalBani = 0
-  itemDiscountBani = 0
-  for (const line of items) {
-    subtotalBani += line.original_price_bani * line.quantity
-    itemDiscountBani += line.item_discount_bani
-  }
-
-  const itemDiscountPct = pctOf(itemDiscountBani, subtotalBani)
-
-  const { data: autoDiscountRules } = await (supabase.from("discount_rules") as any)
-    .select("*")
-    .eq("brand_id", brandId)
-    .eq("trigger_type", "auto")
-    .eq("is_active", true)
-
-  const promotionActive = (autoDiscountRules ?? []).some(
-    (rule: DiscountRule) =>
-      rule.effect_type !== "bonus_multiplier" &&
-      isRuleScheduleActive(rule, now),
+  const subtotalBani = items.reduce(
+    (sum, line) => sum + line.original_price_bani * line.quantity,
+    0,
   )
 
+  const now = new Date()
+
+  const { data: autoDiscountRulesRaw } = await (
+    supabase.from("discount_rules") as any
+  )
+    .select("*")
+    .eq("brand_id", brandId)
+    .eq("trigger_type", "auto")
+    .eq("is_active", true)
+
+  const activeAutoRules = (autoDiscountRulesRaw ?? []).filter(
+    (rule: DiscountRule) => isRuleScheduleActive(rule, now),
+  )
+
+  const promotionActive = activeAutoRules.some(
+    (rule: DiscountRule) => rule.effect_type !== "bonus_multiplier",
+  )
+
+  // База+вариант без топпингов; cheapest_item_free в движке топпинги не учитывает.
+  const engineItems: CartItemForEngine[] = cartItems.map((cartItem, index) => {
+    const menuItem = menuById.get(cartItem.menu_item_id)!
+    const line = items[index]
+    return {
+      menu_item_id: cartItem.menu_item_id,
+      category_id: menuItem.category_id ?? "",
+      variant_id: cartItem.variant_id ?? null,
+      quantity: cartItem.quantity,
+      unit_price_bani: line.price_bani,
+    }
+  })
+
   let promoCodeId: string | null = null
-  let promoDiscountBani = 0
-  let promoDiscountPct = 0
+  let promoCodeRule: DiscountRule | undefined
   let promoError: string | null = null
 
   const normalizedPromo = promoCode?.trim() ?? ""
@@ -404,21 +468,70 @@ export async function calculateOrderPricing(
 
     if (validation.valid) {
       promoCodeId = validation.promo.id
-      const promoEligibleSubtotalBani = eligiblePromoSubtotalBani(
-        cartItems,
-        items,
-        menuById,
-        excludedCategoryIds,
-      )
-      promoDiscountBani =
-        promoEligibleSubtotalBani > 0
-          ? calcPromoDiscount(validation.promo, promoEligibleSubtotalBani)
-          : 0
-      promoDiscountPct = pctOf(promoDiscountBani, promoEligibleSubtotalBani)
+      promoCodeRule = promoCodeToDiscountEngineRule(validation.promo, brandId)
     } else {
       promoError = validation.error
     }
   }
+
+  const engineOutput = evaluateDiscounts(
+    {
+      items: engineItems,
+      rules: activeAutoRules,
+      promoCodeRule,
+      deliveryZone: null,
+      excludedCategoryIds:
+        excludedCategoryIds.size > 0
+          ? [...excludedCategoryIds]
+          : undefined,
+    },
+    now,
+  )
+
+  const eligibleItemPercentRules = activeAutoRules
+    .filter(
+      (rule: DiscountRule) =>
+        rule.effect_type === "item_percent" &&
+        isRuleEligibleForEngine(rule, now),
+    )
+    .sort((a: DiscountRule, b: DiscountRule) => b.priority - a.priority)
+
+  let menuDerivedItemDiscountBani = 0
+  let engineItemPercentBani = 0
+  let promoDiscountBani = 0
+
+  for (const entry of engineOutput.appliedDiscounts) {
+    if (entry.effect_type === "item_percent") {
+      engineItemPercentBani += entry.discount_bani
+    } else {
+      promoDiscountBani += entry.discount_bani
+    }
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const line = items[i]
+    const engineItem = engineItems[i]
+    const menuLineDiscountBani = line.item_discount_bani
+    menuDerivedItemDiscountBani += menuLineDiscountBani
+
+    const campaignLineDiscountBani = lineItemPercentDiscountBani(
+      engineItem,
+      eligibleItemPercentRules,
+      excludedCategoryIds,
+    )
+    const lineTotalDiscountBani = menuLineDiscountBani + campaignLineDiscountBani
+    const lineOriginalSubtotalBani = line.original_price_bani * line.quantity
+
+    items[i] = {
+      ...line,
+      item_discount_bani: lineTotalDiscountBani,
+      item_discount_pct: pctOf(lineTotalDiscountBani, lineOriginalSubtotalBani),
+    }
+  }
+
+  const itemDiscountBani = menuDerivedItemDiscountBani + engineItemPercentBani
+  const itemDiscountPct = pctOf(itemDiscountBani, subtotalBani)
+  const promoDiscountPct = pctOf(promoDiscountBani, subtotalBani)
 
   const grandTotalAfterDiscountsBani = Math.max(
     0,
@@ -457,6 +570,7 @@ export async function calculateOrderPricing(
       deliveryFeeBani,
   )
 
+  const promoCodeRuleId = promoCodeRule?.id
   const discountRulesApplied: PricingResult["discount_rules_applied"] = []
 
   if (menuDerivedItemDiscountBani > 0) {
@@ -467,21 +581,27 @@ export async function calculateOrderPricing(
     })
   }
 
-  for (const entry of campaignDiscountByRule.values()) {
-    if (entry.amount_bani > 0) {
+  for (const entry of engineOutput.appliedDiscounts) {
+    if (entry.discount_bani <= 0) continue
+
+    if (entry.effect_type === "item_percent") {
       discountRulesApplied.push({
         type: "item_discount",
-        label: entry.label,
-        amount_bani: entry.amount_bani,
+        label: entry.label_ru?.trim() || "Скидка на товары",
+        amount_bani: entry.discount_bani,
       })
+      continue
     }
-  }
 
-  if (promoDiscountBani > 0) {
+    const isPromoCodeRule =
+      promoCodeRuleId != null && entry.rule_id === promoCodeRuleId
+
     discountRulesApplied.push({
       type: "promo_code",
-      label: normalizedPromo.toUpperCase(),
-      amount_bani: promoDiscountBani,
+      label: isPromoCodeRule
+        ? normalizedPromo.toUpperCase()
+        : entry.label_ru?.trim() || "Акция",
+      amount_bani: entry.discount_bani,
     })
   }
 
@@ -492,6 +612,11 @@ export async function calculateOrderPricing(
       amount_bani: bonusesRedeemed * 100,
     })
   }
+
+  const giftUnits = allocateGiftUnitsByCartLineId(
+    engineItems,
+    engineOutput.giftItems,
+  )
 
   return {
     items,
@@ -510,5 +635,7 @@ export async function calculateOrderPricing(
     total_bani: totalBani,
     active_promotion: promotionActive,
     discount_rules_applied: discountRulesApplied,
+    giftUnits,
+    giftItems: engineOutput.giftItems,
   }
 }

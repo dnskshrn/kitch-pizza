@@ -3,8 +3,15 @@
 import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { refreshCourierOrderTelegramMessage } from "@/lib/actions/pos/courier-telegram-message"
+import {
+  calcPosOrderTotalBani,
+  computePosOrderDiscountBreakdown,
+  mapPaidOrderItemsForDiscount,
+  paidOrderItemsPriceSumBani,
+  purgePosOrderGiftItems,
+  type PosOrderDiscountBreakdown,
+} from "@/lib/pos/order-discount-breakdown"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
-import type { GiftCartItem } from "@/types/promotions"
 
 export type UpdateOrderDetailsPosInput = {
   orderId: string
@@ -32,8 +39,6 @@ export type UpdateOrderDetailsPosInput = {
   deliveryFee: number
   /** JSON массив применённых правил скидок (для `orders.discount_rules_applied`). */
   discountRulesApplied?: string | null
-  /** Подарочные строки — синхронизируются после обновления заказа. */
-  giftItems?: GiftCartItem[]
   /** Не передавать — не менять `orders.profile_id`. */
   profileId?: string | null
   delivery_lat?: number | null
@@ -170,7 +175,7 @@ export async function updateOrderDetailsPos(
   }
 
   const deliveryFeeBani = Math.max(0, Math.round(input.deliveryFee))
-  const discountBani = Math.max(0, Math.round(input.discount))
+  const isAggregator = input.deliveryMode === "aggregator"
 
   const deliveryAddress: string | null =
     input.deliveryMode === "pickup"
@@ -201,6 +206,8 @@ export async function updateOrderDetailsPos(
     .eq("id", input.orderId)
     .maybeSingle()
 
+  const brandId = (orderRow as { brand_id: string | null } | null)?.brand_id
+
   if (loadError || !orderRow) {
     console.error("[updateOrderDetailsPos] load", loadError?.message)
     return { success: false, error: "Заказ не найден" }
@@ -222,11 +229,9 @@ export async function updateOrderDetailsPos(
   const bonusPointsForTotal =
     bonusPtsFromInput !== null ? bonusPtsFromInput : bonusPtsFromDb
 
-  const bonusesRedeemedBani = bonusPointsForTotal * 100
-
   const { data: itemRows, error: itemsError } = await supabase
     .from("order_items")
-    .select("price")
+    .select("menu_item_id, variant_id, quantity, price, is_gift")
     .eq("order_id", input.orderId)
 
   if (itemsError) {
@@ -234,16 +239,52 @@ export async function updateOrderDetailsPos(
     return { success: false, error: "Не удалось пересчитать заказ" }
   }
 
-  const subtotalBani = (itemRows ?? []).reduce(
-    (s, r) => s + Math.round((r as { price: number }).price ?? 0),
-    0,
-  )
+  const paidItemRows = (itemRows ?? []) as Array<{
+    menu_item_id: string
+    variant_id: string | null
+    quantity: number
+    price: number
+    is_gift?: boolean
+  }>
 
-  const safeDiscount = Math.min(discountBani, subtotalBani)
-  const totalBani = Math.max(
-    0,
-    subtotalBani - safeDiscount + deliveryFeeBani - bonusesRedeemedBani,
+  const itemsPriceSumBani = paidOrderItemsPriceSumBani(paidItemRows)
+
+  let discountBreakdown: PosOrderDiscountBreakdown = {
+    subtotalBani: 0,
+    itemDiscountBani: 0,
+    promoDiscountBani: 0,
+    discountBani: 0,
+    discountRulesApplied: [],
+    promoCodeSaved: null,
+  }
+
+  if (brandId) {
+    try {
+      discountBreakdown = await computePosOrderDiscountBreakdown(supabase, {
+        brandId,
+        orderItems: mapPaidOrderItemsForDiscount(paidItemRows),
+        promoCodeRaw: isAggregator ? null : input.promoCode,
+        isAggregator,
+      })
+    } catch (e) {
+      console.error(
+        "[updateOrderDetailsPos] discount breakdown",
+        e instanceof Error ? e.message : e,
+      )
+      return { success: false, error: "Не удалось пересчитать скидки" }
+    }
+  }
+
+  const safeDiscount = Math.min(
+    Math.max(0, Math.round(discountBreakdown.discountBani)),
+    itemsPriceSumBani,
   )
+  const totalBani = calcPosOrderTotalBani({
+    itemsPriceSumBani,
+    discountBani: safeDiscount,
+    deliveryFeeBani,
+    bonusesRedeemedPoints: bonusPointsForTotal,
+  })
   let delivery_lat: number | null = null
   let delivery_lng: number | null = null
   if (input.deliveryMode === "delivery") {
@@ -317,8 +358,14 @@ export async function updateOrderDetailsPos(
     card_amount: input.cardAmount ?? null,
     total: totalBani,
     delivery_fee: deliveryFeeBani,
+    subtotal: discountBreakdown.subtotalBani,
+    item_discount: discountBreakdown.itemDiscountBani,
+    promo_discount: discountBreakdown.promoDiscountBani,
     discount: safeDiscount,
-    promo_code: input.promoCode?.trim() || null,
+    discount_rules_applied: discountBreakdown.discountRulesApplied,
+    promo_code: isAggregator
+      ? null
+      : discountBreakdown.promoCodeSaved,
     comment: input.comment?.trim() || null,
     scheduled_time: scheduled_time_db,
     updated_at: updatedAt,
@@ -349,10 +396,6 @@ export async function updateOrderDetailsPos(
     patch.prep_deadline_at = null
   }
 
-  if (input.discountRulesApplied !== undefined) {
-    patch.discount_rules_applied = input.discountRulesApplied
-  }
-
   const { error: updateError } = await supabase
     .from("orders")
     .update(patch)
@@ -363,36 +406,9 @@ export async function updateOrderDetailsPos(
     return { success: false, error: "Не удалось сохранить изменения" }
   }
 
-  const giftItems = input.giftItems ?? []
-  const { error: delGiftError } = await (supabase.from("order_items") as any)
-    .delete()
-    .eq("order_id", input.orderId)
-    .eq("is_gift", true)
-  if (delGiftError) {
-    console.error("[updateOrderDetailsPos] delete gift items", delGiftError.message)
-  }
-
-  if (giftItems.length > 0) {
-    const giftRows = giftItems.map((g) => ({
-      order_id: input.orderId,
-      menu_item_id: g.menu_item_id,
-      variant_id: g.variant_id,
-      lunch_set_id: null as string | null,
-      item_name: g.label_ru,
-      size: null as string | null,
-      quantity: g.quantity,
-      toppings: [] as { name: string; price: number }[],
-      price: 0,
-      is_gift: true,
-      gift_rule_id: g.rule_id,
-    }))
-    const { error: giftInsErr } = await (supabase.from("order_items") as any).insert(
-      giftRows,
-    )
-    if (giftInsErr) {
-      console.error("[updateOrderDetailsPos] gift items", giftInsErr.message)
-      return { success: false, error: "Не удалось сохранить подарочные позиции" }
-    }
+  const purgeGifts = await purgePosOrderGiftItems(supabase, input.orderId)
+  if (!purgeGifts.success) {
+    return { success: false, error: purgeGifts.error }
   }
 
   await refreshCourierOrderTelegramMessage(input.orderId, "details")

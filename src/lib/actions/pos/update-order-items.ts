@@ -3,6 +3,7 @@
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { refreshCourierOrderTelegramMessage } from "@/lib/actions/pos/courier-telegram-message"
 import { posLinePayloadFromCartItem } from "@/lib/pos-cart-helpers"
+import { recomputePosOrderDiscountAndTotals } from "@/lib/pos/order-discount-breakdown"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import type { PosCartItem } from "@/types/pos"
 
@@ -18,16 +19,7 @@ type OrderItemRow = {
 
 type OrderRow = {
   id: string
-  delivery_fee: number
-  discount: number
-  /** Пункты лояльности; 1 п. = 100 бань к итогу (orders.total — нетто после вычета). */
-  bonuses_redeemed: number | null
   order_items: OrderItemRow[] | null
-}
-
-function bonusesRedeemedToBani(points: number | null | undefined): number {
-  if (typeof points !== "number" || !Number.isFinite(points)) return 0
-  return Math.max(0, Math.floor(points)) * 100
 }
 
 function itemUnitPriceBani(item: OrderItemRow): number {
@@ -35,27 +27,11 @@ function itemUnitPriceBani(item: OrderItemRow): number {
   return Math.round(item.price / item.quantity)
 }
 
-function nextTotalBani(
-  order: OrderRow,
-  items: OrderItemRow[],
-  replacement?: OrderItemRow,
-): number {
-  const subtotal = items.reduce((sum, item) => {
-    const row = replacement && item.id === replacement.id ? replacement : item
-    return sum + row.price
-  }, 0)
-
-  const bonusBani = bonusesRedeemedToBani(order.bonuses_redeemed)
-  return Math.max(0, subtotal - order.discount + order.delivery_fee - bonusBani)
-}
-
 async function loadOrder(orderId: string): Promise<OrderRow | null> {
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from("orders")
-    .select(
-      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
-    )
+    .select("id, order_items(id, quantity, price)")
     .eq("id", orderId)
     .maybeSingle()
 
@@ -65,6 +41,17 @@ async function loadOrder(orderId: string): Promise<OrderRow | null> {
   }
 
   return data as OrderRow | null
+}
+
+async function persistPricingAfterItemsChange(
+  orderId: string,
+): Promise<UpdateOrderItemsResult> {
+  const supabase = createServiceRoleClient()
+  const result = await recomputePosOrderDiscountAndTotals(supabase, orderId)
+  if (!result.success) {
+    return { success: false, error: result.error }
+  }
+  return { success: true }
 }
 
 export async function updateOrderItemQuantityPos({
@@ -107,17 +94,9 @@ export async function updateOrderItemQuantityPos({
     return { success: false, error: "Не удалось обновить позицию" }
   }
 
-  const { error: orderError } = await supabase
-    .from("orders")
-    .update({
-      total: nextTotalBani(order, items, nextItem),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", orderId)
-
-  if (orderError) {
-    console.error("[updateOrderItems] order total", orderError.message)
-    return { success: false, error: "Не удалось обновить сумму заказа" }
+  const pricingResult = await persistPricingAfterItemsChange(orderId)
+  if (!pricingResult.success) {
+    return pricingResult
   }
 
   await refreshCourierOrderTelegramMessage(orderId, "items")
@@ -140,7 +119,6 @@ export async function removeOrderItemPos({
   const item = items.find((row) => row.id === itemId)
   if (!order || !item) return { success: false, error: "Позиция не найдена" }
 
-  const nextItems = items.filter((row) => row.id !== itemId)
   const supabase = createServiceRoleClient()
 
   const { error: itemError } = await supabase
@@ -154,31 +132,14 @@ export async function removeOrderItemPos({
     return { success: false, error: "Не удалось удалить позицию" }
   }
 
-  const { error: orderError } = await supabase
-    .from("orders")
-    .update({
-      total: nextTotalBani(order, nextItems),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", orderId)
-
-  if (orderError) {
-    console.error("[updateOrderItems] order total", orderError.message)
-    return { success: false, error: "Не удалось обновить сумму заказа" }
+  const pricingResult = await persistPricingAfterItemsChange(orderId)
+  if (!pricingResult.success) {
+    return pricingResult
   }
 
   await refreshCourierOrderTelegramMessage(orderId, "items")
 
   return { success: true }
-}
-
-type PosOrderTotalsRow = {
-  id: string
-  delivery_mode: "delivery" | "pickup" | "aggregator"
-  delivery_fee: number
-  discount: number
-  bonuses_redeemed: number | null
-  order_items: OrderItemRow[] | null
 }
 
 function isAggregatorDeliveryMode(
@@ -192,58 +153,44 @@ function orderItemInsertsFromCartLines(
   lines: PosCartItem[],
   isAggregator: boolean,
 ) {
-  return lines.map((cartItem) => {
-    if (cartItem.is_gift) {
+  return lines
+    .filter((cartItem) => !cartItem.is_gift)
+    .map((cartItem) => {
+      const line = posLinePayloadFromCartItem(cartItem, isAggregator)
       return {
         order_id: orderId,
-        menu_item_id: cartItem.menuItemId,
-        variant_id: cartItem.variantId ?? null,
+        menu_item_id: line.menuItemId,
+        variant_id: line.variantId ?? null,
         lunch_set_id: null as string | null,
-        item_name: cartItem.name,
-        size: cartItem.size,
-        quantity: cartItem.qty,
-        toppings: [] as { name: string; price: number }[],
-        price: 0,
-        is_gift: true,
+        item_name: line.name,
+        size: line.size,
+        quantity: line.qty,
+        toppings: line.toppings,
+        price: Math.round(line.unitPriceBani) * line.qty,
       }
-    }
-    const line = posLinePayloadFromCartItem(cartItem, isAggregator)
-    return {
-      order_id: orderId,
-      menu_item_id: line.menuItemId,
-      variant_id: line.variantId ?? null,
-      lunch_set_id: null as string | null,
-      item_name: line.name,
-      size: line.size,
-      quantity: line.qty,
-      toppings: line.toppings,
-      price: Math.round(line.unitPriceBani) * line.qty,
-    }
-  })
+    })
 }
 
-async function loadOrderForTotals(orderId: string): Promise<PosOrderTotalsRow | null> {
+async function loadOrderDeliveryMode(
+  orderId: string,
+): Promise<"delivery" | "pickup" | "aggregator" | null> {
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from("orders")
-    .select(
-      "id, delivery_mode, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
-    )
+    .select("delivery_mode")
     .eq("id", orderId)
     .maybeSingle()
 
-  if (error) {
-    console.error("[updateOrderItems] load order totals", error.message)
+  if (error || !data) {
+    console.error("[updateOrderItems] load delivery_mode", error?.message)
     return null
   }
 
-  return data as PosOrderTotalsRow | null
-}
-
-function recomputedTotalBani(order: PosOrderTotalsRow, items: OrderItemRow[]): number {
-  const subtotal = items.reduce((sum, row) => sum + row.price, 0)
-  const bonusBani = bonusesRedeemedToBani(order.bonuses_redeemed)
-  return Math.max(0, subtotal - order.discount + order.delivery_fee - bonusBani)
+  const mode = (data as { delivery_mode: string }).delivery_mode
+  if (mode === "delivery" || mode === "pickup" || mode === "aggregator") {
+    return mode
+  }
+  return "delivery"
 }
 
 /** Дополнительные строки к уже сохранённому заказу (шаг POS «добавить к заказу»). */
@@ -261,10 +208,10 @@ export async function addOrderItemsPos({
     return { success: false, error: "Нет позиций для добавления" }
   }
 
-  const order = await loadOrderForTotals(orderId)
-  if (!order) return { success: false, error: "Заказ не найден" }
+  const deliveryMode = await loadOrderDeliveryMode(orderId)
+  if (!deliveryMode) return { success: false, error: "Заказ не найден" }
 
-  const isAggregator = isAggregatorDeliveryMode(order.delivery_mode)
+  const isAggregator = isAggregatorDeliveryMode(deliveryMode)
   const inserts = orderItemInsertsFromCartLines(orderId, lines, isAggregator)
 
   const supabase = createServiceRoleClient()
@@ -276,33 +223,9 @@ export async function addOrderItemsPos({
     return { success: false, error: "Не удалось добавить позиции" }
   }
 
-  const { data: refreshed, error: refreshError } = await supabase
-    .from("orders")
-    .select(
-      "id, delivery_mode, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
-    )
-    .eq("id", orderId)
-    .maybeSingle()
-
-  if (refreshError || !refreshed) {
-    console.error("[updateOrderItems] refresh after add", refreshError?.message)
-    return { success: false, error: "Не удалось пересчитать заказ" }
-  }
-
-  const row = refreshed as PosOrderTotalsRow
-  const total = recomputedTotalBani(row, row.order_items ?? [])
-
-  const { error: orderError } = await supabase
-    .from("orders")
-    .update({
-      total,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", orderId)
-
-  if (orderError) {
-    console.error("[updateOrderItems] total after add", orderError.message)
-    return { success: false, error: "Не удалось обновить сумму заказа" }
+  const pricingResult = await persistPricingAfterItemsChange(orderId)
+  if (!pricingResult.success) {
+    return pricingResult
   }
 
   await refreshCourierOrderTelegramMessage(orderId, "items")
@@ -324,10 +247,10 @@ export async function replaceOrderItemsPos({
   const staff = await getCurrentStaff()
   if (!staff) return { success: false, error: "Сессия кассира недействительна" }
 
-  const order = await loadOrderForTotals(orderId)
-  if (!order) return { success: false, error: "Заказ не найден" }
+  const deliveryMode = await loadOrderDeliveryMode(orderId)
+  if (!deliveryMode) return { success: false, error: "Заказ не найден" }
 
-  const isAggregator = isAggregatorDeliveryMode(order.delivery_mode)
+  const isAggregator = isAggregatorDeliveryMode(deliveryMode)
   const supabase = createServiceRoleClient()
 
   const { error: deleteError } = await supabase
@@ -351,33 +274,9 @@ export async function replaceOrderItemsPos({
     }
   }
 
-  const { data: refreshed, error: refreshError } = await supabase
-    .from("orders")
-    .select(
-      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
-    )
-    .eq("id", orderId)
-    .maybeSingle()
-
-  if (refreshError || !refreshed) {
-    console.error("[updateOrderItems] replace refresh", refreshError?.message)
-    return { success: false, error: "Не удалось пересчитать заказ" }
-  }
-
-  const row = refreshed as PosOrderTotalsRow
-  const total = recomputedTotalBani(row, row.order_items ?? [])
-
-  const { error: orderError } = await supabase
-    .from("orders")
-    .update({
-      total,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", orderId)
-
-  if (orderError) {
-    console.error("[updateOrderItems] replace total", orderError.message)
-    return { success: false, error: "Не удалось обновить сумму заказа" }
+  const pricingResult = await persistPricingAfterItemsChange(orderId)
+  if (!pricingResult.success) {
+    return pricingResult
   }
 
   await refreshCourierOrderTelegramMessage(orderId, "items")
@@ -403,12 +302,15 @@ export async function updateOrderItemCompositionPos({
     return { success: false, error: "Количество должно быть больше нуля" }
   }
 
-  const order = await loadOrderForTotals(orderId)
+  const order = await loadOrder(orderId)
   const items = order?.order_items ?? []
   const exists = items.some((row) => row.id === itemId)
   if (!order || !exists) return { success: false, error: "Позиция не найдена" }
 
-  const isAggregator = isAggregatorDeliveryMode(order.delivery_mode)
+  const deliveryMode = await loadOrderDeliveryMode(orderId)
+  if (!deliveryMode) return { success: false, error: "Заказ не найден" }
+
+  const isAggregator = isAggregatorDeliveryMode(deliveryMode)
   const line = posLinePayloadFromCartItem(cartItem, isAggregator)
   const unit = Math.round(line.unitPriceBani)
   if (unit < 1) return { success: false, error: "Некорректная цена" }
@@ -435,32 +337,9 @@ export async function updateOrderItemCompositionPos({
     return { success: false, error: "Не удалось обновить позицию" }
   }
 
-  const { data: refreshed, error: refreshError } = await supabase
-    .from("orders")
-    .select(
-      "id, delivery_fee, discount, bonuses_redeemed, order_items(id, quantity, price)",
-    )
-    .eq("id", orderId)
-    .maybeSingle()
-
-  if (refreshError || !refreshed) {
-    return { success: false, error: "Не удалось пересчитать заказ" }
-  }
-
-  const row = refreshed as PosOrderTotalsRow
-  const total = recomputedTotalBani(row, row.order_items ?? [])
-
-  const { error: orderError } = await supabase
-    .from("orders")
-    .update({
-      total,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", orderId)
-
-  if (orderError) {
-    console.error("[updateOrderItems] total after composition", orderError.message)
-    return { success: false, error: "Не удалось обновить сумму заказа" }
+  const pricingResult = await persistPricingAfterItemsChange(orderId)
+  if (!pricingResult.success) {
+    return pricingResult
   }
 
   await refreshCourierOrderTelegramMessage(orderId, "items")

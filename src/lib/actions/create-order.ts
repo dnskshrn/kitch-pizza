@@ -1,5 +1,6 @@
 "use server"
 
+import { allocateGiftFreeUnitsByCartLineId } from "@/components/client/cart/storefront-cart-pricing"
 import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import type { CartLang } from "@/lib/cart-helpers"
 import { migrateCartToppingsFromLegacy } from "@/lib/cart-toppings"
@@ -13,6 +14,7 @@ import {
 import { createServiceSupabaseClient } from "@/lib/supabase/server"
 import type { CartItem } from "@/types/cart"
 import type { PromoCodeValidationError } from "@/types/database"
+import type { GiftCartItem } from "@/types/promotions"
 
 export type CreateOrderPayload = {
   lang: CartLang
@@ -80,6 +82,167 @@ function storefrontItemsToPricingItems(items: CartItem[]): PricingCartItem[] {
     quantity: ci.quantity,
     ...(ci.variantId ? { variant_id: ci.variantId } : {}),
   }))
+}
+
+function cartItemMatchesGift(gift: GiftCartItem, cartItem: CartItem): boolean {
+  if (gift.menu_item_id !== cartItem.menuItem.id) return false
+  const cartVariantId = cartItem.variantId ?? null
+  if (gift.variant_id != null && cartVariantId != null) {
+    return gift.variant_id === cartVariantId
+  }
+  return true
+}
+
+function resolveGiftRuleIdForCartLine(
+  cartItem: CartItem,
+  giftItems: GiftCartItem[],
+): string {
+  for (const gift of giftItems) {
+    if (gift.quantity <= 0) continue
+    if (!cartItemMatchesGift(gift, cartItem)) continue
+    return gift.rule_id
+  }
+  throw new Error("[createOrder] gift rule id not found for cart line")
+}
+
+/** Стоимость подарочных единиц (cheapest_item_free) по shelf-цене строк pricing. */
+function cheapestItemFreeDiscountBani(
+  giftUnits: Array<{ cartLineId: string; quantity: number }>,
+  pricedItems: Awaited<ReturnType<typeof calculateOrderPricing>>["items"],
+): number {
+  let sum = 0
+  for (const { cartLineId, quantity } of giftUnits) {
+    const priced = pricedItems[Number(cartLineId)]
+    if (!priced || quantity <= 0) continue
+    sum += priced.price_bani * quantity
+  }
+  return sum
+}
+
+/**
+ * giftUnits.cartLineId — индекс строки корзины ("0", "1", …), не UUID cart item.
+ * allocateGiftFreeUnitsByCartLineId ключит по cartItem.id; сверяем через cartItems[index].
+ */
+function assertGiftUnitsMatchCartAllocation(
+  cartItems: CartItem[],
+  giftUnits: Array<{ cartLineId: string; quantity: number }>,
+  giftFreeByLineId: Map<string, number>,
+): void {
+  const giftUnitsByIndex = new Map(
+    giftUnits.map(({ cartLineId, quantity }) => [cartLineId, quantity]),
+  )
+
+  for (const cartLineId of giftUnitsByIndex.keys()) {
+    const index = Number(cartLineId)
+    if (!Number.isInteger(index) || index < 0 || index >= cartItems.length) {
+      throw new Error("[createOrder] giftUnits cart line index out of range")
+    }
+  }
+
+  for (let index = 0; index < cartItems.length; index++) {
+    const fromGiftUnits = giftUnitsByIndex.get(String(index)) ?? 0
+    const fromAllocator = giftFreeByLineId.get(cartItems[index].id) ?? 0
+    if (fromGiftUnits !== fromAllocator) {
+      throw new Error(
+        `[createOrder] giftUnits index ${index} mismatch: pricing=${fromGiftUnits} allocator=${fromAllocator}`,
+      )
+    }
+  }
+}
+
+type OrderItemInsertRow = {
+  order_id: string
+  menu_item_id: string
+  lunch_set_id: string | null
+  variant_id: string | null
+  item_name: string
+  size: string | null
+  quantity: number
+  toppings: ReturnType<typeof toppingsPayload>
+  price: number
+  original_price: number
+  item_discount_pct: number
+  is_gift?: boolean
+  gift_rule_id?: string
+}
+
+function buildOrderItemRows(input: {
+  orderId: string
+  cartItems: CartItem[]
+  pricedItems: Awaited<ReturnType<typeof calculateOrderPricing>>["items"]
+  giftUnits: Array<{ cartLineId: string; quantity: number }>
+  giftItems: GiftCartItem[]
+  lang: CartLang
+}): { rows: OrderItemInsertRow[]; expectedPriceSumBani: number } {
+  const giftFreeByLineId = allocateGiftFreeUnitsByCartLineId(
+    input.cartItems,
+    input.giftItems,
+  )
+
+  assertGiftUnitsMatchCartAllocation(
+    input.cartItems,
+    input.giftUnits,
+    giftFreeByLineId,
+  )
+
+  const rows: OrderItemInsertRow[] = []
+  let expectedPriceSumBani = 0
+
+  for (let index = 0; index < input.cartItems.length; index++) {
+    const ci = input.cartItems[index]
+    const priced = input.pricedItems[index]
+    if (!priced) {
+      throw new Error("[createOrder] pricing items count mismatch")
+    }
+
+    const { size, variant_id } = orderItemSizeAndVariantForInsert(ci)
+    const itemName =
+      input.lang === "RO" ? ci.menuItem.name_ro : ci.menuItem.name_ru
+    const toppings = toppingsPayload(ci, input.lang)
+    const freeUnits = giftFreeByLineId.get(ci.id) ?? 0
+    const paidQty = ci.quantity - freeUnits
+
+    if (paidQty < 0) {
+      throw new Error("[createOrder] gift units exceed cart line quantity")
+    }
+
+    if (paidQty > 0) {
+      expectedPriceSumBani += priced.price_bani * paidQty
+      rows.push({
+        order_id: input.orderId,
+        menu_item_id: ci.menuItem.id,
+        lunch_set_id: null,
+        variant_id,
+        item_name: itemName,
+        size,
+        quantity: paidQty,
+        toppings,
+        price: priced.price_bani * paidQty,
+        original_price: priced.original_price_bani * paidQty,
+        item_discount_pct: priced.item_discount_pct,
+      })
+    }
+
+    if (freeUnits > 0) {
+      rows.push({
+        order_id: input.orderId,
+        menu_item_id: ci.menuItem.id,
+        lunch_set_id: null,
+        variant_id,
+        item_name: itemName,
+        size,
+        quantity: freeUnits,
+        toppings,
+        price: 0,
+        original_price: priced.original_price_bani * freeUnits,
+        item_discount_pct: 0,
+        is_gift: true,
+        gift_rule_id: resolveGiftRuleIdForCartLine(ci, input.giftItems),
+      })
+    }
+  }
+
+  return { rows, expectedPriceSumBani }
 }
 
 function deliveryCoordsAreUsable(
@@ -415,27 +578,51 @@ export async function executeCreateOrder(
   const orderNumber = orderRow.order_number as number
   const lang = payload.lang
 
-  const rows = payload.items.map((ci, index) => {
-    const priced = pricing.items[index]
-    if (!priced) {
-      throw new Error("[createOrder] pricing items count mismatch")
-    }
-    const { size, variant_id } = orderItemSizeAndVariantForInsert(ci)
-    return {
-      order_id: orderId,
-      menu_item_id: ci.menuItem.id,
-      lunch_set_id: null as string | null,
-      variant_id,
-      item_name:
-        lang === "RO" ? ci.menuItem.name_ro : ci.menuItem.name_ru,
-      size,
-      quantity: ci.quantity,
-      toppings: toppingsPayload(ci, lang),
-      price: priced.price_bani * priced.quantity,
-      original_price: priced.original_price_bani * priced.quantity,
-      item_discount_pct: priced.item_discount_pct,
-    }
-  })
+  let rows: OrderItemInsertRow[]
+  let expectedPriceSumBani: number
+  try {
+    const built = buildOrderItemRows({
+      orderId,
+      cartItems: payload.items,
+      pricedItems: pricing.items,
+      giftUnits: pricing.giftUnits,
+      giftItems: pricing.giftItems,
+      lang,
+    })
+    rows = built.rows
+    expectedPriceSumBani = built.expectedPriceSumBani
+  } catch (e) {
+    console.error(
+      "[createOrder] order_items build",
+      e instanceof Error ? e.message : e,
+    )
+    await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId)
+      .eq("brand_id", brandId)
+    return { success: false, error: t.orderErrors.saveItemsFailed }
+  }
+
+  const orderItemsPriceSum = rows.reduce((sum, row) => sum + row.price, 0)
+  // В строках: shelf unit (price_bani) × платные qty; подарки price=0.
+  // order_percent / order_fixed / промокод — только в orders.promo_discount, не в строках.
+  if (orderItemsPriceSum !== expectedPriceSumBani) {
+    const cheapestFreeBani = cheapestItemFreeDiscountBani(
+      pricing.giftUnits,
+      pricing.items,
+    )
+    console.error(
+      "[createOrder] order_items price invariant",
+      `sum=${orderItemsPriceSum} expected=${expectedPriceSumBani} (subtotal=${pricing.subtotal_bani} item_disc=${pricing.item_discount_bani} cheapest_free=${cheapestFreeBani} promo_disc=${pricing.promo_discount_bani})`,
+    )
+    await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId)
+      .eq("brand_id", brandId)
+    return { success: false, error: t.orderErrors.saveItemsFailed }
+  }
 
   const { error: itemsError } = await supabase
     .from("order_items")

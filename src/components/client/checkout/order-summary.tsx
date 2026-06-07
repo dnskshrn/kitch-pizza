@@ -39,6 +39,8 @@ export type CheckoutPricingBreakdown = {
   totalBani: number
   loading?: boolean
   discountRulesApplied?: CheckoutDiscountRuleLine[]
+  /** cartLineId — индекс строки корзины ("0", "1", …), как в PricingResult. */
+  giftUnits?: Array<{ cartLineId: string; quantity: number }>
 }
 
 export type OrderSummaryProps = {
@@ -91,6 +93,18 @@ export function OrderSummary({
 }: OrderSummaryProps) {
   const { t } = useLanguage()
   const campaignRules = useStorefrontCampaignRules()
+  const giftFreeUnitsByLineId = useMemo(() => {
+    const units = pricingBreakdown?.giftUnits
+    if (!units?.length) return new Map<string, number>()
+    const map = new Map<string, number>()
+    for (const { cartLineId, quantity } of units) {
+      if (quantity <= 0) continue
+      const index = Number(cartLineId)
+      const cartItem = items[index]
+      if (cartItem) map.set(cartItem.id, quantity)
+    }
+    return map
+  }, [pricingBreakdown?.giftUnits, items])
   const deliveryLine = useMemo(
     () =>
       getStorefrontDeliveryLineDisplay({
@@ -168,6 +182,7 @@ export function OrderSummary({
                   unitBani={unitBani}
                   compareUnitBani={compareUnitBani}
                   quantity={cartItem.quantity}
+                  giftFreeUnits={giftFreeUnitsByLineId.get(cartItem.id) ?? 0}
                   lang={lang}
                 />
               </div>
@@ -185,16 +200,16 @@ export function OrderSummary({
             value={formatMoney(pricingBreakdown.subtotalBani, lang)}
           />
           {(() => {
-            const itemDiscountLines =
+            const appliedDiscountLines =
               pricingBreakdown.discountRulesApplied?.filter(
                 (entry) =>
-                  entry.type === "item_discount" && entry.amount_bani > 0,
+                  entry.amount_bani > 0 && entry.type !== "bonus_redemption",
               ) ?? []
 
-            if (itemDiscountLines.length > 0) {
-              return itemDiscountLines.map((entry, index) => (
+            if (appliedDiscountLines.length > 0) {
+              return appliedDiscountLines.map((entry, index) => (
                 <BreakdownRow
-                  key={`item-discount-${entry.label}-${index}`}
+                  key={`discount-${entry.type}-${entry.label}-${index}`}
                   label={entry.label}
                   value={`−${formatMoney(entry.amount_bani, lang)}`}
                   accent
@@ -202,25 +217,29 @@ export function OrderSummary({
               ))
             }
 
+            const legacyLines: ReactNode[] = []
             if (pricingBreakdown.itemDiscountBani > 0) {
-              return (
+              legacyLines.push(
                 <BreakdownRow
+                  key="legacy-item-discount"
                   label={t.checkout.pricingItemDiscount}
                   value={`−${formatMoney(pricingBreakdown.itemDiscountBani, lang)}`}
                   accent
-                />
+                />,
               )
             }
-
-            return null
+            if (pricingBreakdown.promoDiscountBani > 0) {
+              legacyLines.push(
+                <BreakdownRow
+                  key="legacy-promo-discount"
+                  label={t.checkout.pricingPromo}
+                  value={`−${formatMoney(pricingBreakdown.promoDiscountBani, lang)}`}
+                  accent
+                />,
+              )
+            }
+            return legacyLines.length > 0 ? legacyLines : null
           })()}
-          {pricingBreakdown.promoDiscountBani > 0 ? (
-            <BreakdownRow
-              label={t.checkout.pricingPromo}
-              value={`−${formatMoney(pricingBreakdown.promoDiscountBani, lang)}`}
-              accent
-            />
-          ) : null}
           {pricingBreakdown.bonusesRedeemedMdl > 0 ? (
             <BreakdownRow
               label={t.checkout.pricingBonuses}

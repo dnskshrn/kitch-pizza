@@ -4,7 +4,7 @@ import type { PosOrder, PosOrderSource, PosOrderStatus } from "@/types/pos"
 
 /** Колонки `orders` + вложения для списка/карточек POS (без несуществующих полей). */
 const ORDERS_POS_SELECT =
-  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, kitchen_note, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, subtotal, item_discount, promo_discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, ready_at, cash_session_id, brands(slug), order_items(count)"
+  "id, order_number, user_phone, user_name, status, total, delivery_address, comment, kitchen_note, tg_message_id, created_at, delivery_mode, payment_method, change_from, cash_amount, card_amount, delivery_fee, promo_code, discount, subtotal, item_discount, promo_discount, bonuses_redeemed, scheduled_time, updated_at, brand_id, operator_id, source, profile_id, cancel_reason, address_entrance, address_floor, address_apartment, address_intercom, courier_id, aggregator, prep_deadline_at, ready_at, cash_session_id, brands(slug), order_items(quantity, is_gift)"
 
 /** Активные заказы левой колонки POS (без завершённых, отмен и отказов сайта). */
 export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
@@ -18,7 +18,9 @@ export const MAIN_POS_ORDER_STATUSES: readonly PosOrderStatus[] = [
 
 type BrandsEmbed = { slug: string } | { slug: string }[] | null
 
-type OrderItemsCountEmbed = { count: number }[] | null
+type OrderItemsQtyEmbed =
+  | { quantity: number; is_gift?: boolean | null }[]
+  | null
 
 export type OrderRow = {
   id: string
@@ -49,7 +51,7 @@ export type OrderRow = {
   created_at: string
   updated_at: string
   brands: BrandsEmbed
-  order_items: OrderItemsCountEmbed
+  order_items: OrderItemsQtyEmbed
   cancel_reason?: string | null
   address_entrance?: string | null
   address_floor?: string | null
@@ -151,8 +153,11 @@ async function rowsToPosOrders(rows: OrderRow[]): Promise<PosOrder[]> {
 function itemCountFromRow(row: OrderRow): number {
   const items = row.order_items
   if (!items?.length) return 0
-  const n = items[0]?.count
-  return typeof n === "number" ? n : 0
+  return items.reduce((sum, line) => {
+    if (line.is_gift === true) return sum
+    const qty = Math.max(0, Math.round(line.quantity ?? 0))
+    return sum + qty
+  }, 0)
 }
 
 function parseSource(v: unknown): PosOrderSource {

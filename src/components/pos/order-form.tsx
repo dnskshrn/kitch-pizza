@@ -74,6 +74,8 @@ import {
 } from "@/lib/actions/pos/customers-pos-actions"
 import { getActiveDiscountRules } from "@/lib/actions/discounts"
 import { discountRateFromEffectValue } from "@/lib/discount"
+import { CartLinePrice } from "@/components/client/cart/cart-line-price"
+import { allocateGiftUnitsByEngineLineIndex } from "@/components/client/cart/storefront-cart-pricing"
 import { evaluateDiscounts, isRuleScheduleActive } from "@/lib/discount-engine"
 import type { CustomerWithAddresses } from "@/lib/customers"
 import type { CustomerAddress } from "@/types/database"
@@ -482,6 +484,7 @@ function ProductCard({
 function CartItemRow({
   line,
   idx,
+  giftFreeUnits = 0,
   onUpdateQty,
   onRemove,
   onOpenLine,
@@ -489,6 +492,7 @@ function CartItemRow({
 }: {
   line: PosCartItem
   idx: number
+  giftFreeUnits?: number
   onUpdateQty: (idx: number, delta: number) => void | Promise<void>
   onRemove: (idx: number) => void | Promise<void>
   onOpenLine: (idx: number) => void
@@ -587,9 +591,20 @@ function CartItemRow({
               <Plus className="size-3.5" />
             </button>
           </div>
-          <span className="flex min-w-0 shrink-0 items-center gap-1 text-right font-mono text-[13px] font-bold tabular-nums text-[#242424]">
-            {formatMdl(line.price * line.qty)}
-          </span>
+          {giftFreeUnits > 0 ? (
+            <div className="min-w-0 shrink-0 text-right [&_p]:text-[13px] [&_div]:text-[13px] [&_span]:text-[13px] [&_span]:font-mono [&_span]:font-bold">
+              <CartLinePrice
+                unitBani={line.price}
+                quantity={line.qty}
+                giftFreeUnits={giftFreeUnits}
+                lang="RU"
+              />
+            </div>
+          ) : (
+            <span className="flex min-w-0 shrink-0 items-center gap-1 text-right font-mono text-[13px] font-bold tabular-nums text-[#242424]">
+              {formatMdl(line.price * line.qty)}
+            </span>
+          )}
         </div>
       </article>
     </SwipeToDelete>
@@ -603,6 +618,7 @@ const POS_RUNNER_CTA_CLASS =
 function CartPanel({
   cart,
   cartCount,
+  giftFreeUnitsByCartIndex,
   panelTitle = "Корзина",
   totalsSlot,
   orderTotalSlot,
@@ -632,6 +648,8 @@ function CartPanel({
 }: {
   cart: PosCartItem[]
   cartCount: number
+  /** Индекс строки POS-корзины → бесплатные единицы по акции (giftItems движка). */
+  giftFreeUnitsByCartIndex?: Map<number, number>
   panelTitle?: string
   /** Сводка: промо + строки скидок (без «Итого»). */
   totalsSlot?: ReactNode
@@ -790,6 +808,7 @@ function CartPanel({
                   }
                   line={line}
                   idx={idx}
+                  giftFreeUnits={giftFreeUnitsByCartIndex?.get(idx) ?? 0}
                   onUpdateQty={onUpdateQty}
                   onRemove={onRemove}
                   onOpenLine={onOpenLine}
@@ -1369,6 +1388,29 @@ export function OrderForm({
       .map((c) => ({ id: c.id, name_ru: c.name_ru, name_ro: "" }))
   }, [effectiveEngineOutput, cartForEngine, posMenuCategories])
 
+  const giftFreeUnitsByCartIndex = useMemo(() => {
+    const gifts = effectiveEngineOutput.giftItems
+    if (!gifts?.length || cartForEngine.length === 0) {
+      return new Map<number, number>()
+    }
+
+    const byEngineIndex = new Map(
+      allocateGiftUnitsByEngineLineIndex(cartForEngine, gifts).map(
+        ({ cartLineId, quantity }) => [Number(cartLineId), quantity],
+      ),
+    )
+
+    const result = new Map<number, number>()
+    let engineIdx = 0
+    for (let cartIdx = 0; cartIdx < cart.length; cartIdx++) {
+      if (cart[cartIdx].is_gift) continue
+      const free = byEngineIndex.get(engineIdx) ?? 0
+      if (free > 0) result.set(cartIdx, free)
+      engineIdx++
+    }
+    return result
+  }, [cart, cartForEngine, effectiveEngineOutput.giftItems])
+
   const isAggregator = deliveryMode === "aggregator"
   const cartItemsTotalBani = cart.reduce(
     (sum, item) =>
@@ -1623,7 +1665,9 @@ export function OrderForm({
       const bonusBani = effectiveBonusPoints * 100
 
       return {
-        item_count: lines.reduce((sum, line) => sum + line.qty, 0),
+        item_count: lines
+          .filter((line) => !line.is_gift)
+          .reduce((sum, line) => sum + line.qty, 0),
         total: Math.max(0, subtotal - discount + deliveryFee - bonusBani),
         discount,
         delivery_fee: deliveryFee,
@@ -2884,7 +2928,6 @@ export function OrderForm({
         promoCode: promoCode?.trim() || undefined,
         discount: totalDiscountBani,
         discountRulesApplied: JSON.stringify(eng.appliedDiscounts ?? []),
-        giftItems: eng.giftItems ?? [],
         deliveryFee: feeBani,
         profileId: pid,
         delivery_lat:
@@ -3381,7 +3424,6 @@ export function OrderForm({
                   discount_bani: r.discount_bani,
                 }),
               ),
-              giftItems: effectiveEngineOutput.giftItems ?? [],
             }
           : undefined
 
@@ -3473,7 +3515,6 @@ export function OrderForm({
                   discount_bani: r.discount_bani,
                 }),
               ),
-              giftItems: effectiveEngineOutput.giftItems ?? [],
             }
           : undefined
 
@@ -3876,6 +3917,7 @@ export function OrderForm({
             <CartPanel
               cart={cart}
               cartCount={cartCount}
+              giftFreeUnitsByCartIndex={giftFreeUnitsByCartIndex}
               giftsBanner={giftsBanner}
               totalsSlot={
                 <>
@@ -4728,6 +4770,7 @@ export function OrderForm({
           panelTitle="Сводка"
           cart={cart}
           cartCount={cartCount}
+          giftFreeUnitsByCartIndex={giftFreeUnitsByCartIndex}
           giftsBanner={giftsBanner}
           totalsSlot={
             <>

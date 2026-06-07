@@ -9,19 +9,13 @@ import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
 export const dynamic = "force-dynamic"
 
-type EligibleOrderRow = {
+type PendingFeedbackOrderRow = {
   id: string
   brand_id: string
-  courier_id: string | null
-  done_at: string
   profile_id: string
-  profiles: { phone: string | null; id: string } | { phone: string | null; id: string }[] | null
-  brands: { slug: string } | { slug: string }[] | null
-}
-
-function unwrapOne<T>(value: T | T[] | null | undefined): T | null {
-  if (value == null) return null
-  return Array.isArray(value) ? (value[0] ?? null) : value
+  done_at: string
+  phone: string | null
+  brand_slug: string | null
 }
 
 async function hasRecentSmsCooldown(
@@ -78,34 +72,20 @@ export async function GET(req: NextRequest) {
   let processed = 0
   let skipped = 0
 
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-  const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
-
-  const { data: rawOrders, error: ordersError } = await supabase
-    .from("orders")
-    .select(
-      "id, brand_id, courier_id, done_at, profile_id, profiles(phone, id), brands(slug), order_feedback!left(order_id)",
-    )
-    .eq("status", "done")
-    .neq("delivery_mode", "aggregator")
-    .lte("done_at", oneHourAgo)
-    .gte("done_at", fortyEightHoursAgo)
-    .not("profile_id", "is", null)
-    .not("brand_id", "is", null)
-    .is("order_feedback.order_id", null)
-    .limit(50)
+  const { data: rawOrders, error: ordersError } = await supabase.rpc(
+    "get_pending_feedback_orders",
+    { p_limit: 50 },
+  )
 
   if (ordersError) {
     console.error("feedback-sms orders query error:", ordersError.message)
     return NextResponse.json({ error: ordersError.message }, { status: 500 })
   }
 
-  for (const row of (rawOrders ?? []) as EligibleOrderRow[]) {
-    const profile = unwrapOne(row.profiles)
-    const brand = unwrapOne(row.brands)
-    const phone = profile?.phone?.trim() ?? ""
-    const profileId = profile?.id ?? row.profile_id
-    const brandSlug = brand?.slug?.trim() ?? ""
+  for (const row of (rawOrders ?? []) as PendingFeedbackOrderRow[]) {
+    const phone = row.phone?.trim() ?? ""
+    const profileId = row.profile_id
+    const brandSlug = row.brand_slug?.trim() ?? ""
 
     if (!phone || !brandSlug || !row.brand_id) {
       skipped += 1

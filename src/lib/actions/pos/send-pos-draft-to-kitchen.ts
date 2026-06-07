@@ -2,6 +2,7 @@
 
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { redeemBonus } from "@/lib/bonus"
+import { purgePosOrderGiftItems } from "@/lib/pos/order-discount-breakdown"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
 export type SendPosDraftToKitchenInput = {
@@ -20,13 +21,6 @@ export type SendPosDraftToKitchenInput = {
       effect_type: string
       label_ru: string
       discount_bani: number
-    }[]
-    giftItems: {
-      menu_item_id: string
-      variant_id: string | null
-      quantity: number
-      rule_id: string
-      label_ru: string
     }[]
   }
 }
@@ -192,38 +186,13 @@ export async function sendPosDraftToKitchen(
     }
   }
 
+  const purgeGifts = await purgePosOrderGiftItems(supabase, input.orderId)
+  if (!purgeGifts.success) {
+    console.error("[sendPosDraftToKitchen] purge gift items", purgeGifts.error)
+  }
+
   if (input.discountPayload && input.discountPayload.discountBani > 0) {
     const discountPayload = input.discountPayload
-
-    const { error: delGiftError } = await (supabase.from("order_items") as any)
-      .delete()
-      .eq("order_id", input.orderId)
-      .eq("is_gift", true)
-    if (delGiftError) {
-      console.error(
-        "[sendPosDraftToKitchen] delete gift items",
-        delGiftError.message,
-      )
-    }
-
-    if (discountPayload.giftItems.length > 0) {
-      const giftRows = discountPayload.giftItems.map((item) => ({
-        order_id: input.orderId,
-        menu_item_id: item.menu_item_id,
-        variant_id: item.variant_id,
-        item_name: item.label_ru,
-        price: 0,
-        quantity: item.quantity,
-        is_gift: true,
-        gift_rule_id: item.rule_id,
-      }))
-      const { error: giftInsErr } = await (supabase.from("order_items") as any).insert(
-        giftRows,
-      )
-      if (giftInsErr) {
-        console.error("[sendPosDraftToKitchen] gift items", giftInsErr.message)
-      }
-    }
 
     const { error: discountError } = await (supabase.from("orders") as any)
       .update({

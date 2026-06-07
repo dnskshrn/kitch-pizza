@@ -1077,7 +1077,15 @@ export function OrderForm({
   const [modalItem, setModalItem] = useState<MenuItemRow | null>(null)
   const [cartEditIndex, setCartEditIndex] = useState<number | null>(null)
   const cartModalBusyRef = useRef(false)
-  const [cartActionBusy, setCartActionBusy] = useState(false)
+  const inFlightLinesRef = useRef<Set<string>>(new Set())
+  const pendingInsertIdsRef = useRef<Set<string>>(new Set())
+  const qtySyncTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  )
+  const cartRef = useRef(cart)
+  useEffect(() => {
+    cartRef.current = cart
+  }, [cart])
   const loadBrandMenu = usePosMenuCache((s) => s.loadBrandMenu)
   const getBrandMenu = usePosMenuCache((s) => s.getBrandMenu)
   const posMenuCategories = usePosMenuCache((s) =>
@@ -1211,7 +1219,7 @@ export function OrderForm({
   >(null)
   const [orderMenuOpen, setOrderMenuOpen] = useState(false)
   const cartInteractionDisabled =
-    cartActionBusy || extendSubmitting || clearCartBusy || deliveryModeBusy || runnerBusy
+    extendSubmitting || clearCartBusy || deliveryModeBusy || runnerBusy
   const [extendError, setExtendError] = useState<string | null>(null)
   const [editBaselineDeliveryFeeBani, setEditBaselineDeliveryFeeBani] =
     useState<number | null>(null)
@@ -1455,6 +1463,11 @@ export function OrderForm({
       )
     })
   }, [listOrder, posOrderId, cart])
+
+  /** Корзина опустела — сбрасываем снимок скидок, чтобы «Итого» не показывал сумму от прошлого состава. */
+  useEffect(() => {
+    if (cart.length === 0) setEngineOutput(null)
+  }, [cart.length])
 
   /** Левый список читает `orders.total/discount`; на шаге 2 они могли не совпасть с движком — подтягиваем только в локальный снимок панели (без БД). */
   useEffect(() => {
@@ -2269,6 +2282,44 @@ export function OrderForm({
     setCart(lines)
   }, [posOrderId])
 
+  const scheduleQtySync = useCallback(
+    (orderItemId: string) => {
+      const timers = qtySyncTimersRef.current
+      const existing = timers.get(orderItemId)
+      if (existing) clearTimeout(existing)
+      const t = setTimeout(async () => {
+        timers.delete(orderItemId)
+        if (pendingInsertIdsRef.current.has(orderItemId)) {
+          scheduleQtySync(orderItemId)
+          return
+        }
+        const line = cartRef.current.find((l) => l.orderItemId === orderItemId)
+        if (!line || line.qty < 1) return
+        const res = await updateOrderItemQuantityPos({
+          orderId: posOrderId,
+          itemId: orderItemId,
+          quantity: line.qty,
+        })
+        if (!res.success) {
+          toast.error("Не удалось обновить количество")
+          void refreshCartFromDb()
+        } else {
+          lastSyncedCartFingerprintRef.current = cartFingerprint(cartRef.current)
+        }
+      }, 400)
+      timers.set(orderItemId, t)
+    },
+    [posOrderId, refreshCartFromDb],
+  )
+
+  useEffect(
+    () => () => {
+      qtySyncTimersRef.current.forEach((t) => clearTimeout(t))
+      qtySyncTimersRef.current.clear()
+    },
+    [],
+  )
+
   const clearCartOnServer = useCallback(async (): Promise<boolean> => {
     if (cart.length === 0) return true
     const snapshot = cart
@@ -2432,46 +2483,37 @@ export function OrderForm({
           (x.size ?? "") === (entry.size ?? "") &&
           toppingsSignature(x.toppings) === toppingsSignature(entry.toppings),
       )
-      const nextCart =
-        idx >= 0
-          ? cart.map((line, lineIdx) =>
-              lineIdx === idx ? { ...line, qty: line.qty + entry.qty } : line,
-            )
-          : [...cart, entry]
+
+      if (idx >= 0) {
+        const existing = cart[idx]!
+        if (!existing.orderItemId) return false
+
+        const nextCart = cart.map((line, lineIdx) =>
+          lineIdx === idx ? { ...line, qty: line.qty + entry.qty } : line,
+        )
+        applyOptimisticCart(nextCart)
+        scheduleQtySync(existing.orderItemId)
+        return true
+      }
+
+      const newId = crypto.randomUUID()
+      const entryWithId = { ...entry, orderItemId: newId }
+      const nextCart = [...cart, entryWithId]
       applyOptimisticCart(nextCart)
-      setCartActionBusy(true)
+      pendingInsertIdsRef.current.add(newId)
       try {
-        if (idx >= 0) {
-          const existing = cart[idx]!
-          if (existing.orderItemId) {
-            const res = await updateOrderItemQuantityPos({
-              orderId: posOrderId,
-              itemId: existing.orderItemId,
-              quantity: existing.qty + entry.qty,
-            })
-            if (!res.success) {
-              rollbackOptimisticCart(snapshot, "Не удалось обновить количество")
-              return false
-            }
-          } else {
-            rollbackOptimisticCart(snapshot, "Некорректное состояние корзины")
-            return false
-          }
-        } else {
-          const res = await addOrderItemsPos({
-            orderId: posOrderId,
-            lines: [entry],
-          })
-          if (!res.success) {
-            rollbackOptimisticCart(snapshot, "Не удалось добавить позицию")
-            return false
-          }
-          void refreshCartFromDb()
+        const res = await addOrderItemsPos({
+          orderId: posOrderId,
+          lines: [entryWithId],
+        })
+        if (!res.success) {
+          rollbackOptimisticCart(snapshot, "Не удалось добавить позицию")
+          return false
         }
         lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
         return true
       } finally {
-        setCartActionBusy(false)
+        pendingInsertIdsRef.current.delete(newId)
       }
     },
     [
@@ -2479,8 +2521,8 @@ export function OrderForm({
       cart,
       cartInteractionDisabled,
       posOrderId,
-      refreshCartFromDb,
       rollbackOptimisticCart,
+      scheduleQtySync,
       toppingsSignature,
     ],
   )
@@ -2582,6 +2624,7 @@ export function OrderForm({
       if (cartInteractionDisabled) return
       const row = cart[idx]
       if (!row?.orderItemId) return
+
       const q = row.qty + delta
       const snapshot = cart
       const nextCart =
@@ -2591,31 +2634,23 @@ export function OrderForm({
               lineIdx === idx ? { ...line, qty: q } : line,
             )
       applyOptimisticCart(nextCart)
-      setCartActionBusy(true)
-      try {
-        if (q < 1) {
-          const res = await removeOrderItemPos({
-            orderId: posOrderId,
-            itemId: row.orderItemId,
-          })
-          if (!res.success) {
-            rollbackOptimisticCart(snapshot, "Не удалось удалить позицию")
-            return
-          }
-        } else {
-          const res = await updateOrderItemQuantityPos({
-            orderId: posOrderId,
-            itemId: row.orderItemId,
-            quantity: q,
-          })
-          if (!res.success) {
-            rollbackOptimisticCart(snapshot, "Не удалось обновить количество")
-            return
-          }
+      if (q < 1) {
+        const tm = qtySyncTimersRef.current.get(row.orderItemId)
+        if (tm) {
+          clearTimeout(tm)
+          qtySyncTimersRef.current.delete(row.orderItemId)
+        }
+        const res = await removeOrderItemPos({
+          orderId: posOrderId,
+          itemId: row.orderItemId,
+        })
+        if (!res.success) {
+          rollbackOptimisticCart(snapshot, "Не удалось удалить позицию")
+          return
         }
         lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
-      } finally {
-        setCartActionBusy(false)
+      } else {
+        scheduleQtySync(row.orderItemId)
       }
     },
     [
@@ -2624,6 +2659,7 @@ export function OrderForm({
       cartInteractionDisabled,
       posOrderId,
       rollbackOptimisticCart,
+      scheduleQtySync,
     ],
   )
 
@@ -2632,14 +2668,27 @@ export function OrderForm({
       if (cartInteractionDisabled) return
       const row = cart[idx]
       if (!row) return
-      const snapshot = cart
-      const nextCart = cart.filter((_, lineIdx) => lineIdx !== idx)
-      applyOptimisticCart(nextCart)
+
       if (!row.orderItemId) {
+        const nextCart = cart.filter((_, lineIdx) => lineIdx !== idx)
+        applyOptimisticCart(nextCart)
         lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
         return
       }
-      setCartActionBusy(true)
+
+      const tm = qtySyncTimersRef.current.get(row.orderItemId)
+      if (tm) {
+        clearTimeout(tm)
+        qtySyncTimersRef.current.delete(row.orderItemId)
+      }
+
+      const lineId = row.orderItemId
+      if (lineId && inFlightLinesRef.current.has(lineId)) return
+      if (lineId) inFlightLinesRef.current.add(lineId)
+
+      const snapshot = cart
+      const nextCart = cart.filter((_, lineIdx) => lineIdx !== idx)
+      applyOptimisticCart(nextCart)
       try {
         const res = await removeOrderItemPos({
           orderId: posOrderId,
@@ -2651,7 +2700,7 @@ export function OrderForm({
         }
         lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
       } finally {
-        setCartActionBusy(false)
+        if (lineId) inFlightLinesRef.current.delete(lineId)
       }
     },
     [
@@ -2716,12 +2765,17 @@ export function OrderForm({
       if (!prevLine?.orderItemId) {
         throw new Error("Некорректное состояние корзины")
       }
+      const lineId = prevLine.orderItemId
+      if (lineId && inFlightLinesRef.current.has(lineId)) {
+        throw new Error("Повторите попытку")
+      }
+      if (lineId) inFlightLinesRef.current.add(lineId)
+
       const snapshot = cart
       const nextCart = cart.map((line, idx) =>
         idx === cartIndex ? { ...c, orderItemId: prevLine.orderItemId } : line,
       )
       applyOptimisticCart(nextCart)
-      setCartActionBusy(true)
       try {
         const res = await updateOrderItemCompositionPos({
           orderId: posOrderId,
@@ -2737,7 +2791,7 @@ export function OrderForm({
         }
         lastSyncedCartFingerprintRef.current = cartFingerprint(nextCart)
       } finally {
-        setCartActionBusy(false)
+        if (lineId) inFlightLinesRef.current.delete(lineId)
       }
     },
     [
@@ -4004,7 +4058,6 @@ export function OrderForm({
               runnerDisabled={
                 runnerAlreadySent ||
                 cart.length === 0 ||
-                cartActionBusy ||
                 extendSubmitting ||
                 !selectedBrand ||
                 !runnerHasPricedItems
@@ -4821,7 +4874,6 @@ export function OrderForm({
           runnerDisabled={
             runnerAlreadySent ||
             submitting ||
-            cartActionBusy ||
             !runnerHasPricedItems
           }
           runnerBusy={submitting}

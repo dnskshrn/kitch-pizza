@@ -119,6 +119,16 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
       setCompletedOrders(completed)
     }, [])
 
+    const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    const scheduleReload = useCallback(() => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current)
+      reloadTimerRef.current = setTimeout(() => {
+        reloadTimerRef.current = null
+        void reloadOrders()
+      }, 300)
+    }, [reloadOrders])
+
     useImperativeHandle(
       ref,
       () => ({
@@ -195,7 +205,7 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
                 playStatusUpdateSound()
               }
             }
-            void reloadOrders()
+            void scheduleReload()
           },
         )
         .subscribe((status, error) => {
@@ -210,7 +220,7 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
           "postgres_changes",
           { event: "*", schema: "public", table: "order_items" },
           () => {
-            void reloadOrders()
+            void scheduleReload()
           },
         )
         .subscribe((status, error) => {
@@ -224,10 +234,11 @@ export const OrdersPanel = forwardRef<OrdersPanelHandle, OrdersPanelProps>(
         })
 
       return () => {
+        if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current)
         void supabase.removeChannel(ordersChannel)
         void supabase.removeChannel(itemsChannel)
       }
-    }, [reloadOrders])
+    }, [scheduleReload])
 
     useEffect(() => {
       const supabase = createClient()

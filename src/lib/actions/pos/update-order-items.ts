@@ -158,6 +158,7 @@ function orderItemInsertsFromCartLines(
     .map((cartItem) => {
       const line = posLinePayloadFromCartItem(cartItem, isAggregator)
       return {
+        ...(cartItem.orderItemId ? { id: cartItem.orderItemId } : {}),
         order_id: orderId,
         menu_item_id: line.menuItemId,
         variant_id: line.variantId ?? null,

@@ -9,7 +9,6 @@ import { useLanguage } from "@/lib/store/language-store"
 import { useAuthStore } from "@/lib/store/auth-store"
 import { RotateCcw } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Drawer } from "vaul"
 
 type Step = "phone" | "otp"
 
@@ -32,21 +31,6 @@ function formatMmSs(totalSec: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
-/** Drawer на мобилке и планшете; Dialog — от `lg` (1024px). */
-function useIsDrawerLayout() {
-  const [drawer, setDrawer] = useState(false)
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1023px)")
-    setDrawer(mq.matches)
-    const handler = (e: MediaQueryListEvent) => setDrawer(e.matches)
-    mq.addEventListener("change", handler)
-    return () => mq.removeEventListener("change", handler)
-  }, [])
-
-  return drawer
-}
-
 export function AuthModal() {
   const { t } = useLanguage()
   const isAuthOpen = useAuthStore((s) => s.isAuthOpen)
@@ -55,18 +39,16 @@ export function AuthModal() {
   const fetchMe = useAuthStore((s) => s.fetchMe)
   const setWelcomeBonusPending = useAuthStore((s) => s.setWelcomeBonusPending)
 
-  const isDrawer = useIsDrawerLayout()
-
   const [step, setStep] = useState<Step>("phone")
   const [digits, setDigits] = useState("")
   const [submittedPhone, setSubmittedPhone] = useState("")
-  const [otp, setOtp] = useState(() => Array<string>(OTP_LEN).fill(""))
+  const [otpCode, setOtpCode] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [phoneSubmitting, setPhoneSubmitting] = useState(false)
   const [otpSubmitting, setOtpSubmitting] = useState(false)
   const [resendIn, setResendIn] = useState(60)
 
-  const otpRefs = useRef<(HTMLInputElement | null)[]>([])
+  const otpInputRef = useRef<HTMLInputElement | null>(null)
   const verifyLock = useRef(false)
 
   useEffect(() => {
@@ -74,7 +56,7 @@ export function AuthModal() {
       setStep("phone")
       setDigits("")
       setSubmittedPhone("")
-      setOtp(Array(OTP_LEN).fill(""))
+      setOtpCode("")
       setError(null)
       setPhoneSubmitting(false)
       setOtpSubmitting(false)
@@ -93,8 +75,8 @@ export function AuthModal() {
 
   useEffect(() => {
     if (!isAuthOpen || step !== "otp") return
-    const t = window.setTimeout(() => otpRefs.current[0]?.focus(), 0)
-    return () => window.clearTimeout(t)
+    const id = window.setTimeout(() => otpInputRef.current?.focus(), 0)
+    return () => window.clearTimeout(id)
   }, [isAuthOpen, step])
 
   const sendOtpToPhone = useCallback(
@@ -123,7 +105,7 @@ export function AuthModal() {
     try {
       await sendOtpToPhone(phone)
       setSubmittedPhone(phone)
-      setOtp(Array(OTP_LEN).fill(""))
+      setOtpCode("")
       setStep("otp")
     } catch (err) {
       setError(
@@ -147,9 +129,9 @@ export function AuthModal() {
           body: JSON.stringify({ phone: submittedPhone, code }),
         })
         if (!response.ok) {
-          setOtp(Array(OTP_LEN).fill(""))
+          setOtpCode("")
           setError(t.auth.modal.errorWrongCode)
-          window.requestAnimationFrame(() => otpRefs.current[0]?.focus())
+          window.requestAnimationFrame(() => otpInputRef.current?.focus())
           return
         }
         const data = await response.json()
@@ -159,9 +141,9 @@ export function AuthModal() {
           setWelcomeBonusPending(true)
         }
       } catch {
-        setOtp(Array(OTP_LEN).fill(""))
+        setOtpCode("")
         setError(t.auth.modal.errorWrongCode)
-        otpRefs.current[0]?.focus()
+        otpInputRef.current?.focus()
       } finally {
         setOtpSubmitting(false)
         verifyLock.current = false
@@ -170,58 +152,36 @@ export function AuthModal() {
     [closeAuth, fetchMe, setWelcomeBonusPending, submittedPhone, t.auth.modal.errorWrongCode],
   )
 
-  function setOtpDigit(index: number, value: string) {
-    const d = value.replace(/\D/g, "").slice(-1)
-    setOtp((prev) => {
-      const next = [...prev]
-      next[index] = d
-      const joined = next.join("")
-      if (
-        index === OTP_LEN - 1 &&
-        d &&
-        joined.length === OTP_LEN &&
-        /^\d{4}$/.test(joined)
-      ) {
-        queueMicrotask(() => void submitOtpCode(joined))
+  const applyOtpCode = useCallback(
+    (raw: string) => {
+      const code = raw.replace(/\D/g, "").slice(0, OTP_LEN)
+      setOtpCode(code)
+      if (code.length === OTP_LEN) {
+        queueMicrotask(() => void submitOtpCode(code))
       }
-      return next
-    })
-    if (d && index < OTP_LEN - 1) {
-      otpRefs.current[index + 1]?.focus()
-    }
-  }
+    },
+    [submitOtpCode],
+  )
 
-  function handleOtpKeyDown(
-    index: number,
-    e: React.KeyboardEvent<HTMLInputElement>,
-  ) {
-    if (e.key === "Backspace" && !otp[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus()
-    }
-  }
+  useEffect(() => {
+    if (!isAuthOpen || step !== "otp") return
+    if (!("OTPCredential" in window)) return
 
-  function handleOtpPaste(index: number, e: React.ClipboardEvent) {
-    e.preventDefault()
-    const raw = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, OTP_LEN)
-    if (!raw) return
+    const ac = new AbortController()
+    navigator.credentials
+      .get({
+        otp: { transport: ["sms"] },
+        signal: ac.signal,
+      } as CredentialRequestOptions)
+      .then((cred) => {
+        if (cred && "code" in cred && typeof cred.code === "string") {
+          applyOtpCode(cred.code)
+        }
+      })
+      .catch(() => {})
 
-    setOtp((prev) => {
-      const next = [...prev]
-      for (let i = 0; i < raw.length && index + i < OTP_LEN; i++) {
-        next[index + i] = raw[i]!
-      }
-      const joined = next.join("")
-      if (/^\d{4}$/.test(joined)) {
-        queueMicrotask(() => void submitOtpCode(joined))
-      }
-      return next
-    })
-
-    const lastFilled = Math.min(index + raw.length - 1, OTP_LEN - 1)
-    window.requestAnimationFrame(() => {
-      otpRefs.current[lastFilled]?.focus()
-    })
-  }
+    return () => ac.abort()
+  }, [isAuthOpen, step, applyOtpCode])
 
   async function handleResend() {
     if (resendIn > 0 || phoneSubmitting || otpSubmitting || !submittedPhone)
@@ -230,7 +190,7 @@ export function AuthModal() {
     setPhoneSubmitting(true)
     try {
       await sendOtpToPhone(submittedPhone)
-      setOtp(Array(OTP_LEN).fill(""))
+      setOtpCode("")
       setResendIn(60)
     } catch (err) {
       setError(
@@ -303,8 +263,6 @@ export function AuthModal() {
     </div>
   )
 
-  const otpCodeJoined = otp.join("")
-
   const otpStep = (
     <div className="flex min-h-0 flex-1 flex-col">
       <h2 className="text-center text-2xl font-bold text-gray-900">
@@ -313,28 +271,36 @@ export function AuthModal() {
       <p className="mb-6 mt-1 text-center text-sm text-gray-400">
         {t.auth.modal.subtitle}
       </p>
-      <div className="my-6 flex justify-center gap-3">
-        {otp.map((digit, i) => (
-          <input
-            key={i}
-            ref={(el) => {
-              otpRefs.current[i] = el
-            }}
-            type="text"
-            inputMode="numeric"
-            maxLength={1}
-            value={digit}
-            disabled={otpSubmitting || phoneSubmitting}
-            onChange={(e) => setOtpDigit(i, e.target.value)}
-            onKeyDown={(e) => handleOtpKeyDown(i, e)}
-            onPaste={(e) => handleOtpPaste(i, e)}
-            onFocus={(e) =>
-              e.target.scrollIntoView({ behavior: "smooth", block: "center" })
-            }
-            className="h-16 w-16 rounded-2xl bg-[#F5F5F5] text-center text-2xl font-bold tabular-nums text-gray-900 outline-none disabled:opacity-50"
-            aria-label={t.auth.modal.otpDigitAria(i + 1)}
-          />
-        ))}
+      <div className="relative mx-auto my-6 w-fit">
+        <div className="flex gap-3" aria-hidden>
+          {Array.from({ length: OTP_LEN }, (_, i) => (
+            <div
+              key={i}
+              className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#F5F5F5] text-2xl font-bold tabular-nums text-gray-900"
+            >
+              {otpCode[i] ?? ""}
+            </div>
+          ))}
+        </div>
+        <input
+          ref={otpInputRef}
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={OTP_LEN}
+          value={otpCode}
+          disabled={otpSubmitting || phoneSubmitting}
+          onChange={(e) => applyOtpCode(e.target.value)}
+          onPaste={(e) => {
+            e.preventDefault()
+            applyOtpCode(e.clipboardData.getData("text"))
+          }}
+          onFocus={(e) =>
+            e.target.scrollIntoView({ behavior: "smooth", block: "center" })
+          }
+          className="absolute inset-0 h-full w-full cursor-text opacity-0"
+          aria-label={t.auth.modal.otpTitle}
+        />
       </div>
       <div className="flex min-h-[22px] items-center justify-center gap-1.5 text-sm text-gray-400">
         {resendIn > 0 ? (
@@ -364,10 +330,10 @@ export function AuthModal() {
           disabled={
             otpSubmitting ||
             phoneSubmitting ||
-            otpCodeJoined.length !== OTP_LEN
+            otpCode.length !== OTP_LEN
           }
           className={continueBtnClass}
-          onClick={() => void submitOtpCode(otpCodeJoined)}
+          onClick={() => void submitOtpCode(otpCode)}
         >
           {otpSubmitting ? "…" : t.auth.modal.continue}
         </button>
@@ -379,33 +345,6 @@ export function AuthModal() {
     <div className="flex min-h-0 flex-1 flex-col">{step === "phone" ? phoneStep : otpStep}</div>
   )
 
-  if (isDrawer) {
-    return (
-      <Drawer.Root
-        open={isAuthOpen}
-        onOpenChange={(v) => {
-          if (!v) dismissAuth()
-        }}
-      >
-        <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 z-50 bg-black/40" />
-          <Drawer.Content
-            className="fixed bottom-0 left-0 right-0 z-50 flex w-full max-h-[90vh] flex-col rounded-t-[24px] bg-white px-5 pt-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] outline-none"
-            onOpenAutoFocus={(e) => e.preventDefault()}
-          >
-            <div className="mx-auto mb-6 h-1 w-10 shrink-0 rounded-full bg-gray-200" />
-            <Drawer.Title className="sr-only">
-              {step === "phone"
-                ? t.auth.modal.a11yPhoneStep
-                : t.auth.modal.a11yOtpStep}
-            </Drawer.Title>
-            {inner}
-          </Drawer.Content>
-        </Drawer.Portal>
-      </Drawer.Root>
-    )
-  }
-
   return (
     <Dialog
       open={isAuthOpen}
@@ -415,14 +354,16 @@ export function AuthModal() {
     >
       <DialogContent
         showCloseButton
-        className="flex max-h-[90vh] max-w-md flex-col gap-0 overflow-y-auto rounded-2xl border-0 bg-white p-0 sm:max-w-md"
+        className="flex max-h-[90dvh] max-w-md flex-col gap-0 overflow-y-auto rounded-2xl border-0 bg-white p-0 sm:max-w-md"
       >
         <DialogTitle className="sr-only">
           {step === "phone"
             ? t.auth.modal.a11yPhoneStep
             : t.auth.modal.a11yOtpStep}
         </DialogTitle>
-        <div className="px-5 pt-6 pb-10">{inner}</div>
+        <div className="px-5 pt-6 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
+          {inner}
+        </div>
       </DialogContent>
     </Dialog>
   )

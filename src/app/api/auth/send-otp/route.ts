@@ -66,16 +66,17 @@ export async function POST(req: NextRequest) {
       req.headers.get("host") ??
       ""
     const hostname = (host.split(":")[0] ?? host).replace(/^www\./, "")
+    const brand = getBrandByHost(host)
     const brandSlug = BRANDS.some(
       (b) => b.domain === hostname || b.devDomain === hostname,
     )
-      ? getBrandByHost(host).slug
+      ? brand.slug
       : undefined
 
     try {
       await sendSms({
         to: normalized,
-        text: `Ваш код: ${code}. Действителен 10 минут.`,
+        text: `Ваш код: ${code}. Действителен 10 минут.\n\n@${brand.domain} #${code}`,
         brandSlug,
       })
     } catch (err) {

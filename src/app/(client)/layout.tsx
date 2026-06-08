@@ -14,7 +14,7 @@ import { getStorefrontCategories } from "@/lib/data/storefront-categories"
 import { getBrandSeo } from "@/lib/seo/brand-seo"
 import { headers } from "next/headers"
 
-const MAINTENANCE_MODE = false
+const MAINTENANCE_MODE = true
 
 export async function generateMetadata(): Promise<Metadata> {
   const brandSlug = (await headers()).get("x-brand-slug") ?? "kitch-pizza"

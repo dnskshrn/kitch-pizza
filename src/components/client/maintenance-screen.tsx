@@ -18,12 +18,12 @@ type MaintenanceUiLang = "ru" | "ro"
 
 const t = {
   ru: {
-    heading: "Закрыто на обновление",
-    sub: "Возвращаемся 18 мая — ещё вкуснее, быстрее и красивее!",
+    heading: "Извините, мы закрыты сегодня по техническим причинам",
+    sub: "",
   },
   ro: {
-    heading: "Închis pentru renovare",
-    sub: "Revenim pe 18 mai — și mai gustos, mai rapid și mai frumos!",
+    heading: "Ne pare rău, astăzi suntem închiși din motive tehnice",
+    sub: "",
   },
 } as const
 
@@ -132,9 +132,11 @@ export function MaintenanceScreen({ logoSrc, brandName }: MaintenanceScreenProps
         <h1 className="mt-6 text-3xl font-bold leading-tight tracking-tight text-[#242424] sm:text-4xl">
           {copy.heading}
         </h1>
-        <p className="mt-4 text-base leading-relaxed text-[#808080] sm:text-lg">
-          {copy.sub}
-        </p>
+        {copy.sub ? (
+          <p className="mt-4 text-base leading-relaxed text-[#808080] sm:text-lg">
+            {copy.sub}
+          </p>
+        ) : null}
       </div>
     </div>
   )

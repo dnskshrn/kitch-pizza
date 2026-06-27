@@ -66,6 +66,7 @@ export function BonusRedeemBlock({
       <p className="text-[12px] text-[#808080]">
         {t.checkout.bonusesMaxRedeem(maxRedeemable)}
       </p>
+      <p className="text-xs text-muted-foreground">{t.bonus.expiresIn30Days}</p>
     </div>
   )
 

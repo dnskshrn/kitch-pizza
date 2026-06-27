@@ -53,6 +53,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { checkDeliveryZoneByAddress } from "@/lib/actions/pos/check-delivery-zone-pos"
 import type { DeliveryZoneCheckResultPos } from "@/lib/actions/pos/check-delivery-zone-pos"
+import { calcPosBonusMaxRedeemable } from "@/lib/pos/order-discount-breakdown"
 import { cancelOrderPos } from "@/lib/actions/pos/cancel-order-pos"
 import { sendPosDraftToKitchen } from "@/lib/actions/pos/send-pos-draft-to-kitchen"
 import {
@@ -80,6 +81,7 @@ import { evaluateDiscounts, isRuleScheduleActive } from "@/lib/discount-engine"
 import type { CustomerWithAddresses } from "@/lib/customers"
 import type { CustomerAddress } from "@/types/database"
 import { usePosMenuCache } from "@/lib/store/pos-menu-cache"
+import { useLanguage } from "@/lib/store/language-store"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import { orderItemSizeDisplayLabel } from "@/lib/order-item-size-display"
@@ -1040,6 +1042,8 @@ export function OrderForm({
   onClose,
   ordersPanelRef,
 }: OrderFormProps) {
+  const { t } = useLanguage()
+
   const updateOrderLocalState = useCallback(
     (orderId: string, patch: Partial<PosOrder>) => {
       ordersPanelRef?.current?.updateOrderLocalState(orderId, patch)
@@ -1316,6 +1320,15 @@ export function OrderForm({
       .map((c) => c.id)
   }, [posMenuCategories])
 
+  const bonusExcludedCategoryIds = useMemo(() => {
+    if (!posMenuCategories) return new Set<string>()
+    return new Set(
+      posMenuCategories
+        .filter((c) => c.exclude_from_bonus_redemption)
+        .map((c) => c.id),
+    )
+  }, [posMenuCategories])
+
   useEffect(() => {
     if (!brandId) {
       setActiveDiscountRules([])
@@ -1425,6 +1438,26 @@ export function OrderForm({
       sum + getPosCartItemUnitPriceBani(item, isAggregator) * item.qty,
     0,
   )
+
+  const posBonusExcludedNetBani = useMemo(() => {
+    if (bonusExcludedCategoryIds.size === 0) return 0
+    let total = 0
+    for (const item of cart) {
+      if (item.is_gift) continue
+      if (!bonusExcludedCategoryIds.has(item.category_id)) continue
+      total += getPosCartItemUnitPriceBani(item, isAggregator) * item.qty
+    }
+    return total
+  }, [bonusExcludedCategoryIds, cart, isAggregator])
+
+  const hasPosBonusRedeemableCartItems = useMemo(() => {
+    for (const item of cart) {
+      if (item.is_gift) continue
+      if (!bonusExcludedCategoryIds.has(item.category_id)) return true
+    }
+    return false
+  }, [bonusExcludedCategoryIds, cart])
+
   const totalBani =
     effectiveEngineOutput.totalBani && effectiveEngineOutput.totalBani > 0
       ? effectiveEngineOutput.totalBani
@@ -1524,13 +1557,21 @@ export function OrderForm({
             effectiveEngineOutput.discountedSubtotalBani +
               (effectiveEngineOutput.deliveryFeeBani ?? 0),
           )
-    return Math.floor(Math.min(balance, (grandTotalBani / 100) * rate))
+    return calcPosBonusMaxRedeemable({
+      balance,
+      maxRedemptionRate: rate,
+      grandTotalBani,
+      bonusExcludedNetBani: posBonusExcludedNetBani,
+      hasRedeemablePaidItems: hasPosBonusRedeemableCartItems,
+    })
   }, [
     posBonusBalance,
     posMaxRedemptionRate,
     effectiveEngineOutput.totalBani,
     effectiveEngineOutput.discountedSubtotalBani,
     effectiveEngineOutput.deliveryFeeBani,
+    posBonusExcludedNetBani,
+    hasPosBonusRedeemableCartItems,
   ])
 
   const redeemBaniApplied = effectiveBonusPoints * 100
@@ -2911,9 +2952,12 @@ export function OrderForm({
         0,
         Math.floor(detailsPricingRef.current.bonusesToRedeem ?? 0),
       )
-      const bonusesRedeemedPoints = bonusRedeemTouched
-        ? uiBonuses
-        : Math.max(fromOrderBonuses, uiBonuses)
+      const bonusesRedeemedPoints = Math.min(
+        bonusRedeemTouched
+          ? uiBonuses
+          : Math.max(fromOrderBonuses, uiBonuses),
+        posBonusMaxRedeemable,
+      )
 
       const sub = eng.itemSubtotalBani
       const safeDiscountPre = Math.min(totalDiscountBani, sub)
@@ -3027,6 +3071,7 @@ export function OrderForm({
       bonusRedeemTouched,
       scheduledTime,
       kitchenNote,
+      posBonusMaxRedeemable,
     ],
   )
 
@@ -4339,6 +4384,9 @@ export function OrderForm({
                           К оплате: {formatMdlAmount(payableAfterBonusBani)} MDL
                           <span className="mx-1.5 opacity-50">|</span>
                           Списывается бонусов: {effectiveBonusPoints}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {t.bonus.expiresIn30Days}
                         </p>
                       </div>
                     ) : null}

@@ -35,6 +35,8 @@ export interface PricingResult {
 
   bonuses_available: number
   bonuses_blocked: boolean
+  /** База для cap списания бонусов (grand total минус excluded-категории), bani. */
+  bonus_cap_base_bani: number
   max_bonuses_redeemable: number
   bonuses_redeemed: number
 
@@ -106,21 +108,99 @@ function pctOf(part: number, whole: number): number {
   return (part / whole) * 100
 }
 
-async function fetchExcludedDiscountCategoryIds(
+async function fetchMenuCategoryExclusionSets(
   supabase: SupabaseClient,
   brandId: string,
-): Promise<Set<string>> {
+): Promise<{
+  excludedCategoryIds: Set<string>
+  bonusExcludedCategoryIds: Set<string>
+}> {
   const { data, error } = await supabase
     .from("menu_categories")
-    .select("id")
+    .select("id, exclude_from_discounts, exclude_from_bonus_redemption")
     .eq("brand_id", brandId)
-    .eq("exclude_from_discounts", true)
 
   if (error) {
     throw new Error(error.message)
   }
 
-  return new Set((data ?? []).map((row) => row.id as string))
+  const excludedCategoryIds = new Set<string>()
+  const bonusExcludedCategoryIds = new Set<string>()
+  for (const row of data ?? []) {
+    const id = row.id as string
+    if (row.exclude_from_discounts === true) {
+      excludedCategoryIds.add(id)
+    }
+    if (row.exclude_from_bonus_redemption === true) {
+      bonusExcludedCategoryIds.add(id)
+    }
+  }
+
+  return { excludedCategoryIds, bonusExcludedCategoryIds }
+}
+
+function giftQtyByCartLineId(
+  giftUnits: PricingResult["giftUnits"],
+): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const unit of giftUnits) {
+    map.set(unit.cartLineId, (map.get(unit.cartLineId) ?? 0) + unit.quantity)
+  }
+  return map
+}
+
+function lineNetBaniAfterItemDiscount(
+  line: PricingResult["items"][number],
+): number {
+  return Math.max(
+    0,
+    line.original_price_bani * line.quantity - line.item_discount_bani,
+  )
+}
+
+function computeBonusExcludedNetBani(
+  items: PricingResult["items"],
+  engineItems: CartItemForEngine[],
+  bonusExcludedCategoryIds: Set<string>,
+  giftUnits: PricingResult["giftUnits"],
+): number {
+  if (bonusExcludedCategoryIds.size === 0) return 0
+
+  const giftQtyByLine = giftQtyByCartLineId(giftUnits)
+  let total = 0
+
+  for (let i = 0; i < items.length; i++) {
+    const line = items[i]
+    const engineItem = engineItems[i]
+    if (!bonusExcludedCategoryIds.has(engineItem.category_id)) continue
+
+    const giftQty = giftQtyByLine.get(String(i)) ?? 0
+    const paidQty = Math.max(0, line.quantity - giftQty)
+    if (paidQty <= 0 || line.quantity <= 0) continue
+
+    const lineNetBani = lineNetBaniAfterItemDiscount(line)
+    total += Math.round((lineNetBani * paidQty) / line.quantity)
+  }
+
+  return total
+}
+
+function hasBonusRedeemablePaidItems(
+  engineItems: CartItemForEngine[],
+  bonusExcludedCategoryIds: Set<string>,
+  giftUnits: PricingResult["giftUnits"],
+): boolean {
+  const giftQtyByLine = giftQtyByCartLineId(giftUnits)
+
+  for (let i = 0; i < engineItems.length; i++) {
+    const item = engineItems[i]
+    const paidQty = Math.max(0, item.quantity - (giftQtyByLine.get(String(i)) ?? 0))
+    if (paidQty > 0 && !bonusExcludedCategoryIds.has(item.category_id)) {
+      return true
+    }
+  }
+
+  return false
 }
 
 /** Как `resolvePromoCode` / `appliedPromoToDiscountEngineRule`. */
@@ -327,6 +407,7 @@ export async function calculateOrderPricing(
         ? await fetchProfileBonusBalance(supabase, profileId)
         : 0,
       bonuses_blocked: false,
+      bonus_cap_base_bani: 0,
       max_bonuses_redeemable: 0,
       bonuses_redeemed: 0,
       delivery_fee_bani: deliveryFeeBani,
@@ -350,7 +431,7 @@ export async function calculateOrderPricing(
   const [
     { data: menuRows, error: menuError },
     variantResult,
-    excludedCategoryIds,
+    { excludedCategoryIds, bonusExcludedCategoryIds },
   ] = await Promise.all([
     supabase
       .from("menu_items")
@@ -362,7 +443,7 @@ export async function calculateOrderPricing(
           .select("id, menu_item_id, price")
           .in("id", variantIds)
       : Promise.resolve({ data: [] as VariantRow[], error: null }),
-    fetchExcludedDiscountCategoryIds(supabase, brandId),
+    fetchMenuCategoryExclusionSets(supabase, brandId),
   ])
 
   if (menuError) {
@@ -538,6 +619,26 @@ export async function calculateOrderPricing(
     subtotalBani - itemDiscountBani - promoDiscountBani + deliveryFeeBani,
   )
 
+  const giftUnits = allocateGiftUnitsByCartLineId(
+    engineItems,
+    engineOutput.giftItems,
+  )
+
+  const bonusExcludedNetBani = computeBonusExcludedNetBani(
+    items,
+    engineItems,
+    bonusExcludedCategoryIds,
+    giftUnits,
+  )
+
+  const bonusCapBaseBani = hasBonusRedeemablePaidItems(
+    engineItems,
+    bonusExcludedCategoryIds,
+    giftUnits,
+  )
+    ? Math.max(0, grandTotalAfterDiscountsBani - bonusExcludedNetBani)
+    : 0
+
   const [{ maxRedemptionRate }, bonusesAvailable] = await Promise.all([
     getBonusSettings(),
     profileId
@@ -548,7 +649,7 @@ export async function calculateOrderPricing(
   const maxBonusesRedeemable = Math.floor(
     Math.min(
       bonusesAvailable,
-      (grandTotalAfterDiscountsBani / 100) * (maxRedemptionRate ?? 0.3),
+      (bonusCapBaseBani / 100) * (maxRedemptionRate ?? 0.3),
     ),
   )
 
@@ -613,10 +714,7 @@ export async function calculateOrderPricing(
     })
   }
 
-  const giftUnits = allocateGiftUnitsByCartLineId(
-    engineItems,
-    engineOutput.giftItems,
-  )
+  const giftItems = engineOutput.giftItems
 
   return {
     items,
@@ -629,6 +727,7 @@ export async function calculateOrderPricing(
     promo_error: promoError,
     bonuses_available: bonusesAvailable,
     bonuses_blocked: false,
+    bonus_cap_base_bani: bonusCapBaseBani,
     max_bonuses_redeemable: maxBonusesRedeemable,
     bonuses_redeemed: bonusesRedeemed,
     delivery_fee_bani: deliveryFeeBani,
@@ -636,6 +735,6 @@ export async function calculateOrderPricing(
     active_promotion: promotionActive,
     discount_rules_applied: discountRulesApplied,
     giftUnits,
-    giftItems: engineOutput.giftItems,
+    giftItems,
   }
 }

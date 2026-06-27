@@ -6,6 +6,39 @@ const DEFAULT_BONUS_SETTINGS = {
   isEnabled: true,
 } as const
 
+const BONUS_LOT_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+async function createBonusLot({
+  profileId,
+  sourceTxId,
+  amount,
+  earnedAt,
+}: {
+  profileId: string
+  sourceTxId: string
+  amount: number
+  earnedAt: Date
+}): Promise<void> {
+  if (amount <= 0) return
+
+  const supabase = createServiceSupabaseClient()
+  const expiresAt = new Date(earnedAt.getTime() + BONUS_LOT_TTL_MS).toISOString()
+
+  const { error } = await (supabase.from('bonus_lots') as any).insert({
+    profile_id: profileId,
+    source_tx_id: sourceTxId,
+    amount_granted: amount,
+    amount_remaining: amount,
+    earned_at: earnedAt.toISOString(),
+    expires_at: expiresAt,
+    is_expired: false,
+  })
+
+  if (error) {
+    console.error('[bonus] createBonusLot', error.message)
+  }
+}
+
 export async function getUserBalance(profileId: string): Promise<number> {
   const supabase = createServiceSupabaseClient()
   const { data, error } = await supabase
@@ -38,19 +71,31 @@ export async function awardWelcomeBonus(profileId: string): Promise<boolean> {
 
   const currentBalance = await getUserBalance(profileId)
 
-  const { error: insertError } = await supabase.from('bonus_transactions').insert({
-    profile_id: profileId,
-    amount: 100,
-    balance_after: currentBalance + 100,
-    type: 'welcome',
-    note: 'Приветственный бонус LOSOS',
-    created_by: null,
-  })
+  const { data: inserted, error: insertError } = await supabase
+    .from('bonus_transactions')
+    .insert({
+      profile_id: profileId,
+      amount: 100,
+      balance_after: currentBalance + 100,
+      type: 'welcome',
+      note: 'Приветственный бонус LOSOS',
+      created_by: null,
+    })
+    .select('id, created_at')
+    .single()
 
   if (insertError) {
     console.error('[bonus] awardWelcomeBonus insert', insertError.message)
     return false
   }
+
+  const earnedAt = inserted.created_at ? new Date(inserted.created_at) : new Date()
+  await createBonusLot({
+    profileId,
+    sourceTxId: inserted.id,
+    amount: 100,
+    earnedAt,
+  })
 
   return true
 }
@@ -112,17 +157,29 @@ export async function accrueBonus(profileId: string, orderId: string, amount: nu
 
   const currentBalance = await getUserBalance(profileId)
   const supabase = createServiceSupabaseClient()
-  const { error } = await supabase.from('bonus_transactions').insert({
-    profile_id: profileId,
-    order_id: orderId,
-    type: 'accrual',
-    amount,
-    balance_after: currentBalance + amount,
-    note: 'Начисление за заказ',
-    created_by: null,
-  })
+  const { data, error } = await supabase
+    .from('bonus_transactions')
+    .insert({
+      profile_id: profileId,
+      order_id: orderId,
+      type: 'accrual',
+      amount,
+      balance_after: currentBalance + amount,
+      note: 'Начисление за заказ',
+      created_by: null,
+    })
+    .select('id, created_at')
+    .single()
 
   if (error) throw new Error(error.message)
+
+  const earnedAt = data.created_at ? new Date(data.created_at) : new Date()
+  await createBonusLot({
+    profileId,
+    sourceTxId: data.id,
+    amount,
+    earnedAt,
+  })
 }
 
 export async function redeemBonus(profileId: string, orderId: string, amount: number): Promise<void> {
@@ -177,17 +234,31 @@ export async function manualAdjust(
   }
 
   const supabase = createServiceSupabaseClient()
-  const { error } = await supabase.from('bonus_transactions').insert({
-    profile_id: profileId,
-    order_id: null,
-    type,
-    amount,
-    balance_after: balanceAfter,
-    note,
-    created_by: createdBy,
-  })
+  const { data, error } = await supabase
+    .from('bonus_transactions')
+    .insert({
+      profile_id: profileId,
+      order_id: null,
+      type,
+      amount,
+      balance_after: balanceAfter,
+      note,
+      created_by: createdBy,
+    })
+    .select('id, created_at')
+    .single()
 
   if (error) throw new Error(error.message)
+
+  if (type === 'manual_add') {
+    const earnedAt = data.created_at ? new Date(data.created_at) : new Date()
+    await createBonusLot({
+      profileId,
+      sourceTxId: data.id,
+      amount,
+      earnedAt,
+    })
+  }
 }
 
 /**

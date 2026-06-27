@@ -1,4 +1,5 @@
 import { getActiveDiscountRules, resolvePromoCode } from "@/lib/actions/discounts"
+import { getBonusSettings } from "@/lib/bonus"
 import { calcCompareAt } from "@/lib/discount"
 import { evaluateDiscounts, isRuleScheduleActive } from "@/lib/discount-engine"
 import type { CartItemForEngine, DiscountRule } from "@/types/promotions"
@@ -23,6 +24,8 @@ export type PosOrderDiscountBreakdown = {
   discountBani: number
   discountRulesApplied: PosDiscountRulesAppliedEntry[]
   promoCodeSaved: string | null
+  bonusExcludedNetBani: number
+  hasBonusRedeemablePaidItems: boolean
 }
 
 type MenuItemRow = {
@@ -54,21 +57,102 @@ function unitOriginalPriceBani(
   return calcCompareAt(unitPriceBani, discountPercent)
 }
 
-async function fetchExcludedDiscountCategoryIds(
+async function fetchMenuCategoryExclusionSets(
   supabase: SupabaseClient,
   brandId: string,
-): Promise<Set<string>> {
+): Promise<{
+  excludedCategoryIds: Set<string>
+  bonusExcludedCategoryIds: Set<string>
+}> {
   const { data, error } = await supabase
     .from("menu_categories")
-    .select("id")
+    .select("id, exclude_from_discounts, exclude_from_bonus_redemption")
     .eq("brand_id", brandId)
-    .eq("exclude_from_discounts", true)
 
   if (error) {
     throw new Error(error.message)
   }
 
-  return new Set((data ?? []).map((row) => row.id as string))
+  const excludedCategoryIds = new Set<string>()
+  const bonusExcludedCategoryIds = new Set<string>()
+  for (const row of data ?? []) {
+    const id = row.id as string
+    if (row.exclude_from_discounts === true) {
+      excludedCategoryIds.add(id)
+    }
+    if (row.exclude_from_bonus_redemption === true) {
+      bonusExcludedCategoryIds.add(id)
+    }
+  }
+
+  return { excludedCategoryIds, bonusExcludedCategoryIds }
+}
+
+function menuItemCategoryById(menuById: Map<string, MenuItemRow>): Map<string, string> {
+  return new Map(
+    [...menuById.entries()].map(([id, row]) => [id, row.category_id ?? ""]),
+  )
+}
+
+export function computePosBonusExcludedNetBaniFromPaidRows(
+  paidRows: PaidOrderItemRow[],
+  categoryByMenuItemId: Map<string, string>,
+  bonusExcludedCategoryIds: Set<string>,
+): number {
+  if (bonusExcludedCategoryIds.size === 0) return 0
+
+  let total = 0
+  for (const row of paidRows) {
+    if (row.is_gift) continue
+    const categoryId = categoryByMenuItemId.get(row.menu_item_id) ?? ""
+    if (!bonusExcludedCategoryIds.has(categoryId)) continue
+    total += Math.round(row.price ?? 0)
+  }
+
+  return total
+}
+
+export function hasPosBonusRedeemablePaidItems(
+  paidRows: PaidOrderItemRow[],
+  categoryByMenuItemId: Map<string, string>,
+  bonusExcludedCategoryIds: Set<string>,
+): boolean {
+  for (const row of paidRows) {
+    if (row.is_gift) continue
+    const categoryId = categoryByMenuItemId.get(row.menu_item_id) ?? ""
+    if (!bonusExcludedCategoryIds.has(categoryId)) return true
+  }
+  return false
+}
+
+export function calcPosBonusMaxRedeemable(input: {
+  balance: number
+  maxRedemptionRate: number
+  grandTotalBani: number
+  bonusExcludedNetBani: number
+  hasRedeemablePaidItems: boolean
+}): number {
+  const capBase = input.hasRedeemablePaidItems
+    ? Math.max(0, input.grandTotalBani - input.bonusExcludedNetBani)
+    : 0
+  return Math.floor(
+    Math.min(input.balance, (capBase / 100) * input.maxRedemptionRate),
+  )
+}
+
+export function calcPosBonusRateCap(input: {
+  grandTotalBani: number
+  bonusExcludedNetBani: number
+  hasRedeemablePaidItems: boolean
+  maxRedemptionRate: number
+}): number {
+  return calcPosBonusMaxRedeemable({
+    balance: Number.MAX_SAFE_INTEGER,
+    maxRedemptionRate: input.maxRedemptionRate,
+    grandTotalBani: input.grandTotalBani,
+    bonusExcludedNetBani: input.bonusExcludedNetBani,
+    hasRedeemablePaidItems: input.hasRedeemablePaidItems,
+  })
 }
 
 export function mapPaidOrderItemsForDiscount(
@@ -111,6 +195,7 @@ export async function computePosOrderDiscountBreakdown(
   params: {
     brandId: string
     orderItems: OrderItemForDiscount[]
+    paidOrderItemRows?: PaidOrderItemRow[]
     promoCodeRaw: string | null | undefined
     isAggregator: boolean
   },
@@ -122,6 +207,8 @@ export async function computePosOrderDiscountBreakdown(
     discountBani: 0,
     discountRulesApplied: [],
     promoCodeSaved: null,
+    bonusExcludedNetBani: 0,
+    hasBonusRedeemablePaidItems: false,
   }
 
   if (!params.orderItems.length) return empty
@@ -140,7 +227,7 @@ export async function computePosOrderDiscountBreakdown(
   const [
     { data: menuRows, error: menuError },
     variantResult,
-    excludedCategoryIds,
+    { excludedCategoryIds, bonusExcludedCategoryIds },
   ] = await Promise.all([
     supabase
       .from("menu_items")
@@ -152,7 +239,7 @@ export async function computePosOrderDiscountBreakdown(
           .select("id, menu_item_id, price")
           .in("id", variantIds)
       : Promise.resolve({ data: [] as VariantRow[], error: null }),
-    fetchExcludedDiscountCategoryIds(supabase, params.brandId),
+    fetchMenuCategoryExclusionSets(supabase, params.brandId),
   ])
 
   if (menuError) throw new Error(menuError.message)
@@ -194,9 +281,21 @@ export async function computePosOrderDiscountBreakdown(
 
   if (params.isAggregator) {
     // TODO: заменить на channels-поле правила
+    const paidRows = params.paidOrderItemRows ?? []
+    const categoryByMenuItemId = menuItemCategoryById(menuById)
     return {
       ...empty,
       subtotalBani,
+      bonusExcludedNetBani: computePosBonusExcludedNetBaniFromPaidRows(
+        paidRows,
+        categoryByMenuItemId,
+        bonusExcludedCategoryIds,
+      ),
+      hasBonusRedeemablePaidItems: hasPosBonusRedeemablePaidItems(
+        paidRows,
+        categoryByMenuItemId,
+        bonusExcludedCategoryIds,
+      ),
     }
   }
 
@@ -280,6 +379,19 @@ export async function computePosOrderDiscountBreakdown(
     })
   }
 
+  const paidRows = params.paidOrderItemRows ?? []
+  const categoryByMenuItemId = menuItemCategoryById(menuById)
+  const bonusExcludedNetBani = computePosBonusExcludedNetBaniFromPaidRows(
+    paidRows,
+    categoryByMenuItemId,
+    bonusExcludedCategoryIds,
+  )
+  const hasBonusRedeemablePaidItems = hasPosBonusRedeemablePaidItems(
+    paidRows,
+    categoryByMenuItemId,
+    bonusExcludedCategoryIds,
+  )
+
   return {
     subtotalBani,
     itemDiscountBani,
@@ -287,6 +399,8 @@ export async function computePosOrderDiscountBreakdown(
     discountBani,
     discountRulesApplied,
     promoCodeSaved,
+    bonusExcludedNetBani,
+    hasBonusRedeemablePaidItems,
   }
 }
 
@@ -362,6 +476,8 @@ export async function recomputePosOrderDiscountAndTotals(
     discountBani: 0,
     discountRulesApplied: [],
     promoCodeSaved: null,
+    bonusExcludedNetBani: 0,
+    hasBonusRedeemablePaidItems: false,
   }
 
   if (order.brand_id) {
@@ -369,6 +485,7 @@ export async function recomputePosOrderDiscountAndTotals(
       discountBreakdown = await computePosOrderDiscountBreakdown(supabase, {
         brandId: order.brand_id,
         orderItems: mapPaidOrderItemsForDiscount(paidRows),
+        paidOrderItemRows: paidRows,
         promoCodeRaw: isAggregator ? null : promoCodeRaw,
         isAggregator,
       })
@@ -386,7 +503,7 @@ export async function recomputePosOrderDiscountAndTotals(
     return purgeGifts
   }
 
-  const bonusesRedeemedPoints =
+  let bonusesRedeemedPoints =
     typeof order.bonuses_redeemed === "number" &&
     Number.isFinite(order.bonuses_redeemed)
       ? Math.max(0, Math.floor(order.bonuses_redeemed))
@@ -397,10 +514,34 @@ export async function recomputePosOrderDiscountAndTotals(
     itemsPriceSumBani,
   )
 
+  const deliveryFeeBani = Math.max(0, Math.round(order.delivery_fee ?? 0))
+  const grandBeforeBonusBani = calcPosOrderTotalBani({
+    itemsPriceSumBani,
+    discountBani: safeDiscount,
+    deliveryFeeBani,
+    bonusesRedeemedPoints: 0,
+  })
+
+  try {
+    const { maxRedemptionRate } = await getBonusSettings()
+    const maxFromRate = calcPosBonusRateCap({
+      grandTotalBani: grandBeforeBonusBani,
+      bonusExcludedNetBani: discountBreakdown.bonusExcludedNetBani,
+      hasRedeemablePaidItems: discountBreakdown.hasBonusRedeemablePaidItems,
+      maxRedemptionRate,
+    })
+    bonusesRedeemedPoints = Math.min(bonusesRedeemedPoints, maxFromRate)
+  } catch (e) {
+    console.error(
+      "[recomputePosOrderDiscountAndTotals] bonus cap",
+      e instanceof Error ? e.message : e,
+    )
+  }
+
   const totalBani = calcPosOrderTotalBani({
     itemsPriceSumBani,
     discountBani: safeDiscount,
-    deliveryFeeBani: Math.max(0, Math.round(order.delivery_fee ?? 0)),
+    deliveryFeeBani,
     bonusesRedeemedPoints,
   })
 
@@ -413,6 +554,7 @@ export async function recomputePosOrderDiscountAndTotals(
       discount: safeDiscount,
       discount_rules_applied: discountBreakdown.discountRulesApplied,
       promo_code: isAggregator ? null : discountBreakdown.promoCodeSaved,
+      bonuses_redeemed: bonusesRedeemedPoints,
       total: totalBani,
       updated_at: new Date().toISOString(),
     })

@@ -8,6 +8,7 @@ export type PosMenuCategoryCacheRow = {
   name_ru: string
   sort_order: number
   exclude_from_discounts: boolean
+  exclude_from_bonus_redemption: boolean
 }
 
 export type PosMenuCacheBrand = {
@@ -34,7 +35,7 @@ async function fetchBrandMenu(brandId: string): Promise<PosMenuCacheBrand> {
   const [categoriesResult, itemsResult] = await Promise.all([
     supabase
       .from("menu_categories")
-      .select("id, name_ru, sort_order, exclude_from_discounts")
+      .select("id, name_ru, sort_order, exclude_from_discounts, exclude_from_bonus_redemption")
       .eq("brand_id", brandId)
       .eq("is_active", true)
       .order("sort_order", { ascending: true }),
@@ -59,12 +60,14 @@ async function fetchBrandMenu(brandId: string): Promise<PosMenuCacheBrand> {
       name_ru: string
       sort_order: number
       exclude_from_discounts?: boolean | null
+      exclude_from_bonus_redemption?: boolean | null
     }
     return {
       id: r.id,
       name_ru: r.name_ru,
       sort_order: r.sort_order,
       exclude_from_discounts: Boolean(r.exclude_from_discounts),
+      exclude_from_bonus_redemption: Boolean(r.exclude_from_bonus_redemption),
     } satisfies PosMenuCategoryCacheRow
   })
   const items = (itemsResult.data ?? []) as PosMenuItemModalSourceRow[]

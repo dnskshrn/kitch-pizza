@@ -4,6 +4,7 @@ import { geocodeAddress } from "@/lib/actions/check-delivery-zone"
 import { getCurrentStaff } from "@/lib/actions/pos/auth"
 import { refreshCourierOrderTelegramMessage } from "@/lib/actions/pos/courier-telegram-message"
 import {
+  calcPosBonusRateCap,
   calcPosOrderTotalBani,
   computePosOrderDiscountBreakdown,
   mapPaidOrderItemsForDiscount,
@@ -11,6 +12,7 @@ import {
   purgePosOrderGiftItems,
   type PosOrderDiscountBreakdown,
 } from "@/lib/pos/order-discount-breakdown"
+import { getBonusSettings } from "@/lib/bonus"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 
 export type UpdateOrderDetailsPosInput = {
@@ -226,9 +228,6 @@ export async function updateOrderDetailsPos(
       ? Math.max(0, Math.floor(Number(input.bonusesRedeemedPoints)))
       : null
 
-  const bonusPointsForTotal =
-    bonusPtsFromInput !== null ? bonusPtsFromInput : bonusPtsFromDb
-
   const { data: itemRows, error: itemsError } = await supabase
     .from("order_items")
     .select("menu_item_id, variant_id, quantity, price, is_gift")
@@ -256,6 +255,8 @@ export async function updateOrderDetailsPos(
     discountBani: 0,
     discountRulesApplied: [],
     promoCodeSaved: null,
+    bonusExcludedNetBani: 0,
+    hasBonusRedeemablePaidItems: false,
   }
 
   if (brandId) {
@@ -263,6 +264,7 @@ export async function updateOrderDetailsPos(
       discountBreakdown = await computePosOrderDiscountBreakdown(supabase, {
         brandId,
         orderItems: mapPaidOrderItemsForDiscount(paidItemRows),
+        paidOrderItemRows: paidItemRows,
         promoCodeRaw: isAggregator ? null : input.promoCode,
         isAggregator,
       })
@@ -279,6 +281,33 @@ export async function updateOrderDetailsPos(
     Math.max(0, Math.round(discountBreakdown.discountBani)),
     itemsPriceSumBani,
   )
+
+  let bonusPointsForTotal =
+    bonusPtsFromInput !== null ? bonusPtsFromInput : bonusPtsFromDb
+
+  const grandBeforeBonusBani = calcPosOrderTotalBani({
+    itemsPriceSumBani,
+    discountBani: safeDiscount,
+    deliveryFeeBani,
+    bonusesRedeemedPoints: 0,
+  })
+
+  try {
+    const { maxRedemptionRate } = await getBonusSettings()
+    const maxFromRate = calcPosBonusRateCap({
+      grandTotalBani: grandBeforeBonusBani,
+      bonusExcludedNetBani: discountBreakdown.bonusExcludedNetBani,
+      hasRedeemablePaidItems: discountBreakdown.hasBonusRedeemablePaidItems,
+      maxRedemptionRate,
+    })
+    bonusPointsForTotal = Math.min(bonusPointsForTotal, maxFromRate)
+  } catch (e) {
+    console.error(
+      "[updateOrderDetailsPos] bonus cap",
+      e instanceof Error ? e.message : e,
+    )
+  }
+
   const totalBani = calcPosOrderTotalBani({
     itemsPriceSumBani,
     discountBani: safeDiscount,
@@ -382,7 +411,7 @@ export async function updateOrderDetailsPos(
   }
 
   if (bonusPtsFromInput !== null) {
-    patch.bonuses_redeemed = bonusPtsFromInput
+    patch.bonuses_redeemed = bonusPointsForTotal
   }
 
   if (input.profileId !== undefined) {

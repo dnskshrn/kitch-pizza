@@ -323,6 +323,7 @@ export const messages = {
       redeemUnavailable: "На текущую сумму заказа списание недоступно",
       redeemSummary: (points: number) =>
         `Списать ${points} бонусов = −${points} MDL`,
+      expiresIn30Days: "Бонусы сгорают через 30 календарных дней",
     },
     auth: {
       signIn: "Войти",
@@ -570,6 +571,7 @@ export const messages = {
         "Pentru suma curentă a comenzii, bonusurile nu pot fi utilizate",
       redeemSummary: (points: number) =>
         `Utilizează ${points} bonusuri = −${points} MDL`,
+      expiresIn30Days: "Bonusurile expiră în 30 de zile calendaristice",
     },
     auth: {
       signIn: "Intră",
